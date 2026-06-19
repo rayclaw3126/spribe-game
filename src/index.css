@@ -1,0 +1,87 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --primary: #7C3AED;
+  --primary-light: #8B5CF6;
+  --primary-dark: #6D28D9;
+  --gold: #F59E0B;
+  --gold-light: #FCD34D;
+  --success: #10B981;
+  --danger: #EF4444;
+  --bg: #F5F3FF;
+  --bg2: #EDE9FE;
+  --surface: #FFFFFF;
+  --surface2: #F9F7FF;
+  --border: #E5E0FF;
+  --text: #1E1B4B;
+  --text2: #4C4882;
+  --text3: #9490C0;
+  --shadow: 0 4px 24px rgba(124,58,237,0.08);
+  --shadow-lg: 0 8px 40px rgba(124,58,237,0.14);
+  --radius: 16px;
+  --radius-sm: 10px;
+  --radius-lg: 24px;
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+  width: 100%;
+  text-align: left;
+}
+
+button { font-family: 'Inter', sans-serif; cursor: pointer; border: none; outline: none; }
+input { font-family: 'Inter', sans-serif; outline: none; }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--primary-light); border-radius: 99px; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes pulse {
+  0%,100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes float {
+  0%,100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes winPop {
+  0%   { transform: scale(0.7); opacity: 0; }
+  60%  { transform: scale(1.12); }
+  100% { transform: scale(1);   opacity: 1; }
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes shimmer {
+  0%   { background-position: -300% center; }
+  100% { background-position: 300% center; }
+}
+@keyframes ballDrop {
+  from { top: 0; }
+}
+@keyframes popIn {
+  0%   { transform: scale(0); opacity: 0; }
+  70%  { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}

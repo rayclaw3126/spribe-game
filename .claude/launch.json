@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Spribe Gems – Dev",
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["node_modules/.bin/vite", "--port", "6688", "--strictPort"],
+      "port": 6688
+    },
+    {
+      "name": "Spribe Gems – Preview",
+      "runtimeExecutable": "/usr/local/bin/npm",
+      "runtimeArgs": ["run", "preview"],
+      "port": 4173
+    }
+  ]
+}
