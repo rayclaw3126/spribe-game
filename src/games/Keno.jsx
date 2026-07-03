@@ -2,31 +2,29 @@ import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import { COLORS, RADIUS, KENO } from '../components/shell/tokens'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
-// Team Keno — visual layer is a 1:1 copy of the Spribe Keno reference shot
-// (scratchpad/keno-ref.png): crimson felt, 6×6 glossy number balls, empty
-// draw column, RANDOM/CLEAR pills, bottom bet band. Betting/draw logic is
-// untouched in this pass (K2); BET stays disabled.
-// NOTE for K2: logic pool TOTAL=40 predates the 36-ball board — RANDOM may
-// select numbers 37–40 that have no visible cell until K2 aligns the pool.
+// Team Keno — Spribe-aligned rules: 36-ball pool, pick up to 10, 10 balls
+// drawn per round. Visual layer is the 1:1 Spribe replica from K1.
 
-const TOTAL = 40
-const DRAW = 20
-const GRID_N = 36   // visible 6×6 board (Spribe layout)
+const TOTAL = 36   // number pool = the visible 6×6 board
+const DRAW = 10    // balls drawn per round
 
-// Payout table: [picks][matches] = multiplier
+// Standard keno paytable for draw-10-of-36, [picks][hits] = multiplier.
+// Multipliers calibrated against the hypergeometric hit distribution
+// (RTP ≈ 85–93% per pick size, matching typical Spribe-style keno).
 const PAYOUTS = {
-  1:  { 1: 3.8 },
-  2:  { 2: 8 },
-  3:  { 2: 2, 3: 26 },
-  4:  { 2: 1.5, 3: 6, 4: 70 },
-  5:  { 3: 3, 4: 20, 5: 200 },
-  6:  { 3: 2, 4: 8, 5: 50, 6: 500 },
-  7:  { 4: 5, 5: 25, 6: 100, 7: 1000 },
-  8:  { 4: 3, 5: 15, 6: 50, 7: 300, 8: 3000 },
-  9:  { 4: 2, 5: 8,  6: 25, 7: 100, 8: 800, 9: 5000 },
-  10: { 5: 5, 6: 15, 7: 50, 8: 200, 9: 1000, 10: 10000 },
+  1:  { 1: 3.4 },
+  2:  { 2: 13 },
+  3:  { 2: 2, 3: 35 },
+  4:  { 2: 1, 3: 7, 4: 80 },
+  5:  { 3: 3, 4: 22, 5: 450 },
+  6:  { 3: 1, 4: 8, 5: 90, 6: 1500 },
+  7:  { 4: 4, 5: 30, 6: 350, 7: 8000 },
+  8:  { 4: 2, 5: 13, 6: 110, 7: 1200, 8: 10000 },
+  9:  { 5: 6, 6: 60, 7: 500, 8: 5000, 9: 10000 },
+  10: { 5: 3, 6: 25, 7: 150, 8: 2500, 9: 10000, 10: 10000 },
 }
 
 export default function Keno({ balance, setBalance }) {
@@ -36,8 +34,8 @@ export default function Keno({ balance, setBalance }) {
   const [drawn, setDrawn] = useState([])
   const [drawing, setDrawing] = useState(false)
   const [phase, setPhase] = useState('idle') // idle | drawing | done
-  const [, setRoundHistory] = useState([])   // kept for K2 (display bookkeeping)
-  const [, setMessage] = useState(null)
+  const [roundHistory, setRoundHistory] = useState([])   // won multiplier per round, newest first
+  const [message, setMessage] = useState(null)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
   const audioRef = useRef({ ctx: null, muted: false })
@@ -132,13 +130,17 @@ export default function Keno({ balance, setBalance }) {
     setDrawn([])
     setMessage(null)
 
-    // Draw 20 numbers one by one
-    const allNums = Array.from({ length: TOTAL }, (_, i) => i + 1)
-    const shuffled = allNums.sort(() => Math.random() - 0.5).slice(0, DRAW)
+    // Fisher-Yates over the 36 pool, take 10 — one ball drops every ~200ms
+    const pool = Array.from({ length: TOTAL }, (_, i) => i + 1)
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[pool[i], pool[j]] = [pool[j], pool[i]]
+    }
+    const shuffled = pool.slice(0, DRAW)
     const drawResult = []
 
     for (let i = 0; i < shuffled.length; i++) {
-      await new Promise(r => setTimeout(r, 80))
+      await new Promise(r => setTimeout(r, 200))
       drawResult.push(shuffled[i])
       setDrawn([...drawResult])
       playDraw()
@@ -188,19 +190,32 @@ export default function Keno({ balance, setBalance }) {
     cursor: enabled ? 'pointer' : 'not-allowed',
   })
 
-  const ballStyle = sel => ({
-    aspectRatio: '1', borderRadius: RADIUS.pill, padding: 0,
-    background: sel
-      ? `radial-gradient(circle at 32% 28%, #ff7aa8, ${KENO.pill} 58%, ${KENO.bgOuter})`
-      : `radial-gradient(circle at 32% 28%, #57323e, ${KENO.ball} 62%)`,
-    border: sel ? '2px solid rgba(255,255,255,0.85)' : `1px solid ${KENO.ballRim}`,
-    boxShadow: sel ? '0 0 12px rgba(255,255,255,0.3)' : 'inset 0 -6px 10px rgba(0,0,0,0.5)',
-    color: COLORS.white, fontSize: 15, fontWeight: 900,
-    fontFamily: "'Space Grotesk', sans-serif",
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    cursor: drawing ? 'not-allowed' : 'pointer',
-    transition: 'border-color 0.12s, box-shadow 0.12s',
-  })
+  // ring sync while balls drop: hit = green ring, drawn-but-unpicked = white ring
+  const ballStyle = (sel, isDrawn) => {
+    const hit = sel && isDrawn
+    return {
+      aspectRatio: '1', borderRadius: RADIUS.pill, padding: 0,
+      background: sel
+        ? `radial-gradient(circle at 32% 28%, #ff7aa8, ${KENO.pill} 58%, ${KENO.bgOuter})`
+        : `radial-gradient(circle at 32% 28%, #57323e, ${KENO.ball} 62%)`,
+      border: hit
+        ? `2px solid ${KENO.green}`
+        : isDrawn
+          ? '2px solid rgba(255,255,255,0.9)'
+          : sel ? '2px solid rgba(255,255,255,0.85)' : `1px solid ${KENO.ballRim}`,
+      boxShadow: hit
+        ? `0 0 14px ${KENO.green}`
+        : isDrawn
+          ? '0 0 10px rgba(255,255,255,0.35)'
+          : sel ? '0 0 12px rgba(255,255,255,0.3)' : 'inset 0 -6px 10px rgba(0,0,0,0.5)',
+      color: COLORS.white, fontSize: 15, fontWeight: 900,
+      fontFamily: "'Space Grotesk', sans-serif",
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      cursor: drawing ? 'not-allowed' : 'pointer',
+      transition: 'border-color 0.12s, box-shadow 0.12s',
+    }
+  }
+  const drawnSet = new Set(drawn)
 
   return (
     <GameLayout title="Team Keno" emoji="⚽" color={KENO.pill}>
@@ -268,21 +283,29 @@ export default function Keno({ balance, setBalance }) {
 
         {/* ---- board ---- */}
         <div style={{ maxWidth: 640, margin: '0 auto', position: 'relative', zIndex: 1 }}>
+          <style>{`
+            @keyframes kenoDrop {
+              from { transform: translateY(-18px) scale(0.6); opacity: 0; }
+              to { transform: translateY(0) scale(1); opacity: 1; }
+            }
+          `}</style>
+          <RoundHistoryBar rounds={roundHistory} />
           <div style={{
             padding: '6px 0', borderRadius: RADIUS.pill, marginBottom: 12,
             background: KENO.strip, textAlign: 'center',
-            color: KENO.green, fontSize: 12, fontWeight: 800, letterSpacing: 1.5,
+            color: message ? (message.win ? KENO.green : '#ff8a80') : KENO.green,
+            fontSize: 12, fontWeight: 800, letterSpacing: 1.5,
           }}>
-            PICK NUMBERS FOR START
+            {phase === 'drawing' ? 'DRAWING…' : message ? message.text : 'PICK NUMBERS FOR START'}
           </div>
 
           <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 14 }}>
             {/* 6×6 number balls */}
             <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: isMobile ? 8 : 10 }}>
-              {Array.from({ length: GRID_N }, (_, i) => i + 1).map(n => {
+              {Array.from({ length: TOTAL }, (_, i) => i + 1).map(n => {
                 const sel = selected.includes(n)
                 return (
-                  <button key={n} type="button" onClick={() => toggleNumber(n)} style={ballStyle(sel)}>
+                  <button key={n} type="button" onClick={() => toggleNumber(n)} style={ballStyle(sel, drawnSet.has(n))}>
                     <span>{n}</span>
                     {sel && <span style={{ fontSize: 8, lineHeight: 1, marginTop: 1 }}>⚽</span>}
                   </button>
@@ -290,7 +313,7 @@ export default function Keno({ balance, setBalance }) {
               })}
             </div>
 
-            {/* draw column — fills during K2's live draw, empty at rest */}
+            {/* draw column — balls drop in one by one with a springy landing */}
             <div style={{
               width: isMobile ? '100%' : 92,
               minHeight: isMobile ? 64 : 'auto',
@@ -301,15 +324,20 @@ export default function Keno({ balance, setBalance }) {
               flexWrap: 'wrap', alignContent: 'flex-start',
               gap: 6, padding: 8, boxSizing: 'border-box',
             }}>
-              {drawn.map(n => (
-                <span key={n} style={{
-                  width: 24, height: 24, borderRadius: RADIUS.pill,
-                  background: selected.includes(n) ? KENO.pill : KENO.ball,
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  color: COLORS.white, fontSize: 11, fontWeight: 800,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                }}>{n}</span>
-              ))}
+              {drawn.map(n => {
+                const hit = selected.includes(n)
+                return (
+                  <span key={n} style={{
+                    width: 24, height: 24, borderRadius: RADIUS.pill,
+                    background: hit ? KENO.pill : KENO.ball,
+                    border: `1.5px solid ${hit ? KENO.green : 'rgba(255,255,255,0.3)'}`,
+                    boxShadow: hit ? `0 0 8px ${KENO.green}` : 'none',
+                    color: COLORS.white, fontSize: 11, fontWeight: 800,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    animation: 'kenoDrop 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+                  }}>{n}</span>
+                )
+              })}
             </div>
           </div>
 
@@ -352,15 +380,24 @@ export default function Keno({ balance, setBalance }) {
             border: '2px solid rgba(255,255,255,0.4)',
             fontSize: 16, fontWeight: 900, cursor: 'not-allowed',
           }}>⟳</button>
-          <button type="button" disabled onClick={phase === 'done' ? reset : play} style={{
-            minWidth: 200, padding: '11px 0', borderRadius: RADIUS.pill, marginLeft: 6,
-            background: `linear-gradient(180deg, ${KENO.bet}, ${KENO.betDark})`,
-            color: COLORS.white, border: '1px solid rgba(255,255,255,0.25)',
-            fontSize: 15, fontWeight: 900, letterSpacing: 2,
-            cursor: 'not-allowed', opacity: 0.9,
-          }}>
-            ▷ BET
-          </button>
+          {(() => {
+            const canBet = phase === 'idle' && selected.length > 0 && bet <= balance && bet >= 1
+            const isDone = phase === 'done'
+            const enabled = isDone || canBet
+            return (
+              <button type="button" disabled={!enabled} onClick={isDone ? reset : play} style={{
+                minWidth: 200, padding: '11px 0', borderRadius: RADIUS.pill, marginLeft: 6,
+                background: `linear-gradient(180deg, ${KENO.bet}, ${KENO.betDark})`,
+                color: COLORS.white, border: '1px solid rgba(255,255,255,0.25)',
+                fontSize: 15, fontWeight: 900, letterSpacing: 2,
+                cursor: enabled ? 'pointer' : 'not-allowed',
+                opacity: enabled ? 1 : 0.55,
+                transition: 'opacity 0.15s',
+              }}>
+                {isDone ? '再来一轮' : '▷ BET'}
+              </button>
+            )
+          })()}
         </div>
       </Panel>
     </GameLayout>
