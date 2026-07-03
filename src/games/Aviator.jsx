@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import GameLayout, { Panel, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import ChipQuickBet from '../components/shell/ChipQuickBet'
+import BetButton from '../components/shell/BetButton'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
@@ -20,12 +23,6 @@ function rand(min, max) {
 
 function money(n) {
   return Number(n).toFixed(2)
-}
-
-function multColor(mult) {
-  if (mult < 2.5) return GREEN
-  if (mult < 6) return '#facc15'
-  return '#fb923c'
 }
 
 function maskName(name) {
@@ -251,7 +248,7 @@ export default function Aviator({ balance, setBalance }) {
     playCrash()
     setPhase('crashed')
     setCrashPoint(crashRef.current)
-    setHistory(h => [Number(crashRef.current.toFixed(2)), ...h].slice(0, 12))
+    setHistory(h => [Number(crashRef.current.toFixed(2)), ...h].slice(0, 20))
     setPlayers(list => list.map(p => p.status === 'live' ? { ...p, status: 'crashed' } : p))
     setMessage(`本轮 ${crashRef.current.toFixed(2)}× 飞了`)
     setTimeout(resetRound, 2200)
@@ -264,6 +261,13 @@ export default function Aviator({ balance, setBalance }) {
     setBalance(b => Number((b - amount).toFixed(2)))
     setPlayerBet({ amount })
     setMessage(`已下注 $${money(amount)}，本轮生效`)
+  }
+
+  function cancelBet() {
+    if (phase !== 'betting' || !playerBet) return
+    setBalance(b => Number((b + playerBet.amount).toFixed(2)))
+    setPlayerBet(null)
+    setMessage('已取消下注')
   }
 
   function cashOut() {
@@ -484,6 +488,14 @@ export default function Aviator({ balance, setBalance }) {
       : '球飞了 — 下一轮马上来'
   const potentialWin = playerBet ? playerBet.amount * multiplier : 0
 
+  // Shell BetButton state — mapped from existing phase/playerBet/cashedOut only.
+  const btnState = phase === 'flying' ? 'cashout' : (phase === 'betting' && playerBet) ? 'cancel' : 'bet'
+  const btnLabel = btnState === 'cashout'
+    ? `兑现 $${money(potentialWin)}`
+    : btnState === 'cancel' ? '取消' : `下注 $${money(bet)}`
+  const btnDisabled = btnState === 'cashout' ? !canCash : btnState === 'bet' ? (!canBet || bet > balance) : false
+  const btnClick = btnState === 'cashout' ? cashOut : btnState === 'cancel' ? cancelBet : placeBet
+
   return (
     <GameLayout
       title="Breakaway"
@@ -514,15 +526,20 @@ export default function Aviator({ balance, setBalance }) {
                 }}>2×</button>
               </div>
             </div>
-            {phase === 'flying' ? (
-              <ActionButton onClick={cashOut} disabled={!canCash} color={multColor(multiplier)}>
-                套现 ({multiplier.toFixed(2)}×) ${money(potentialWin)}
-              </ActionButton>
-            ) : (
-              <ActionButton onClick={placeBet} disabled={!canBet || bet > balance} color={GREEN}>
-                下注下一轮
-              </ActionButton>
-            )}
+            <ChipQuickBet
+              value={bet}
+              max={balance}
+              onSelect={setBet}
+              disabled={!canBet}
+            />
+            <div style={{ marginTop: 12 }}>
+              <BetButton
+                state={btnState}
+                label={btnLabel}
+                onClick={btnClick}
+                disabled={btnDisabled}
+              />
+            </div>
             {message && (
               <div style={{ marginTop: 12, color: '#8a97a6', fontSize: 13, lineHeight: 1.5 }}>
                 {message}
@@ -586,6 +603,7 @@ export default function Aviator({ balance, setBalance }) {
             100% { transform: scale(1); }
           }
         `}</style>
+        <RoundHistoryBar rounds={history} />
         <div style={{ position: 'relative', animation: phase === 'crashed' ? 'bkShake 0.4s ease' : 'none' }}>
           <canvas
             ref={canvasRef}
@@ -598,27 +616,6 @@ export default function Aviator({ balance, setBalance }) {
               border: '1px solid #172333',
             }}
           />
-
-          {/* Recent multipliers — vertical column, newest on top */}
-          <div style={{
-            position: 'absolute', top: 10, left: 10,
-            display: 'flex', flexDirection: 'column', gap: 5,
-            maxHeight: 'calc(100% - 20px)', overflow: 'hidden',
-          }}>
-            {history.slice(0, isMobile ? 6 : 9).map((v, i) => (
-              <span key={`${v}-${i}`} style={{
-                padding: '3px 9px',
-                borderRadius: 999,
-                textAlign: 'center',
-                background: v >= 2 ? 'rgba(22,199,132,0.16)' : v >= 1.5 ? 'rgba(250,204,21,0.15)' : 'rgba(248,113,113,0.16)',
-                color: v >= 2 ? '#86efac' : v >= 1.5 ? '#fde68a' : '#fca5a5',
-                fontSize: 11,
-                fontWeight: 900,
-              }}>
-                {v.toFixed(2)}×
-              </span>
-            ))}
-          </div>
 
           {/* BGM toggle — canvas top-right (left of mute) */}
           <button
