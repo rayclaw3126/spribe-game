@@ -35,6 +35,8 @@ export const RADIUS = {
   pill: 999,
   btn: 12,
   chip: 12,
+  panel: 16,
+  input: 10,
 }
 
 export const SPACE = {

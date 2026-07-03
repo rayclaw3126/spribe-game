@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
-import ChipQuickBet from '../components/shell/ChipQuickBet'
-import BetButton from '../components/shell/BetButton'
+import BetPanel from '../components/shell/BetPanel'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
@@ -62,6 +61,7 @@ export default function Aviator({ balance, setBalance }) {
   const bgmRef = useRef({ audio: null })
 
   const [bet, setBet] = useState(10)
+  const [bet2, setBet2] = useState(10)   // panel 2 display bay — local amount only, betting not wired yet
   const [phase, setPhase] = useState('betting')
   const [countdown, setCountdown] = useState(3)
   const [multiplier, setMultiplier] = useState(1)
@@ -503,50 +503,6 @@ export default function Aviator({ balance, setBalance }) {
       color={GREEN}
       sidebar={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Panel style={{ background: '#101923', borderColor: '#243142', padding: 18 }}>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>下注</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type="number" min="1" value={bet}
-                  onChange={e => setBet(Math.max(1, Number(e.target.value)))}
-                  disabled={!canBet}
-                  style={{
-                    flex: 1, minWidth: 0, padding: '10px 14px', borderRadius: 10, minHeight: 40, boxSizing: 'border-box',
-                    border: '1.5px solid #243142', background: '#0a1119', color: '#e8edf2', fontSize: 15, fontWeight: 600,
-                  }}
-                />
-                <button onClick={() => setBet(b => Math.max(1, Math.floor(b / 2)))} disabled={!canBet} style={{
-                  padding: '10px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700,
-                  background: '#1a2230', color: '#8a97a6', border: '1.5px solid #243142',
-                }}>½</button>
-                <button onClick={() => setBet(b => Math.max(1, b * 2))} disabled={!canBet} style={{
-                  padding: '10px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700,
-                  background: '#1a2230', color: '#8a97a6', border: '1.5px solid #243142',
-                }}>2×</button>
-              </div>
-            </div>
-            <ChipQuickBet
-              value={bet}
-              max={balance}
-              onSelect={setBet}
-              disabled={!canBet}
-            />
-            <div style={{ marginTop: 12 }}>
-              <BetButton
-                state={btnState}
-                label={btnLabel}
-                onClick={btnClick}
-                disabled={btnDisabled}
-              />
-            </div>
-            {message && (
-              <div style={{ marginTop: 12, color: '#8a97a6', fontSize: 13, lineHeight: 1.5 }}>
-                {message}
-              </div>
-            )}
-          </Panel>
-
           <Panel style={{ background: '#101923', borderColor: '#243142', padding: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <strong style={{ color: '#e8edf2', fontSize: 14 }}>实时下注</strong>
@@ -681,6 +637,33 @@ export default function Aviator({ balance, setBalance }) {
           </div>
         </div>
       </Panel>
+
+      {/* Dual bet bays — Spribe-style bottom placement; stacked on mobile */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+        gap: 14,
+        marginTop: 14,
+      }}>
+        <BetPanel
+          bet={bet}
+          setBet={setBet}
+          max={balance}
+          inputDisabled={!canBet}
+          chipDisabled={!canBet}
+          button={{ state: btnState, label: btnLabel, onClick: btnClick, disabled: btnDisabled }}
+          hint={message}
+        />
+        <BetPanel
+          bet={bet2}
+          setBet={setBet2}
+          max={balance}
+          inputDisabled={false}
+          chipDisabled={false}
+          button={{ state: 'bet', label: `下注 $${money(bet2)}`, onClick: undefined, disabled: true }}
+          hint="第二注即将开通"
+        />
+      </div>
     </GameLayout>
   )
 }
