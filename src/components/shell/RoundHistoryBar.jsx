@@ -1,8 +1,12 @@
-import { COLORS, RADIUS, SPACE } from './tokens'
+import { COLORS, RADIUS, SPACE, ROULETTE } from './tokens'
 
-// Horizontal capsule strip of recent round multipliers, newest on the left.
-// <2× slate, 2–10× soft green, ≥10× amber gold. New pills slide in from the
-// left over 150ms; overflow scrolls horizontally. Designed for the dark arena bg.
+// Horizontal capsule strip of recent round results, newest on the left.
+// Default variant shows multipliers: <2× slate, 2–10× soft green, ≥10× amber.
+// variant="roulette" shows drawn numbers instead — red numbers on red, the
+// rest on the wheel's black. New pills slide in from the left over 150ms;
+// overflow scrolls horizontally. Designed for the dark arena bg.
+
+const ROULETTE_RED = new Set([1, 3, 5, 8, 10, 12])
 
 function pillStyle(v) {
   if (v >= 10) return { background: COLORS.amberTint, color: COLORS.amber }
@@ -10,7 +14,8 @@ function pillStyle(v) {
   return { background: COLORS.slateTint, color: COLORS.slate }
 }
 
-export default function RoundHistoryBar({ rounds }) {
+export default function RoundHistoryBar({ rounds, variant }) {
+  const roulette = variant === 'roulette'
   return (
     <div style={{
       display: 'flex', gap: SPACE.sm, alignItems: 'center',
@@ -33,9 +38,11 @@ export default function RoundHistoryBar({ rounds }) {
           fontSize: 12,
           fontWeight: 900,
           animation: 'shellPillIn 150ms ease-out',
-          ...pillStyle(v),
+          ...(roulette
+            ? { background: ROULETTE_RED.has(v) ? ROULETTE.red : ROULETTE.black, color: COLORS.white, minWidth: 18, textAlign: 'center' }
+            : pillStyle(v)),
         }}>
-          {v.toFixed(2)}×
+          {roulette ? v : `${v.toFixed(2)}×`}
         </span>
       ))}
     </div>

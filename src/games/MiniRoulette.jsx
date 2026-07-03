@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { useIsMobile } from '../hooks/useMediaQuery'
-import { COLORS, RADIUS, ROULETTE } from '../components/shell/tokens'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
+import { COLORS, RADIUS, LAYOUT, ROULETTE } from '../components/shell/tokens'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetFeed from '../components/shell/BetFeed'
+import { makeFeedBots } from '../components/shell/arenaFx'
 
 // Static Team Roulette board — pure UI, no betting/spin/settlement logic.
 // Pixel-level copy of the Spribe Mini Roulette reference screenshot
@@ -27,6 +30,9 @@ const CHIPS = [
   { label: '1K', color: ROULETTE.chipPurple },
 ]
 
+// static fake draw history for the desktop strip
+const FAKE_DRAWS = [6, 11, 3, 8, 1, 12, 4, 9, 5, 2, 10, 7, 3, 8, 11]
+
 const rad = d => (d * Math.PI) / 180
 function sectorPath(i, r = R) {
   const a1 = rad(-90 + i * 30), a2 = rad(-90 + (i + 1) * 30)
@@ -41,8 +47,10 @@ const gloss = base => `radial-gradient(circle at 35% 28%, rgba(255,255,255,0.36)
 
 export default function MiniRoulette({ balance }) {
   const isMobile = useIsMobile()
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [hoverNum, setHoverNum] = useState(null)
   const [chip, setChip] = useState('10')
+  const [feedBets] = useState(() => makeFeedBots())   // static fake feed, all rows「进行中」
 
   const pillBtn = {
     padding: '6px 18px', borderRadius: RADIUS.pill,
@@ -74,11 +82,11 @@ export default function MiniRoulette({ balance }) {
     </button>
   )
 
-  return (
-    <GameLayout title="Team Roulette" emoji="⚽" color={COLORS.green}>
+  const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 38%, ${ROULETTE.feltCenter}, ${ROULETTE.feltEdge})`,
         borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* ---- top bar: name pill + How to Play + balance ---- */}
         <div style={{
@@ -261,6 +269,49 @@ export default function MiniRoulette({ balance }) {
           </button>
         </div>
       </Panel>
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024), same bones as Breakaway ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Team Roulette</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={feedBets} myBets={[]} online={926} fill />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
+              <RoundHistoryBar rounds={FAKE_DRAWS} variant="roulette" />
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {gameCard}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- stacked layout (<1024): unchanged ----
+  return (
+    <GameLayout title="Team Roulette" emoji="⚽" color={COLORS.green}>
+      {gameCard}
     </GameLayout>
   )
 }
