@@ -1,15 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { useIsMobile } from '../hooks/useMediaQuery'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
+import { COLORS, LAYOUT } from '../components/shell/tokens'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetPanel from '../components/shell/BetPanel'
 import { createArenaFx, drawArenaFx, drawWaiting, makeFeedBots } from '../components/shell/arenaFx'
 import BetFeed from '../components/shell/BetFeed'
+import WinToast from '../components/shell/WinToast'
+import bayBgUrl from '../assets/shared/bay_bg.png'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
 const GREEN = '#16C784'
 const HISTORY_SEED = [1.42, 2.81, 1.06, 5.24, 1.88, 3.37, 9.12, 1.19, 2.05, 4.63]
+// Betting window — the countdown, the waiting-bay progress bar and auto-bet
+// all pace off this single constant.
+const BETTING_MS = 5000
+const BETTING_S = BETTING_MS / 1000
 
 function generateCrash() {
   const r = Math.random()
@@ -41,11 +48,12 @@ function makePanel() {
 
 export default function Balloon({ balance, setBalance }) {
   const isMobile = useIsMobile()
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const canvasRef = useRef(null)
   const ballRef = useRef(null)
   const frameRef = useRef(null)
   const phaseRef = useRef('betting')
-  const countdownRef = useRef(3)
+  const countdownRef = useRef(BETTING_S)
   const startRef = useRef(0)
   const crashRef = useRef(2)
   const multRef = useRef(1)
@@ -63,16 +71,25 @@ export default function Balloon({ balance, setBalance }) {
   const bettingStartRef = useRef(0)
   const launchAtRef = useRef(0)
   const roundIdRef = useRef(0)   // keys the player's feed row per round
+  const crashAtRef = useRef(0)   // crash timestamp — drives the ball fly-out
   if (fxRef.current === null) fxRef.current = createArenaFx()
+
+  function pushToast(mult, win) {
+    const id = ++toastIdRef.current
+    setToasts(t => [...t, { id, mult, win }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
+  }
 
   const [panels, setPanels] = useState(() => [makePanel(), makePanel()])
   const [phase, setPhase] = useState('betting')
-  const [countdown, setCountdown] = useState(3)
+  const [countdown, setCountdown] = useState(BETTING_S)
   const [multiplier, setMultiplier] = useState(1)
   const [crashPoint, setCrashPoint] = useState(null)
   const [history, setHistory] = useState(HISTORY_SEED)
   const [players, setPlayers] = useState(() => makeFeedBots())
   const [myBets, setMyBets] = useState([])   // player's last 20 settled rounds (display only)
+  const [toasts, setToasts] = useState([])   // cash-out toasts (display only)
+  const toastIdRef = useRef(0)
   const [online, setOnline] = useState(() => Math.floor(rand(820, 980)))
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
@@ -241,8 +258,8 @@ export default function Balloon({ balance, setBalance }) {
     burstRef.current = false
     flashRef.current = 0
     setPhase('betting')
-    countdownRef.current = 3
-    setCountdown(3)
+    countdownRef.current = BETTING_S
+    setCountdown(BETTING_S)
     setMultiplier(1)
     setCrashPoint(null)
     panelsRef.current = panelsRef.current.map(p => ({ ...p, playerBet: null, cashedOut: null, note: '' }))
@@ -267,6 +284,7 @@ export default function Balloon({ balance, setBalance }) {
 
   function crashRound() {
     phaseRef.current = 'crashed'
+    crashAtRef.current = performance.now()
     flashRef.current = 0.7
     stopEngine()
     playCrash()
@@ -315,6 +333,7 @@ export default function Balloon({ balance, setBalance }) {
     })
     credit(win)
     setMyBets(m => [{ bet: p.playerBet.amount, mult, win }, ...m].slice(0, 20))
+    pushToast(mult, win)
     playDing()
   }
 
@@ -438,9 +457,24 @@ export default function Balloon({ balance, setBalance }) {
     if (mode === 'betting') {
       drawWaiting(ctx, {
         W, H, dpr, now: performance.now(), img,
-        progress: (performance.now() - bettingStartRef.current) / 3000,
+        progress: (performance.now() - bettingStartRef.current) / BETTING_MS,
       })
-    } else if (img?.complete && mode !== 'crashed') {
+    } else if (mode === 'crashed') {
+      // Fly-out: for ~400ms the ball accelerates along the curve's tangent
+      // off-canvas, spinning faster. Fresh full repaint each frame — no trails.
+      const t = (performance.now() - crashAtRef.current) / 400
+      if (img?.complete && t < 1) {
+        const dirX = W * 0.66
+        const dirY = -1.45 * Math.pow(Math.max(progress, 0.001), 0.45) * (H * 0.58)
+        const len = Math.hypot(dirX, dirY) || 1
+        const dist = t * t * 900 * dpr
+        ctx.save()
+        ctx.translate(x + (dirX / len) * dist, y + (dirY / len) * dist)
+        ctx.rotate(performance.now() / 60)
+        ctx.drawImage(img, -r, -r, r * 2, r * 2)
+        ctx.restore()
+      }
+    } else if (img?.complete) {
       const sinceLaunch = performance.now() - launchAtRef.current
       let bx = x, by = y
       if (sinceLaunch < 300) {
@@ -575,15 +609,16 @@ export default function Balloon({ balance, setBalance }) {
     const p = panels[i]
     if (phase === 'flying') {
       if (!p.playerBet) return { state: 'waiting', label: '等待下一局', disabled: true }
-      if (p.cashedOut) return { state: 'waiting', label: `已兑现 $${money(p.cashedOut.win)}`, disabled: true }
-      return { state: 'cashout', label: `兑现 $${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(i), disabled: false }
+      if (p.cashedOut) return { state: 'waiting', label: '已兑现', sub: `$${money(p.cashedOut.win)}`, disabled: true }
+      return { state: 'cashout', label: '兑现', sub: `$${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(i), disabled: false }
     }
     if (canBetPhase && p.playerBet) {
-      return { state: 'cancel', label: '取消', onClick: () => cancelBetFor(i), disabled: false }
+      return { state: 'cancel', label: '取消', sub: `$${money(p.playerBet.amount)}`, onClick: () => cancelBetFor(i), disabled: false }
     }
     return {
       state: 'bet',
-      label: `下注 $${money(p.bet)}`,
+      label: '下注',
+      sub: `$${money(p.bet)}`,
       onClick: () => placeBetFor(i),
       disabled: !canBetPhase || !!p.playerBet || p.bet > balance,
     }
@@ -594,17 +629,15 @@ export default function Balloon({ balance, setBalance }) {
     updatePanel(i, { bet: typeof next === 'function' ? next(p.bet) : next })
   }
 
-  return (
-    <GameLayout
-      title="Long Shot"
-      emoji="⚽"
-      color={GREEN}
-    >
-      {/* Spribe-style layout: bet feed on the left (desktop) / below (mobile) */}
-      <div style={{ display: isMobile ? 'block' : 'grid', gridTemplateColumns: '300px minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
-        {!isMobile && <BetFeed bets={displayPlayers} myBets={myBets} online={online} maxHeight={560} />}
-        <div style={{ minWidth: 0 }}>
-      <Panel style={{ background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden' }}>
+  // Shared blocks composed into either the Spribe-parity desktop skeleton
+  // (≥1024) or the stacked mobile layout (<1024).
+  const arena = (
+      <Panel style={{
+        background: '#0a1119', borderColor: '#232c39', overflow: 'hidden',
+        padding: isDesk ? 0 : (isMobile ? 12 : 18),
+        borderRadius: LAYOUT.canvasRadius,
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' } : {}),
+      }}>
         <style>{`
           @keyframes bkShake {
             0%,100% { transform: translateX(0); }
@@ -621,19 +654,36 @@ export default function Balloon({ balance, setBalance }) {
             100% { transform: scale(1); }
           }
         `}</style>
-        <RoundHistoryBar rounds={history} />
-        <div style={{ position: 'relative', animation: phase === 'crashed' ? 'bkShake 0.4s ease' : 'none' }}>
+        {isDesk && (
+          <div style={{
+            height: LAYOUT.demoBarH, flex: '0 0 auto',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: COLORS.amberTint, color: COLORS.amber,
+            fontSize: 11, fontWeight: 900, letterSpacing: 3,
+          }}>
+            DEMO MODE
+          </div>
+        )}
+        {!isDesk && <RoundHistoryBar rounds={history} />}
+        <div style={{
+          position: 'relative',
+          animation: phase === 'crashed' ? 'bkShake 0.4s ease' : 'none',
+          ...(isDesk ? { flex: 1, minHeight: 0, margin: 10 } : {}),
+        }}>
           <canvas
             ref={canvasRef}
             style={{
               display: 'block',
               width: '100%',
-              height: isMobile ? 290 : 430,
+              height: isDesk ? '100%' : (isMobile ? 290 : 430),
               borderRadius: 16,
               background: '#0a1119',
               border: '1px solid #172333',
             }}
           />
+
+          {/* Cash-out toast stack — top center of the arena */}
+          <WinToast toasts={toasts} />
 
           {/* BGM toggle — canvas top-right (left of mute) */}
           <button
@@ -673,8 +723,9 @@ export default function Balloon({ balance, setBalance }) {
             {muted ? '🔇' : '🔊'}
           </button>
 
-          {/* Big multiplier + status — centered overlay */}
-          <div style={{
+          {/* Big multiplier + status — centered overlay. Hidden while betting:
+              the canvas waiting bay (ball + 等待下一局 + progress) owns that phase. */}
+          {phase !== 'betting' && <div style={{
             position: 'absolute', inset: 0,
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             pointerEvents: 'none', textAlign: 'center',
@@ -696,44 +747,94 @@ export default function Balloon({ balance, setBalance }) {
             <div style={{ color: '#8a97a6', fontSize: 13, fontWeight: 600, marginTop: 8 }}>
               {statusText}
             </div>
-          </div>
+          </div>}
         </div>
       </Panel>
+  )
 
-      {/* Single bet bay — crash mode, full shell incl. Auto; dual-bay architecture retained. */}
-      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>
-        {(() => {
-          const i = 0
-          const p = panels[i]
-          const locked = !canBetPhase || !!p.playerBet
-          return (
-            <BetPanel
-              bet={p.bet}
-              setBet={next => setBetFor(i, next)}
-              max={balance}
-              inputDisabled={locked}
-              chipDisabled={locked}
-              button={panelButton(i)}
-              hint={p.note || p.autoNote || message}
-              auto={{
-                betOn: p.autoBet,
-                cashOn: p.autoCashOn,
-                cashMult: p.autoCashMult,
-                onToggleBet: () => toggleAutoBet(i),
-                onToggleCash: () => updatePanel(i, { autoCashOn: !panelsRef.current[i].autoCashOn }),
-                onCashMult: v => updatePanel(i, { autoCashMult: v }),
-              }}
-            />
-          )
-        })()}
+  // Single bet bay — dual-bay panel architecture retained, only bay 0 rendered.
+  const p0 = panels[0]
+  const locked0 = !canBetPhase || !!p0.playerBet
+  const bay = (
+    <BetPanel
+      bare={isDesk}
+      bet={p0.bet}
+      setBet={next => setBetFor(0, next)}
+      max={balance}
+      inputDisabled={locked0}
+      chipDisabled={locked0}
+      button={panelButton(0)}
+      hint={p0.note || p0.autoNote || message}
+      auto={{
+        betOn: p0.autoBet,
+        cashOn: p0.autoCashOn,
+        cashMult: p0.autoCashMult,
+        onToggleBet: () => toggleAutoBet(0),
+        onToggleCash: () => updatePanel(0, { autoCashOn: !panelsRef.current[0].autoCashOn }),
+        onCashMult: v => updatePanel(0, { autoCashMult: v }),
+      }}
+    />
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024, 1440×900 basis) ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        {/* full-width in-game header: name left, balance right */}
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Long Shot</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {money(balance)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          {/* bet feed — 400px, full height, edge-flush, internal scroll */}
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={displayPlayers} myBets={myBets} online={online} fill />
+          </div>
+
+          {/* right column: history row → arena card → bottom bay strip */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
+              <RoundHistoryBar rounds={history} />
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {arena}
+            </div>
+            <div style={{
+              flex: '0 0 auto', minHeight: LAYOUT.bottomH,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              // full-bleed strip: cancel the column padding, ambient art under a
+              // dark scrim so the controls stay readable, hairline on top
+              margin: '0 -12px -12px',
+              background: `linear-gradient(rgba(10,17,25,0.78), rgba(10,17,25,0.78)), url(${bayBgUrl}) center / cover no-repeat`,
+              borderTop: `1px solid ${COLORS.border}`,
+            }}>
+              <div style={{ width: LAYOUT.bayW, maxWidth: '100%' }}>{bay}</div>
+            </div>
+          </div>
+        </div>
       </div>
+    )
+  }
 
-      {isMobile && (
-        <div style={{ marginTop: 14 }}>
-          <BetFeed bets={displayPlayers} myBets={myBets} online={online} maxHeight={300} />
-        </div>
-      )}
-        </div>
+  // ---- stacked layout (<1024): unchanged mobile arrangement ----
+  return (
+    <GameLayout title="Long Shot" emoji="⚽" color={GREEN}>
+      {arena}
+      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bay}</div>
+      <div style={{ marginTop: 14 }}>
+        <BetFeed bets={displayPlayers} myBets={myBets} online={online} maxHeight={300} />
       </div>
     </GameLayout>
   )
