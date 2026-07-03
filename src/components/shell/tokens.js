@@ -71,6 +71,23 @@ export const ROULETTE = {
   chipPurple: '#8e24aa',
 }
 
+// Team Keno — sampled from the Spribe Keno reference shot
+export const KENO = {
+  bgOuter: '#5a0626',   // 仿 Spribe 洋红（面板边缘暗酒红）
+  bgCenter: '#a50f47',  // 仿 Spribe 洋红（中央亮）
+  band: '#6d0830',      // 顶栏 / 底部条
+  strip: 'rgba(0,0,0,0.28)',
+  pill: '#c81450',      // crimson pills / RANDOM
+  ball: '#211016',      // number ball base (near-black)
+  ballRim: 'rgba(214,26,86,0.55)',
+  green: '#35d07f',     // PICK NUMBERS FOR START
+  blue: '#3b4ed8',      // turbo circle button
+  bet: '#9aa019',       // BET olive gradient top
+  betDark: '#6e7513',   // BET olive gradient bottom
+  orange: '#f28c17',
+  xDark: 'rgba(0,0,0,0.16)',  // giant side chevrons
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',
