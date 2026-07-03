@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { useIsMobile } from '../hooks/useMediaQuery'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
+import { COLORS, LAYOUT } from '../components/shell/tokens'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetPanel from '../components/shell/BetPanel'
 import { createArenaFx, drawArenaFx, drawWaiting, makeFeedBots } from '../components/shell/arenaFx'
@@ -41,6 +42,7 @@ function makePanel() {
 
 export default function Aviator({ balance, setBalance }) {
   const isMobile = useIsMobile()
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const canvasRef = useRef(null)
   const ballRef = useRef(null)
   const frameRef = useRef(null)
@@ -594,17 +596,15 @@ export default function Aviator({ balance, setBalance }) {
     updatePanel(i, { bet: typeof next === 'function' ? next(p.bet) : next })
   }
 
-  return (
-    <GameLayout
-      title="Breakaway"
-      emoji="✈️"
-      color={GREEN}
-    >
-      {/* Spribe-style layout: bet feed on the left (desktop) / below (mobile) */}
-      <div style={{ display: isMobile ? 'block' : 'grid', gridTemplateColumns: '300px minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
-        {!isMobile && <BetFeed bets={displayPlayers} myBets={myBets} online={online} maxHeight={560} />}
-        <div style={{ minWidth: 0 }}>
-      <Panel style={{ background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden' }}>
+  // Shared blocks composed into either the Spribe-parity desktop skeleton
+  // (≥1024) or the stacked mobile layout (<1024).
+  const arena = (
+      <Panel style={{
+        background: '#0a1119', borderColor: '#232c39', overflow: 'hidden',
+        padding: isDesk ? 0 : (isMobile ? 12 : 18),
+        borderRadius: LAYOUT.canvasRadius,
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' } : {}),
+      }}>
         <style>{`
           @keyframes bkShake {
             0%,100% { transform: translateX(0); }
@@ -621,14 +621,28 @@ export default function Aviator({ balance, setBalance }) {
             100% { transform: scale(1); }
           }
         `}</style>
-        <RoundHistoryBar rounds={history} />
-        <div style={{ position: 'relative', animation: phase === 'crashed' ? 'bkShake 0.4s ease' : 'none' }}>
+        {isDesk && (
+          <div style={{
+            height: LAYOUT.demoBarH, flex: '0 0 auto',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: COLORS.amberTint, color: COLORS.amber,
+            fontSize: 11, fontWeight: 900, letterSpacing: 3,
+          }}>
+            DEMO MODE
+          </div>
+        )}
+        {!isDesk && <RoundHistoryBar rounds={history} />}
+        <div style={{
+          position: 'relative',
+          animation: phase === 'crashed' ? 'bkShake 0.4s ease' : 'none',
+          ...(isDesk ? { flex: 1, minHeight: 0, margin: 10 } : {}),
+        }}>
           <canvas
             ref={canvasRef}
             style={{
               display: 'block',
               width: '100%',
-              height: isMobile ? 290 : 430,
+              height: isDesk ? '100%' : (isMobile ? 290 : 430),
               borderRadius: 16,
               background: '#0a1119',
               border: '1px solid #172333',
@@ -699,42 +713,86 @@ export default function Aviator({ balance, setBalance }) {
           </div>
         </div>
       </Panel>
+  )
 
-      {/* Single bet bay — dual-bay panel architecture retained, only bay 0 rendered.
-          Centered comfortable width on desktop, full width on mobile. */}
-      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>
-        {(() => {
-          const i = 0
-          const p = panels[i]
-          const locked = !canBetPhase || !!p.playerBet
-          return (
-            <BetPanel
-              bet={p.bet}
-              setBet={next => setBetFor(i, next)}
-              max={balance}
-              inputDisabled={locked}
-              chipDisabled={locked}
-              button={panelButton(i)}
-              hint={p.note || p.autoNote || message}
-              auto={{
-                betOn: p.autoBet,
-                cashOn: p.autoCashOn,
-                cashMult: p.autoCashMult,
-                onToggleBet: () => toggleAutoBet(i),
-                onToggleCash: () => updatePanel(i, { autoCashOn: !panelsRef.current[i].autoCashOn }),
-                onCashMult: v => updatePanel(i, { autoCashMult: v }),
-              }}
-            />
-          )
-        })()}
+  // Single bet bay — dual-bay panel architecture retained, only bay 0 rendered.
+  const p0 = panels[0]
+  const locked0 = !canBetPhase || !!p0.playerBet
+  const bay = (
+    <BetPanel
+      bet={p0.bet}
+      setBet={next => setBetFor(0, next)}
+      max={balance}
+      inputDisabled={locked0}
+      chipDisabled={locked0}
+      button={panelButton(0)}
+      hint={p0.note || p0.autoNote || message}
+      auto={{
+        betOn: p0.autoBet,
+        cashOn: p0.autoCashOn,
+        cashMult: p0.autoCashMult,
+        onToggleBet: () => toggleAutoBet(0),
+        onToggleCash: () => updatePanel(0, { autoCashOn: !panelsRef.current[0].autoCashOn }),
+        onCashMult: v => updatePanel(0, { autoCashMult: v }),
+      }}
+    />
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024, 1440×900 basis) ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        {/* a. full-width in-game header: name left, balance right */}
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Breakaway</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {money(balance)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          {/* b. bet feed — 400px, full height, edge-flush, internal scroll */}
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={displayPlayers} myBets={myBets} online={online} fill />
+          </div>
+
+          {/* c. right column: history row → arena card → bottom bay */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
+              <RoundHistoryBar rounds={history} />
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {arena}
+            </div>
+            <div style={{
+              flex: '0 0 auto', minHeight: LAYOUT.bottomH,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {/* d. single centered bay */}
+              <div style={{ width: LAYOUT.bayW, maxWidth: '100%' }}>{bay}</div>
+            </div>
+          </div>
+        </div>
       </div>
+    )
+  }
 
-      {isMobile && (
-        <div style={{ marginTop: 14 }}>
-          <BetFeed bets={displayPlayers} myBets={myBets} online={online} maxHeight={300} />
-        </div>
-      )}
-        </div>
+  // ---- stacked layout (<1024): unchanged mobile arrangement ----
+  return (
+    <GameLayout title="Breakaway" emoji="✈️" color={GREEN}>
+      {arena}
+      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bay}</div>
+      <div style={{ marginTop: 14 }}>
+        <BetFeed bets={displayPlayers} myBets={myBets} online={online} maxHeight={300} />
       </div>
     </GameLayout>
   )

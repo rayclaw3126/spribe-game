@@ -67,3 +67,16 @@ export const SPACE = {
   md: 12,
   lg: 16,
 }
+
+// Spribe-parity desktop skeleton (1440×900 basis, ≥1024 breakpoint)
+export const LAYOUT = {
+  breakpoint: 1024,
+  siteHeaderH: 60,   // global site header above the game area
+  headerH: 40,       // in-game top bar (name left, balance right)
+  feedW: 400,        // bet feed sidebar, full height, edge-flush
+  historyH: 34,      // round-history strip row
+  canvasRadius: 16,  // arena card corner radius
+  bottomH: 185,      // bottom bet-bay section (min height)
+  bayW: 500,         // single centered bet bay width
+  demoBarH: 22,      // golden DEMO MODE strip inside the arena card
+}

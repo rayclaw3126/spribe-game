@@ -49,7 +49,10 @@ function Row({ left, mid, right, you, dim }) {
   )
 }
 
-function BetFeed({ bets, myBets, online, maxHeight }) {
+// fill=true: edge-flush full-height sidebar variant (no card chrome, the
+// row list flex-grows and scrolls internally); otherwise a rounded card
+// whose list scrolls within maxHeight.
+function BetFeed({ bets, myBets, online, maxHeight, fill = false }) {
   const [tab, setTab] = useState('all')
   // Session-best wins accumulate as cashed rows stream through `bets`.
   const seenRef = useRef(new Set())
@@ -67,11 +70,12 @@ function BetFeed({ bets, myBets, online, maxHeight }) {
   return (
     <div style={{
       background: COLORS.panel,
-      border: `1.5px solid ${COLORS.borderLight}`,
-      borderRadius: RADIUS.panel,
+      border: fill ? 'none' : `1.5px solid ${COLORS.borderLight}`,
+      borderRadius: fill ? 0 : RADIUS.panel,
       padding: SPACE.md,
       boxSizing: 'border-box',
       minWidth: 0,
+      ...(fill ? { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 } : {}),
     }}>
       <div style={{ display: 'flex', gap: SPACE.xs, background: COLORS.bg, border: `1px solid ${COLORS.borderLight}`, borderRadius: RADIUS.pill, padding: 3, marginBottom: SPACE.sm }}>
         {tabs.map(([key, label]) => (
@@ -90,7 +94,10 @@ function BetFeed({ bets, myBets, online, maxHeight }) {
         {online != null && <span style={{ color: COLORS.green }}>{online} 在线</span>}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight, overflowY: 'auto', scrollbarWidth: 'thin' }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', scrollbarWidth: 'thin',
+        ...(fill ? { flex: 1, minHeight: 0 } : { maxHeight }),
+      }}>
         {tab === 'all' && bets.map(b => (
           <Row key={b.id} you={b.you} dim={b.status === 'crashed'}
             left={<Avatar name={b.name} you={b.you} />}
