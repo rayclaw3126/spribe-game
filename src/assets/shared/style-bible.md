@@ -1,0 +1,1 @@
+Dark stadium night background #0a1119, neon green glow accents (#16C784), single key light from upper-left 45 degrees, glossy premium 3D render, subtle green rim light, centered single subject, no text, no watermark
