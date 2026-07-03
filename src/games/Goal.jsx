@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel, BetInput, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetPanel from '../components/shell/BetPanel'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
@@ -21,6 +23,7 @@ export default function Goal({ balance, setBalance }) {
   const [awaiting, setAwaiting] = useState(false)  // waiting for L/R choice
   const [message, setMessage] = useState(null)     // { text, tone }
   const [finalResult, setFinalResult] = useState(null)
+  const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round (0 = tackled), newest first
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
 
@@ -154,6 +157,7 @@ export default function Goal({ balance, setBalance }) {
           setBalance(b => parseFloat((b + payout).toFixed(2)))
           setMessage({ text: '突破成功！', tone: 'gold' })
           setFinalResult({ win: payout, level: nl })
+          setRoundHistory(h => [MULTS[MAX], ...h].slice(0, 20))
           setPhase('done'); phaseRef.current = 'done'
           playWin()
         } else {
@@ -165,6 +169,7 @@ export default function Goal({ balance, setBalance }) {
         flashRef.current = { a: 0.55, c: '239,68,68' }; shakeRef.current = 1
         setMessage({ text: '被抢断！', tone: 'bad' })
         setFinalResult({ win: 0, level: levelRef.current })
+        setRoundHistory(h => [0, ...h].slice(0, 20))
         setPhase('done'); phaseRef.current = 'done'
         playTackle()
       }
@@ -178,6 +183,7 @@ export default function Goal({ balance, setBalance }) {
     setBalance(b => parseFloat((b + payout).toFixed(2)))
     setMessage({ text: `兑现 ${mult}×`, tone: 'good' })
     setFinalResult({ win: payout, level: levelRef.current, cashed: true })
+    setRoundHistory(h => [mult, ...h].slice(0, 20))
     setPhase('done'); phaseRef.current = 'done'
     playCash()
   }
@@ -294,29 +300,6 @@ export default function Goal({ balance, setBalance }) {
     <GameLayout title="Goal" emoji="⚽" color={COLOR}
       sidebar={
         <Panel>
-          <BetInput bet={bet} setBet={setBet}
-            onHalf={() => setBet(b => Math.max(1, Math.floor(b / 2)))}
-            onDouble={() => setBet(b => b * 2)}
-            disabled={running}
-          />
-
-          {running && level > 0 && awaiting && (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 6 }}>现在兑现可得：</div>
-              <div style={{
-                padding: '10px 14px', borderRadius: 10, fontWeight: 700, fontSize: 16,
-                background: 'rgba(16,185,129,0.15)', border: '1.5px solid rgba(16,185,129,0.4)', color: COLOR, marginBottom: 10,
-              }}>💰 ${money(bet * MULTS[level])} ({MULTS[level]}×)</div>
-              <ActionButton onClick={cashOut} color={COLOR} variant="secondary">🏃 立即兑现</ActionButton>
-            </div>
-          )}
-
-          {(phase === 'idle' || phase === 'done') && (
-            <ActionButton onClick={start} color={COLOR} disabled={bet > balance || bet < 1}>
-              ⚽ {phase === 'done' ? '再次突破' : '开始突破'}
-            </ActionButton>
-          )}
-
           {finalResult && (
             <div style={{
               marginTop: 14, padding: '12px 16px', borderRadius: 12,
@@ -355,6 +338,7 @@ export default function Goal({ balance, setBalance }) {
       }
     >
       <Panel style={{ background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden' }}>
+        <RoundHistoryBar rounds={roundHistory} />
         <div style={{ position: 'relative' }}>
           <canvas ref={canvasRef} style={{
             display: 'block', width: '100%', height: isMobile ? 300 : 360,
@@ -406,6 +390,21 @@ export default function Goal({ balance, setBalance }) {
           </p>
         )}
       </Panel>
+
+      {/* Shell bet bay — multi-step mode: bet / live cashout while running / back to bet */}
+      <div style={{ maxWidth: 480, margin: '14px auto 0' }}>
+        <BetPanel
+          bet={bet}
+          setBet={setBet}
+          max={balance}
+          inputDisabled={running}
+          chipDisabled={running}
+          showAuto={false}
+          button={running
+            ? { state: 'cashout', label: `兑现 $${money(bet * MULTS[level])}`, onClick: cashOut, disabled: level < 1 || !awaiting }
+            : { state: 'bet', label: `下注 $${money(bet)}`, onClick: start, disabled: bet > balance || bet < 1 }}
+        />
+      </div>
     </GameLayout>
   )
 }

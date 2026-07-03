@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel, BetInput, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetPanel from '../components/shell/BetPanel'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
@@ -29,10 +31,10 @@ export default function Keno({ balance, setBalance }) {
   const [drawn, setDrawn] = useState([])
   const [drawing, setDrawing] = useState(false)
   const [phase, setPhase] = useState('idle') // idle | drawing | done
+  const [roundHistory, setRoundHistory] = useState([])   // won multiplier per round (0 = no win), newest first
   const [message, setMessage] = useState(null)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
-  const timerRef = useRef(null)
   const audioRef = useRef({ ctx: null, muted: false })
   const bgmRef = useRef({ audio: null })
 
@@ -153,6 +155,7 @@ export default function Keno({ balance, setBalance }) {
         ? { text: `${matchStr} — ${mult}× — Won $${payout.toFixed(2)}! 🎉`, win: true }
         : { text: `${matchStr} — No win this time`, win: false }
     )
+    setRoundHistory(h => [mult, ...h].slice(0, 20))
     setPhase('done')
     setDrawing(false)
   }
@@ -174,12 +177,6 @@ export default function Keno({ balance, setBalance }) {
     <GameLayout title="Team Keno" emoji="⚽" color={COLOR}
       sidebar={
         <Panel>
-          <BetInput bet={bet} setBet={setBet}
-            onHalf={() => setBet(b => Math.max(1, Math.floor(b / 2)))}
-            onDouble={() => setBet(b => b * 2)}
-            disabled={phase !== 'idle'}
-          />
-
           {/* Quick pick */}
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
@@ -230,15 +227,7 @@ export default function Keno({ balance, setBalance }) {
             </div>
           </div>
 
-          {phase === 'idle' ? (
-            <ActionButton onClick={play} color={COLOR} disabled={selected.length === 0 || bet > balance || bet < 1}>
-              ⚽ Play Team Keno
-            </ActionButton>
-          ) : phase === 'done' ? (
-            <ActionButton onClick={reset} color={COLOR}>
-              🔄 Play Again
-            </ActionButton>
-          ) : (
+          {phase === 'drawing' && (
             <div style={{
               padding: '12px 16px', borderRadius: 12, background: COLOR + '15',
               fontWeight: 600, fontSize: 14, color: COLOR, textAlign: 'center',
@@ -285,6 +274,7 @@ export default function Keno({ balance, setBalance }) {
       }
     >
       <Panel>
+        <RoundHistoryBar rounds={roundHistory} />
         {/* Audio toggles */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 10 }}>
           <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
@@ -354,6 +344,23 @@ export default function Keno({ balance, setBalance }) {
           </p>
         )}
       </Panel>
+
+      {/* Shell bet bay — one-shot mode with a reset step, no Auto tab */}
+      <div style={{ maxWidth: 480, margin: '14px auto 0' }}>
+        <BetPanel
+          bet={bet}
+          setBet={setBet}
+          max={balance}
+          inputDisabled={phase !== 'idle'}
+          chipDisabled={phase !== 'idle'}
+          showAuto={false}
+          button={phase === 'drawing'
+            ? { state: 'waiting', label: `开奖中… ${drawn.length}/${DRAW}`, disabled: true }
+            : phase === 'done'
+              ? { state: 'bet', label: '🔄 再来一轮', onClick: reset, disabled: false }
+              : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: play, disabled: selected.length === 0 || bet > balance || bet < 1 }}
+        />
+      </div>
     </GameLayout>
   )
 }

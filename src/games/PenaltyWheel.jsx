@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel, BetInput, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetPanel from '../components/shell/BetPanel'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
 const COLOR = '#16C784'
@@ -46,6 +48,7 @@ export default function PenaltyWheel({ balance, setBalance }) {
   const [rotation, setRotation] = useState(0)
   const [spinning, setSpinning] = useState(false)
   const [result, setResult] = useState(null)
+  const [roundHistory, setRoundHistory] = useState([])   // landed multiplier per round, newest first
   const [winIdx, setWinIdx] = useState(null)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
@@ -147,6 +150,7 @@ export default function PenaltyWheel({ balance, setBalance }) {
       const payout = parseFloat((bet * mult).toFixed(2))
       if (payout > 0) setBalance(b => parseFloat((b + payout).toFixed(2)))
       setResult({ mult, payout, win: payout > 0 })
+      setRoundHistory(h => [mult, ...h].slice(0, 20))
       setWinIdx(idx)
       setSpinning(false)
       if (mult >= 3) { playWin(); playBig() }
@@ -162,11 +166,6 @@ export default function PenaltyWheel({ balance, setBalance }) {
     <GameLayout title="Penalty Wheel" emoji="⚽" color={COLOR}
       sidebar={
         <Panel>
-          <BetInput bet={bet} setBet={setBet}
-            onHalf={() => setBet(b => Math.max(1, Math.floor(b / 2)))}
-            onDouble={() => setBet(b => b * 2)}
-            disabled={spinning}
-          />
           <div style={{ background: 'var(--bg2)', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
             <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8, fontWeight: 600 }}>Wheel payouts</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -180,9 +179,6 @@ export default function PenaltyWheel({ balance, setBalance }) {
               ))}
             </div>
           </div>
-          <ActionButton onClick={spin} color={COLOR} disabled={spinning || bet > balance || bet < 1}>
-            {spinning ? '⚽ Spinning...' : '⚽ Spin the Wheel'}
-          </ActionButton>
           {result && (
             <div style={{
               marginTop: 14, padding: '12px 16px', borderRadius: 12,
@@ -196,7 +192,8 @@ export default function PenaltyWheel({ balance, setBalance }) {
         </Panel>
       }
     >
-      <Panel style={{ position: 'relative', minHeight: 340, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Panel style={{ position: 'relative', minHeight: 340, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <RoundHistoryBar rounds={roundHistory} />
         <style>{`
           @keyframes wheelParticle { from { transform: translate(0,0); opacity:1 } to { transform: translate(var(--tx), var(--ty)); opacity:0 } }
           @keyframes wheelGlow { from { transform: translate(-50%,-50%) scale(0.4); opacity:0.85 } to { transform: translate(-50%,-50%) scale(2.3); opacity:0 } }
@@ -213,7 +210,7 @@ export default function PenaltyWheel({ balance, setBalance }) {
           background: 'var(--bg2)', color: muted ? 'var(--text3)' : COLOR, border: '1px solid var(--border)', fontSize: 18, cursor: 'pointer',
         }}>{muted ? '🔇' : '🔊'}</button>
 
-        <div style={{ position: 'relative', width: 280, maxWidth: '100%' }}>
+        <div style={{ position: 'relative', width: 280, maxWidth: '100%', margin: '0 auto' }}>
           <svg viewBox="0 0 280 285" width="100%" style={{
             transform: `rotate(${rotation}deg)`,
             transition: spinning ? `transform ${SPIN_MS}ms cubic-bezier(0.15,0.55,0.25,1)` : 'none',
@@ -299,6 +296,21 @@ export default function PenaltyWheel({ balance, setBalance }) {
           )}
         </div>
       </Panel>
+
+      {/* Shell bet bay — one-shot mode, no Auto tab */}
+      <div style={{ maxWidth: 480, margin: '14px auto 0' }}>
+        <BetPanel
+          bet={bet}
+          setBet={setBet}
+          max={balance}
+          inputDisabled={spinning}
+          chipDisabled={spinning}
+          showAuto={false}
+          button={spinning
+            ? { state: 'waiting', label: '结算中…', disabled: true }
+            : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: spin, disabled: bet > balance || bet < 1 }}
+        />
+      </div>
     </GameLayout>
   )
 }

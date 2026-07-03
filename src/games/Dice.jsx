@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel, BetInput, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetPanel from '../components/shell/BetPanel'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
 const COLOR = '#16C784'
@@ -42,6 +44,7 @@ export default function Dice({ balance, setBalance }) {
   const [mode, setMode] = useState('over')  // over | under
   const [rolling, setRolling] = useState(false)
   const [result, setResult] = useState(null)
+  const [roundHistory, setRoundHistory] = useState([])   // won multiplier per round (0 = loss), newest first
   const [face, setFace] = useState(4)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
@@ -155,6 +158,7 @@ export default function Dice({ balance, setBalance }) {
         const profit = win ? parseFloat((bet * multiplier).toFixed(2)) : 0
         if (win) setBalance(b => parseFloat((b + profit).toFixed(2)))
         setResult({ roll: r, win, profit })
+        setRoundHistory(h => [win ? multiplier : 0, ...h].slice(0, 20))
         setRolling(false)
         setTimeout(() => (win ? playWin() : playLose()), 150)
       }
@@ -165,12 +169,6 @@ export default function Dice({ balance, setBalance }) {
     <GameLayout title="Total Goals" emoji="⚽" color={COLOR}
       sidebar={
         <Panel>
-          <BetInput bet={bet} setBet={setBet}
-            onHalf={() => setBet(b => Math.max(1, Math.floor(b / 2)))}
-            onDouble={() => setBet(b => b * 2)}
-            disabled={rolling}
-          />
-
           {/* Mode toggle */}
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
@@ -218,10 +216,6 @@ export default function Dice({ balance, setBalance }) {
             <StatBox label="Profit" value={`$${(bet * multiplier - bet).toFixed(2)}`} color='#16C784' />
           </div>
 
-          <ActionButton onClick={roll} color={COLOR} disabled={rolling || bet > balance || bet < 1}>
-            {rolling ? '⚽ Rolling...' : '⚽ Kick Off'}
-          </ActionButton>
-
           {result && (
             <div style={{
               marginTop: 14, padding: '12px 16px', borderRadius: 12,
@@ -235,7 +229,9 @@ export default function Dice({ balance, setBalance }) {
         </Panel>
       }
     >
-      <Panel style={{ position: 'relative', minHeight: 320, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+      <Panel style={{ position: 'relative', minHeight: 320, display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
+        <RoundHistoryBar rounds={roundHistory} />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
         {/* Audio toggles — top-right corner (🎵 music + 🔊 sfx, independent) */}
         <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
           position: 'absolute', top: 12, right: 60, width: 40, height: 40, borderRadius: '50%',
@@ -281,7 +277,23 @@ export default function Dice({ balance, setBalance }) {
             : `Win when total goals ${target} OR UNDER (${[...Array(6)].map((_, i) => i + 1).filter(n => n <= target).join(', ')})`
           }
         </p>
+        </div>
       </Panel>
+
+      {/* Shell bet bay — one-shot mode, no Auto tab */}
+      <div style={{ maxWidth: 480, margin: '14px auto 0' }}>
+        <BetPanel
+          bet={bet}
+          setBet={setBet}
+          max={balance}
+          inputDisabled={rolling}
+          chipDisabled={rolling}
+          showAuto={false}
+          button={rolling
+            ? { state: 'waiting', label: '结算中…', disabled: true }
+            : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: roll, disabled: bet > balance || bet < 1 }}
+        />
+      </div>
     </GameLayout>
   )
 }

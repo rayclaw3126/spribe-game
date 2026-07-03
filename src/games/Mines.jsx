@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel, BetInput, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetPanel from '../components/shell/BetPanel'
 import bgmUrl from '../assets/covers/bgm.mp3'
 import ballUrl from '../assets/covers/ball-3d.png'
 
@@ -34,6 +36,7 @@ export default function Mines({ balance, setBalance }) {
   const [revealed, setRevealed] = useState([])
   const [exploded, setExploded] = useState(null)
   const [message, setMessage] = useState(null)
+  const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round (0 = tackled), newest first
   const [cashedOut, setCashedOut] = useState(false)
   const [shaking, setShaking] = useState(false)
   const [muted, setMuted] = useState(false)
@@ -126,6 +129,7 @@ export default function Mines({ balance, setBalance }) {
     if (mineSet.has(idx)) {
       setExploded(idx)
       setMessage({ text: `💥 Tackled! You lost $${bet.toFixed(2)}`, win: false })
+      setRoundHistory(h => [0, ...h].slice(0, 20))
       setPhase('done')
       setRevealed([...revealed, idx])
       playTackle()
@@ -139,6 +143,7 @@ export default function Mines({ balance, setBalance }) {
         const payout = parseFloat((bet * calcMultiplier(newGems, mineCount)).toFixed(2))
         setBalance(b => parseFloat((b + payout).toFixed(2)))
         setMessage({ text: `All gems found! ${calcMultiplier(newGems, mineCount)}× — $${payout.toFixed(2)}! 🏆`, win: true })
+        setRoundHistory(h => [calcMultiplier(newGems, mineCount), ...h].slice(0, 20))
         setPhase('done')
         playWin()
       } else {
@@ -154,6 +159,7 @@ export default function Mines({ balance, setBalance }) {
     setBalance(b => parseFloat((b + payout).toFixed(2)))
     setCashedOut(true)
     setMessage({ text: `Cashed out ${currentMult}× — Won $${payout.toFixed(2)}!`, win: true })
+    setRoundHistory(h => [currentMult, ...h].slice(0, 20))
     setPhase('done')
     setRevealed(prev => {
       const mines = [...mineSet]
@@ -174,12 +180,6 @@ export default function Mines({ balance, setBalance }) {
     <GameLayout title="Dribble" emoji="👟" color={COLOR}
       sidebar={
         <Panel>
-          <BetInput bet={bet} setBet={setBet}
-            onHalf={() => setBet(b => Math.max(1, Math.floor(b / 2)))}
-            onDouble={() => setBet(b => b * 2)}
-            disabled={phase === 'playing'}
-          />
-
           {/* Mine count */}
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
@@ -225,26 +225,6 @@ export default function Mines({ balance, setBalance }) {
             </div>
           </div>
 
-          {phase === 'playing' && gems > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{
-                padding: '10px 14px', borderRadius: 10, fontWeight: 700, fontSize: 15,
-                background: 'rgba(16,185,129,0.15)', border: '1.5px solid rgba(16,185,129,0.4)', color: '#6EE7B7', marginBottom: 10,
-              }}>
-                💰 ${(bet * currentMult).toFixed(2)} ({currentMult}×)
-              </div>
-              <ActionButton onClick={cashOut} color='#16C784' variant="secondary">
-                💸 Cash Out
-              </ActionButton>
-            </div>
-          )}
-
-          {phase !== 'playing' && (
-            <ActionButton onClick={startGame} color={COLOR} disabled={bet > balance || bet < 1}>
-              👟 {phase === 'done' ? 'Play Again' : 'Start Run'}
-            </ActionButton>
-          )}
-
           {message && (
             <div style={{
               marginTop: 14, padding: '12px 16px', borderRadius: 12,
@@ -260,6 +240,7 @@ export default function Mines({ balance, setBalance }) {
     >
       <Panel>
         <style>{`@keyframes drShake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)} 40%{transform:translateX(6px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(3px)} }`}</style>
+        <RoundHistoryBar rounds={roundHistory} />
 
         {/* Audio toggles */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 10 }}>
@@ -321,6 +302,21 @@ export default function Mines({ balance, setBalance }) {
           </p>
         )}
       </Panel>
+
+      {/* Shell bet bay — multi-step mode: bet / live cashout while playing / back to bet */}
+      <div style={{ maxWidth: 480, margin: '14px auto 0' }}>
+        <BetPanel
+          bet={bet}
+          setBet={setBet}
+          max={balance}
+          inputDisabled={phase === 'playing'}
+          chipDisabled={phase === 'playing'}
+          showAuto={false}
+          button={phase === 'playing'
+            ? { state: 'cashout', label: `兑现 $${(bet * currentMult).toFixed(2)}`, onClick: cashOut, disabled: gems === 0 || cashedOut }
+            : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: startGame, disabled: bet > balance || bet < 1 }}
+        />
+      </div>
     </GameLayout>
   )
 }

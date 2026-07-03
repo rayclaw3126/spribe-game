@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel, BetInput, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetPanel from '../components/shell/BetPanel'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
@@ -143,7 +145,7 @@ export default function Plinko({ balance, setBalance }) {
     if (payout > 0) setBalance(b => parseFloat((b + payout).toFixed(2)))
     setLastBucket(ball.bucketIdx)
     setLastResult({ mult, payout, win: mult >= 1 })
-    setHistory(h => [{ mult, bucketIdx: ball.bucketIdx }, ...h].slice(0, 8))
+    setHistory(h => [{ mult, bucketIdx: ball.bucketIdx }, ...h].slice(0, 20))
     flashesRef.current[ball.bucketIdx] = 1
     const bx = paddingX + ball.bucketIdx * (availW / COLS) + (availW / COLS) / 2
     for (let k = 0; k < 12; k++) {
@@ -259,11 +261,6 @@ export default function Plinko({ balance, setBalance }) {
     <GameLayout title="Free Kick" emoji="⚽" color={COLOR}
       sidebar={
         <Panel>
-          <BetInput bet={bet} setBet={setBet}
-            onHalf={() => setBet(b => Math.max(1, Math.floor(b / 2)))}
-            onDouble={() => setBet(b => b * 2)}
-          />
-
           {/* Multiplier reference */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8, fontWeight: 600 }}>Zone Multipliers</div>
@@ -279,13 +276,6 @@ export default function Plinko({ balance, setBalance }) {
             </div>
           </div>
 
-          <ActionButton onClick={takeKick} color={COLOR} disabled={!canKick}>
-            ⚽ Take Kick
-          </ActionButton>
-          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text3)', textAlign: 'center' }}>
-            连点可同时踢多球
-          </div>
-
           {lastResult && (
             <div style={{
               marginTop: 14, padding: '12px 16px', borderRadius: 12,
@@ -297,24 +287,11 @@ export default function Plinko({ balance, setBalance }) {
             </div>
           )}
 
-          {history.length > 0 && (
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 6, fontWeight: 600 }}>History</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                {history.map((h, i) => (
-                  <span key={i} style={{
-                    padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                    background: h.mult >= 2 ? 'rgba(16,185,129,0.15)' : h.mult >= 1 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
-                    color: h.mult >= 2 ? '#6EE7B7' : h.mult >= 1 ? '#FCD34D' : '#FCA5A5',
-                  }}>{h.mult}×</span>
-                ))}
-              </div>
-            </div>
-          )}
         </Panel>
       }
     >
       <Panel style={{ padding: 12, position: 'relative' }}>
+        <RoundHistoryBar rounds={history.map(h => h.mult)} />
         <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
           position: 'absolute', top: 20, right: 62, width: 40, height: 40, borderRadius: '50%', zIndex: 2,
           background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)',
@@ -329,6 +306,20 @@ export default function Plinko({ balance, setBalance }) {
           style={{ width: '100%', borderRadius: 12, display: 'block' }}
         />
       </Panel>
+
+      {/* Shell bet bay — one-shot fire-and-forget: every click drops another ball */}
+      <div style={{ maxWidth: 480, margin: '14px auto 0' }}>
+        <BetPanel
+          bet={bet}
+          setBet={setBet}
+          max={balance}
+          inputDisabled={false}
+          chipDisabled={false}
+          showAuto={false}
+          button={{ state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: takeKick, disabled: !canKick }}
+          hint="连点可同时踢多球"
+        />
+      </div>
     </GameLayout>
   )
 }
