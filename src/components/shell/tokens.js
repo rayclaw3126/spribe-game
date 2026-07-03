@@ -51,6 +51,26 @@ export const COLORS = {
   feedYouBorder: 'rgba(22,199,132,0.45)',
 }
 
+// Team Roulette — sampled from the Spribe Mini Roulette reference shot
+export const ROULETTE = {
+  feltCenter: '#1c8f45',  // 仿 Spribe 亮绿毡（径向渐变中心）
+  feltEdge: '#0a5526',    // 仿 Spribe 绿（边缘）
+  band: '#0b4d23',        // top bar + chip rail dark-green band
+  red: '#d6262d',
+  black: '#1b1b1b',
+  rim: '#0e3d1d',                    // wheel outer dark ring
+  line: 'rgba(255,255,255,0.55)',    // white table skeleton
+  ball: '#ffb300',                   // golden ball
+  orange: '#f28c17',                 // How to Play pill
+  hub: '#f6eef0',                    // wheel hub (warm white)
+  chipGrey: '#9e9e9e',
+  chipRed: '#e53935',
+  chipBlue: '#1e88e5',
+  chipGreen: '#43a047',
+  chipBlack: '#424242',
+  chipPurple: '#8e24aa',
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',

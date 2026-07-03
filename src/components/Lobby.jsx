@@ -10,6 +10,7 @@ import coverOddsClimb from '../assets/covers/cover-odds-climb.png'
 import coverPenaltyWheel from '../assets/covers/cover-penalty-wheel.png'
 import coverStreakRoll from '../assets/covers/cover-streak-roll.png'
 import coverStrikerTower from '../assets/covers/cover-striker-tower.png'
+import coverTeamRoulette from '../assets/roulette/team_01.png'   // placeholder until the Codex cover lands
 
 const GAMES = [
   { id: 'Aviator',  emoji: '🏃',  name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
@@ -24,6 +25,7 @@ const GAMES = [
   { id: 'PenaltyWheel', emoji: '⚽', name: 'Penalty Wheel', desc: 'Spin the wheel, land a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverPenaltyWheel },
   { id: 'StreakRoll', emoji: '🎯', name: 'Streak Roll', desc: 'Roll the strip, stop on a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll },
   { id: 'Tower', emoji: '🏆', name: 'Striker Tower', desc: 'Climb the tower, dodge defenders!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStrikerTower },
+  { id: 'MiniRoulette', emoji: '⚽', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette },
 ]
 
 export default function Lobby({ onSelect, balance }) {
