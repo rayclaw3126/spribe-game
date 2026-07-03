@@ -10,7 +10,7 @@ import coverOddsClimb from '../assets/covers/cover-odds-climb.png'
 import coverPenaltyWheel from '../assets/covers/cover-penalty-wheel.png'
 import coverStreakRoll from '../assets/covers/cover-streak-roll.png'
 import coverStrikerTower from '../assets/covers/cover-striker-tower.png'
-import coverTeamRoulette from '../assets/roulette/team_01.png'   // placeholder until the Codex cover lands
+import coverTeamRoulette from '../assets/covers/cover_miniroulette.png'
 
 const GAMES = [
   { id: 'Aviator',  emoji: '🏃',  name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
