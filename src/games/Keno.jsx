@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { useIsMobile } from '../hooks/useMediaQuery'
-import { COLORS, RADIUS, KENO } from '../components/shell/tokens'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
+import { COLORS, RADIUS, LAYOUT, KENO } from '../components/shell/tokens'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetFeed from '../components/shell/BetFeed'
+import { makeFeedBots } from '../components/shell/arenaFx'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
 // Team Keno — Spribe-aligned rules: 36-ball pool, pick up to 10, 10 balls
@@ -29,6 +31,7 @@ const PAYOUTS = {
 
 export default function Keno({ balance, setBalance }) {
   const isMobile = useIsMobile()
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bet, setBet] = useState(10)
   const [selected, setSelected] = useState([])
   const [drawn, setDrawn] = useState([])
@@ -38,6 +41,7 @@ export default function Keno({ balance, setBalance }) {
   const [message, setMessage] = useState(null)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const audioRef = useRef({ ctx: null, muted: false })
   const bgmRef = useRef({ audio: null })
 
@@ -129,6 +133,7 @@ export default function Keno({ balance, setBalance }) {
     setDrawing(true)
     setDrawn([])
     setMessage(null)
+    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
 
     // Fisher-Yates over the 36 pool, take 10 — one ball drops every ~200ms
     const pool = Array.from({ length: TOTAL }, (_, i) => i + 1)
@@ -165,6 +170,10 @@ export default function Keno({ balance, setBalance }) {
     setRoundHistory(h => [mult, ...h].slice(0, 20))
     setPhase('done')
     setDrawing(false)
+    // fake feed rows settle for the round: ~45% cash green, the rest grey out
+    setFeedBets(list => list.map(b => Math.random() < 0.45
+      ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+      : { ...b, status: 'crashed' }))
   }
 
   function reset() {
@@ -217,12 +226,12 @@ export default function Keno({ balance, setBalance }) {
   }
   const drawnSet = new Set(drawn)
 
-  return (
-    <GameLayout title="Team Keno" emoji="⚽" color={KENO.pill}>
+  const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 42%, ${KENO.bgCenter}, ${KENO.bgOuter})`,
         borderColor: COLORS.border, padding: isMobile ? 12 : 18,
         overflow: 'hidden', position: 'relative',
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* giant side chevrons (dark X texture) */}
         <div style={{
@@ -289,7 +298,7 @@ export default function Keno({ balance, setBalance }) {
               to { transform: translateY(0) scale(1); opacity: 1; }
             }
           `}</style>
-          <RoundHistoryBar rounds={roundHistory} />
+          {!isDesk && <RoundHistoryBar rounds={roundHistory} />}
           <div style={{
             padding: '6px 0', borderRadius: RADIUS.pill, marginBottom: 12,
             background: KENO.strip, textAlign: 'center',
@@ -400,6 +409,49 @@ export default function Keno({ balance, setBalance }) {
           })()}
         </div>
       </Panel>
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024), same bones as Team Roulette ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Team Keno</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={feedBets} myBets={[]} online={914} fill />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
+              <RoundHistoryBar rounds={roundHistory} />
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {gameCard}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- stacked layout (<1024): unchanged ----
+  return (
+    <GameLayout title="Team Keno" emoji="⚽" color={KENO.pill}>
+      {gameCard}
     </GameLayout>
   )
 }
