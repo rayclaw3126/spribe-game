@@ -22,8 +22,11 @@ const stepBtnStyle = {
   border: `1.5px solid ${COLORS.borderLight}`,
 }
 
-export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled, button, hint, auto }) {
+// showAuto=false hides the Bet/Auto tab row entirely (one-shot / multi-step
+// games where auto-bet has no meaning); `auto` is then not required.
+export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled, button, hint, auto, showAuto = true }) {
   const [tab, setTab] = useState('bet')
+  const activeTab = showAuto ? tab : 'bet'
 
   return (
     <div style={{
@@ -35,28 +38,30 @@ export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled
       minWidth: 0,
     }}>
       {/* Bet / Auto tabs */}
-      <div style={{
-        display: 'flex', gap: SPACE.xs, width: 'fit-content', margin: `0 auto ${SPACE.lg}px`,
-        background: COLORS.bg, border: `1px solid ${COLORS.borderLight}`,
-        borderRadius: RADIUS.pill, padding: 3,
-      }}>
-        {[['bet', 'Bet'], ['auto', 'Auto']].map(([key, label]) => (
-          <button key={key} type="button" onClick={() => setTab(key)} style={{
-            padding: `5px ${SPACE.lg + 6}px`,
-            borderRadius: RADIUS.pill,
-            border: 'none',
-            fontSize: 13, fontWeight: 800,
-            background: tab === key ? COLORS.surface : 'transparent',
-            color: tab === key ? COLORS.text : COLORS.textFaint,
-            cursor: 'pointer',
-            transition: 'background 0.15s, color 0.15s',
-          }}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {showAuto && (
+        <div style={{
+          display: 'flex', gap: SPACE.xs, width: 'fit-content', margin: `0 auto ${SPACE.lg}px`,
+          background: COLORS.bg, border: `1px solid ${COLORS.borderLight}`,
+          borderRadius: RADIUS.pill, padding: 3,
+        }}>
+          {[['bet', 'Bet'], ['auto', 'Auto']].map(([key, label]) => (
+            <button key={key} type="button" onClick={() => setTab(key)} style={{
+              padding: `5px ${SPACE.lg + 6}px`,
+              borderRadius: RADIUS.pill,
+              border: 'none',
+              fontSize: 13, fontWeight: 800,
+              background: tab === key ? COLORS.surface : 'transparent',
+              color: tab === key ? COLORS.text : COLORS.textFaint,
+              cursor: 'pointer',
+              transition: 'background 0.15s, color 0.15s',
+            }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {tab === 'bet' ? (
+      {activeTab === 'bet' ? (
         <>
           <div style={{ display: 'flex', gap: SPACE.sm, marginBottom: SPACE.sm }}>
             <input

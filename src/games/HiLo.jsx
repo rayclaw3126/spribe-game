@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel, BetInput, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel, ActionButton } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import bgmUrl from '../assets/covers/bgm.mp3'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetPanel from '../components/shell/BetPanel'
 
 const COLOR = '#16C784'
 const POSITIONS = ['GK', 'CB', 'LB', 'RB', 'CM', 'CDM', 'CAM', 'LW', 'RW', 'ST']
@@ -73,6 +75,7 @@ export default function HiLo({ balance, setBalance }) {
   const [streak, setStreak] = useState(0)
   const [currentMult, setCurrentMult] = useState(1)
   const [history, setHistory] = useState([])
+  const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round (0 = bust), newest first
   const [message, setMessage] = useState(null)
   const [cashedOut, setCashedOut] = useState(false)
   const [muted, setMuted] = useState(false)
@@ -161,6 +164,7 @@ export default function HiLo({ balance, setBalance }) {
       if (!correct) {
         playWrong()
         setMessage({ text: `Wrong! It was ${next.rating}. Streak lost.`, win: false })
+        setRoundHistory(rh => [0, ...rh].slice(0, 20))
         setStreak(0); setPhase('done'); setFlipping(false)
       } else {
         playCorrect()
@@ -171,6 +175,7 @@ export default function HiLo({ balance, setBalance }) {
           const payout = parseFloat((bet * 25).toFixed(2))
           setBalance(b => parseFloat((b + payout).toFixed(2)))
           setMessage({ text: `MAX STREAK! 25× — Won $${payout.toFixed(2)}! 🏆`, win: true })
+          setRoundHistory(rh => [25, ...rh].slice(0, 20))
           setPhase('done'); setFlipping(false)
         } else {
           setMessage({ text: `Correct! ${next.rating} — keep going!`, win: true })
@@ -187,9 +192,15 @@ export default function HiLo({ balance, setBalance }) {
     setBalance(b => parseFloat((b + payout).toFixed(2)))
     setCashedOut(true)
     setMessage({ text: `Cashed out ${currentMult}× — Won $${payout.toFixed(2)}!`, win: true })
+    setRoundHistory(rh => [currentMult, ...rh].slice(0, 20))
     setPhase('done')
     playCash()
   }
+
+  // Shell BetButton — multi-step mode: bet / live cashout while playing / back to bet.
+  const shellBtn = phase === 'playing'
+    ? { state: 'cashout', label: `兑现 $${(bet * currentMult).toFixed(2)}`, onClick: cashOut, disabled: flipping || streak === 0 || cashedOut }
+    : { state: 'bet', label: `下注 $${Number(bet).toFixed(2)}`, onClick: startGame, disabled: bet > balance || bet < 1 }
 
   const CW = isMobile ? 120 : 150
   const CH = isMobile ? 168 : 210
@@ -199,31 +210,15 @@ export default function HiLo({ balance, setBalance }) {
     <GameLayout title="Rating Hi-Lo" emoji="📊" color={COLOR}
       sidebar={
         <Panel>
-          <BetInput bet={bet} setBet={setBet}
-            onHalf={() => setBet(b => Math.max(1, Math.floor(b / 2)))}
-            onDouble={() => setBet(b => b * 2)}
-            disabled={phase === 'playing'}
-          />
-
-          {phase === 'playing' && streak > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{
-                padding: '10px 14px', borderRadius: 10, fontWeight: 700, fontSize: 16,
-                background: 'rgba(16,185,129,0.15)', border: '1.5px solid rgba(16,185,129,0.4)', color: '#6EE7B7', marginBottom: 10,
-              }}>💰 Cash out: ${(bet * currentMult).toFixed(2)} ({currentMult}×)</div>
-              <ActionButton onClick={cashOut} color='#16C784' variant="secondary" disabled={flipping}>💸 Cash Out Now</ActionButton>
-            </div>
-          )}
-
-          {phase === 'idle' || phase === 'done' ? (
-            <ActionButton onClick={startGame} color={COLOR} disabled={bet > balance || bet < 1}>
-              ⚽ {phase === 'done' ? 'Play Again' : 'Deal Players'}
-            </ActionButton>
-          ) : (
+          {phase === 'playing' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <ActionButton onClick={() => guess('higher')} color='#16C784' disabled={flipping}>⬆️ Higher</ActionButton>
               <ActionButton onClick={() => guess('lower')} color='#EF4444' disabled={flipping}>⬇️ Lower</ActionButton>
             </div>
+          ) : (
+            <p style={{ color: 'var(--text3)', fontSize: 13, textAlign: 'center', margin: '4px 0' }}>
+              下注后猜下一位球员评分更高或更低
+            </p>
           )}
 
           {message && (
@@ -255,6 +250,8 @@ export default function HiLo({ balance, setBalance }) {
       }
     >
       <Panel style={{ position: 'relative' }}>
+        {/* Round history — final multiplier per round */}
+        <RoundHistoryBar rounds={roundHistory} />
         {/* audio toggles */}
         <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
           position: 'absolute', top: 14, right: 60, width: 40, height: 40, borderRadius: '50%', zIndex: 3,
@@ -334,6 +331,19 @@ export default function HiLo({ balance, setBalance }) {
           </p>
         )}
       </Panel>
+
+      {/* Shell bet bay — multi-step mode, no Auto tab */}
+      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>
+        <BetPanel
+          bet={bet}
+          setBet={setBet}
+          max={balance}
+          inputDisabled={phase === 'playing'}
+          chipDisabled={phase === 'playing'}
+          showAuto={false}
+          button={shellBtn}
+        />
+      </div>
     </GameLayout>
   )
 }

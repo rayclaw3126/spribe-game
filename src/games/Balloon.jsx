@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import GameLayout, { Panel, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetPanel from '../components/shell/BetPanel'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
@@ -22,16 +24,24 @@ function money(n) {
   return Number(n).toFixed(2)
 }
 
-function multColor(mult) {
-  if (mult < 2.5) return GREEN
-  if (mult < 6) return '#facc15'
-  return '#fb923c'
-}
-
 function maskName(name) {
-  if (name === '你') return name
+  if (name.startsWith('你')) return name
   if (name.length <= 2) return name[0] + '***'
   return `${name[0]}***${name[name.length - 1]}`
+}
+
+// One bet bay's full state — same per-panel money path as Breakaway.
+function makePanel() {
+  return {
+    bet: 10,
+    playerBet: null,
+    cashedOut: null,
+    autoBet: false,
+    autoCashOn: false,
+    autoCashMult: 2.0,
+    note: '',      // per-round hint, cleared on reset
+    autoNote: '',  // sticky hint (auto-bet stopped), cleared on re-enable
+  }
 }
 
 function makeBots() {
@@ -55,6 +65,7 @@ export default function Balloon({ balance, setBalance }) {
   const ballRef = useRef(null)
   const frameRef = useRef(null)
   const phaseRef = useRef('betting')
+  const countdownRef = useRef(3)
   const startRef = useRef(0)
   const crashRef = useRef(2)
   const multRef = useRef(1)
@@ -63,14 +74,16 @@ export default function Balloon({ balance, setBalance }) {
   const flashRef = useRef(0)
   const audioRef = useRef({ ctx: null, muted: false, engine: null })
   const bgmRef = useRef({ audio: null })
+  // Synchronous mirrors — actions guard/settle through these so rapid clicks,
+  // the rAF loop and timers all see committed values instantly (race safety).
+  const panelsRef = useRef(null)
+  const balanceRef = useRef(balance)
 
-  const [bet, setBet] = useState(10)
+  const [panels, setPanels] = useState(() => [makePanel(), makePanel()])
   const [phase, setPhase] = useState('betting')
   const [countdown, setCountdown] = useState(3)
   const [multiplier, setMultiplier] = useState(1)
   const [crashPoint, setCrashPoint] = useState(null)
-  const [playerBet, setPlayerBet] = useState(null)
-  const [cashedOut, setCashedOut] = useState(null)
   const [history, setHistory] = useState(HISTORY_SEED)
   const [players, setPlayers] = useState(() => makeBots())
   const [online, setOnline] = useState(() => Math.floor(rand(820, 980)))
@@ -78,18 +91,34 @@ export default function Balloon({ balance, setBalance }) {
   const [bgmOn, setBgmOn] = useState(false)
   const [message, setMessage] = useState('')
 
+  if (panelsRef.current === null) panelsRef.current = panels
+
+  useEffect(() => { balanceRef.current = balance }, [balance])
+
+  function updatePanel(i, patch) {
+    panelsRef.current = panelsRef.current.map((p, j) => (j === i ? { ...p, ...patch } : p))
+    setPanels(panelsRef.current)
+  }
+
+  // Single money path — every balance change in the game goes through here.
+  function credit(delta) {
+    balanceRef.current = Number((balanceRef.current + delta).toFixed(2))
+    setBalance(b => Number((b + delta).toFixed(2)))
+  }
+
   const displayPlayers = useMemo(() => {
-    const you = playerBet ? [{
-      id: 'you',
+    const p = panels[0]
+    const you = p.playerBet ? [{
+      id: 'you0',
       name: '你',
-      bet: playerBet.amount,
-      target: cashedOut?.mult || null,
-      status: cashedOut ? 'cashed' : phase === 'crashed' ? 'crashed' : 'live',
-      payout: cashedOut?.win || null,
+      bet: p.playerBet.amount,
+      target: p.cashedOut?.mult || null,
+      status: p.cashedOut ? 'cashed' : phase === 'crashed' ? 'crashed' : 'live',
+      payout: p.cashedOut?.win || null,
       you: true,
     }] : []
     return [...you, ...players].slice(0, 15)
-  }, [cashedOut, phase, playerBet, players])
+  }, [panels, phase, players])
 
   function ensureAudio() {
     if (audioRef.current.ctx) return audioRef.current.ctx
@@ -223,14 +252,16 @@ export default function Balloon({ balance, setBalance }) {
     burstRef.current = false
     flashRef.current = 0
     setPhase('betting')
+    countdownRef.current = 3
     setCountdown(3)
     setMultiplier(1)
     setCrashPoint(null)
-    setPlayerBet(null)
-    setCashedOut(null)
+    panelsRef.current = panelsRef.current.map(p => ({ ...p, playerBet: null, cashedOut: null, note: '' }))
+    setPanels(panelsRef.current)
     setPlayers(makeBots())
     setMessage('')
     stopEngine()
+    autoBetsOnRoundStart()
   }
 
   function launchRound() {
@@ -251,30 +282,61 @@ export default function Balloon({ balance, setBalance }) {
     playCrash()
     setPhase('crashed')
     setCrashPoint(crashRef.current)
-    setHistory(h => [Number(crashRef.current.toFixed(2)), ...h].slice(0, 12))
+    setHistory(h => [Number(crashRef.current.toFixed(2)), ...h].slice(0, 20))
     setPlayers(list => list.map(p => p.status === 'live' ? { ...p, status: 'crashed' } : p))
     setMessage(`本轮 ${crashRef.current.toFixed(2)}× 射偏了`)
     setTimeout(resetRound, 2200)
   }
 
-  function placeBet() {
-    if (phase !== 'betting' || playerBet || bet < 1 || bet > balance) return
-    ensureAudio()
-    const amount = Number(bet)
-    setBalance(b => Number((b - amount).toFixed(2)))
-    setPlayerBet({ amount })
-    setMessage(`已下注 $${money(amount)}，本轮生效`)
+  function placeBetFor(i, { auto = false } = {}) {
+    const p = panelsRef.current[i]
+    if (phaseRef.current !== 'betting' || p.playerBet || p.bet < 1 || p.bet > balanceRef.current) return
+    if (!auto) ensureAudio()
+    const amount = Number(p.bet)
+    updatePanel(i, { playerBet: { amount }, note: `已下注 $${money(amount)}，本轮生效` })
+    credit(-amount)
   }
 
-  function cashOut() {
-    if (phase !== 'flying' || !playerBet || cashedOut) return
-    ensureAudio()
-    const mult = Number(multRef.current.toFixed(2))
-    const win = Number((playerBet.amount * mult).toFixed(2))
-    setBalance(b => Number((b + win).toFixed(2)))
-    setCashedOut({ mult, win })
-    setMessage(`已套现 ${mult.toFixed(2)}× — +$${money(win)}`)
+  function cancelBetFor(i) {
+    const p = panelsRef.current[i]
+    if (phaseRef.current !== 'betting' || !p.playerBet) return
+    const amount = p.playerBet.amount
+    updatePanel(i, { playerBet: null, note: '已取消下注' })
+    credit(amount)
+  }
+
+  // Manual cashout settles at the current multiplier; auto passes its target
+  // and settles at exactly that (not the trigger frame's multiplier).
+  function cashOutFor(i, targetMult = null) {
+    const p = panelsRef.current[i]
+    if (phaseRef.current !== 'flying' || !p.playerBet || p.cashedOut) return
+    if (!targetMult) ensureAudio()
+    const mult = targetMult ?? Number(multRef.current.toFixed(2))
+    const win = Number((p.playerBet.amount * mult).toFixed(2))
+    updatePanel(i, {
+      cashedOut: { mult, win },
+      note: `已${targetMult ? '自动兑现' : '套现'} ${mult.toFixed(2)}× — +$${money(win)}`,
+    })
+    credit(win)
     playDing()
+  }
+
+  function toggleAutoBet(i) {
+    const p = panelsRef.current[i]
+    const next = !p.autoBet
+    updatePanel(i, { autoBet: next, autoNote: '' })
+    if (next && phaseRef.current === 'betting' && !p.playerBet) placeBetFor(i, { auto: true })
+  }
+
+  function autoBetsOnRoundStart() {
+    panelsRef.current.forEach((p, i) => {
+      if (!p.autoBet) return
+      if (p.bet < 1 || p.bet > balanceRef.current) {
+        updatePanel(i, { autoBet: false, autoNote: '余额不足，自动下注已停' })
+        return
+      }
+      placeBetFor(i, { auto: true })
+    })
   }
 
   function drawArena(current, mode = phaseRef.current) {
@@ -428,13 +490,12 @@ export default function Balloon({ balance, setBalance }) {
     resetRound()
     const countdownTimer = setInterval(() => {
       if (phaseRef.current !== 'betting') return
-      setCountdown(c => {
-        if (c <= 1) {
-          launchRound()
-          return 0
-        }
-        return c - 1
-      })
+      // Tick through a ref, then set state — calling launchRound() inside the
+      // setCountdown updater made StrictMode double-invoke it (two crash rolls).
+      const next = countdownRef.current - 1
+      countdownRef.current = Math.max(0, next)
+      setCountdown(countdownRef.current)
+      if (next <= 0) launchRound()
     }, 1000)
 
     const animate = now => {
@@ -453,6 +514,13 @@ export default function Balloon({ balance, setBalance }) {
           }
           return p
         }))
+        // Auto-cashout — settles at the panel's target multiplier. capped never
+        // exceeds the crash point, so this only fires when target ≤ crash.
+        panelsRef.current.forEach((p, i) => {
+          if (p.autoCashOn && p.playerBet && !p.cashedOut && capped >= p.autoCashMult) {
+            cashOutFor(i, p.autoCashMult)
+          }
+        })
         if (next >= crashRef.current) crashRound()
       }
       drawArena(multRef.current)
@@ -470,8 +538,7 @@ export default function Balloon({ balance, setBalance }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const canBet = phase === 'betting' && !playerBet
-  const canCash = phase === 'flying' && playerBet && !cashedOut
+  const canBetPhase = phase === 'betting'
   const bigColor = phase === 'crashed'
     ? '#e2564a'
     : multiplier < 2.5 ? '#16C784' : multiplier < 6 ? '#e0b100' : '#e2564a'
@@ -482,7 +549,29 @@ export default function Balloon({ balance, setBalance }) {
     : phase === 'flying'
       ? '飞行中 — 及时套现!'
       : '射偏了 — 下一轮马上来'
-  const potentialWin = playerBet ? playerBet.amount * multiplier : 0
+  // Shell BetButton state per bay — mapped from phase/playerBet/cashedOut only.
+  function panelButton(i) {
+    const p = panels[i]
+    if (phase === 'flying') {
+      if (!p.playerBet) return { state: 'waiting', label: '等待下一局', disabled: true }
+      if (p.cashedOut) return { state: 'waiting', label: `已兑现 $${money(p.cashedOut.win)}`, disabled: true }
+      return { state: 'cashout', label: `兑现 $${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(i), disabled: false }
+    }
+    if (canBetPhase && p.playerBet) {
+      return { state: 'cancel', label: '取消', onClick: () => cancelBetFor(i), disabled: false }
+    }
+    return {
+      state: 'bet',
+      label: `下注 $${money(p.bet)}`,
+      onClick: () => placeBetFor(i),
+      disabled: !canBetPhase || !!p.playerBet || p.bet > balance,
+    }
+  }
+
+  function setBetFor(i, next) {
+    const p = panelsRef.current[i]
+    updatePanel(i, { bet: typeof next === 'function' ? next(p.bet) : next })
+  }
 
   return (
     <GameLayout
@@ -491,45 +580,6 @@ export default function Balloon({ balance, setBalance }) {
       color={GREEN}
       sidebar={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Panel style={{ background: '#101923', borderColor: '#243142', padding: 18 }}>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>下注</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type="number" min="1" value={bet}
-                  onChange={e => setBet(Math.max(1, Number(e.target.value)))}
-                  disabled={!canBet}
-                  style={{
-                    flex: 1, minWidth: 0, padding: '10px 14px', borderRadius: 10, minHeight: 40, boxSizing: 'border-box',
-                    border: '1.5px solid #243142', background: '#0a1119', color: '#e8edf2', fontSize: 15, fontWeight: 600,
-                  }}
-                />
-                <button onClick={() => setBet(b => Math.max(1, Math.floor(b / 2)))} disabled={!canBet} style={{
-                  padding: '10px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700,
-                  background: '#1a2230', color: '#8a97a6', border: '1.5px solid #243142',
-                }}>½</button>
-                <button onClick={() => setBet(b => Math.max(1, b * 2))} disabled={!canBet} style={{
-                  padding: '10px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700,
-                  background: '#1a2230', color: '#8a97a6', border: '1.5px solid #243142',
-                }}>2×</button>
-              </div>
-            </div>
-            {phase === 'flying' ? (
-              <ActionButton onClick={cashOut} disabled={!canCash} color={multColor(multiplier)}>
-                套现 ({multiplier.toFixed(2)}×) ${money(potentialWin)}
-              </ActionButton>
-            ) : (
-              <ActionButton onClick={placeBet} disabled={!canBet || bet > balance} color={GREEN}>
-                下注下一轮
-              </ActionButton>
-            )}
-            {message && (
-              <div style={{ marginTop: 12, color: '#8a97a6', fontSize: 13, lineHeight: 1.5 }}>
-                {message}
-              </div>
-            )}
-          </Panel>
-
           <Panel style={{ background: '#101923', borderColor: '#243142', padding: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <strong style={{ color: '#e8edf2', fontSize: 14 }}>实时下注</strong>
@@ -586,6 +636,7 @@ export default function Balloon({ balance, setBalance }) {
             100% { transform: scale(1); }
           }
         `}</style>
+        <RoundHistoryBar rounds={history} />
         <div style={{ position: 'relative', animation: phase === 'crashed' ? 'bkShake 0.4s ease' : 'none' }}>
           <canvas
             ref={canvasRef}
@@ -598,27 +649,6 @@ export default function Balloon({ balance, setBalance }) {
               border: '1px solid #172333',
             }}
           />
-
-          {/* Recent multipliers — vertical column, newest on top */}
-          <div style={{
-            position: 'absolute', top: 10, left: 10,
-            display: 'flex', flexDirection: 'column', gap: 5,
-            maxHeight: 'calc(100% - 20px)', overflow: 'hidden',
-          }}>
-            {history.slice(0, isMobile ? 6 : 9).map((v, i) => (
-              <span key={`${v}-${i}`} style={{
-                padding: '3px 9px',
-                borderRadius: 999,
-                textAlign: 'center',
-                background: v >= 2 ? 'rgba(22,199,132,0.16)' : v >= 1.5 ? 'rgba(250,204,21,0.15)' : 'rgba(248,113,113,0.16)',
-                color: v >= 2 ? '#86efac' : v >= 1.5 ? '#fde68a' : '#fca5a5',
-                fontSize: 11,
-                fontWeight: 900,
-              }}>
-                {v.toFixed(2)}×
-              </span>
-            ))}
-          </div>
 
           {/* BGM toggle — canvas top-right (left of mute) */}
           <button
@@ -684,6 +714,34 @@ export default function Balloon({ balance, setBalance }) {
           </div>
         </div>
       </Panel>
+
+      {/* Single bet bay — crash mode, full shell incl. Auto; dual-bay architecture retained. */}
+      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>
+        {(() => {
+          const i = 0
+          const p = panels[i]
+          const locked = !canBetPhase || !!p.playerBet
+          return (
+            <BetPanel
+              bet={p.bet}
+              setBet={next => setBetFor(i, next)}
+              max={balance}
+              inputDisabled={locked}
+              chipDisabled={locked}
+              button={panelButton(i)}
+              hint={p.note || p.autoNote || message}
+              auto={{
+                betOn: p.autoBet,
+                cashOn: p.autoCashOn,
+                cashMult: p.autoCashMult,
+                onToggleBet: () => toggleAutoBet(i),
+                onToggleCash: () => updatePanel(i, { autoCashOn: !panelsRef.current[i].autoCashOn }),
+                onCashMult: v => updatePanel(i, { autoCashMult: v }),
+              }}
+            />
+          )
+        })()}
+      </div>
     </GameLayout>
   )
 }

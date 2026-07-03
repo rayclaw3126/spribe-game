@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import GameLayout, { Panel, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetPanel from '../components/shell/BetPanel'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
@@ -50,6 +52,7 @@ export default function Limbo({ balance, setBalance }) {
   const [rolling, setRolling] = useState(false)
   const [result, setResult] = useState(null)
   const [multiplier, setMultiplier] = useState(1)
+  const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round, newest first
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
 
@@ -196,6 +199,7 @@ export default function Limbo({ balance, setBalance }) {
     const profit = win ? parseFloat((b * tt).toFixed(2)) : 0
     if (win) setBalance(bb => parseFloat((bb + profit).toFixed(2)))
     setResult({ mult: to, win, profit })
+    setRoundHistory(h => [to, ...h].slice(0, 20))
     setRolling(false)
     stopEngine()
     if (win) { burstRef.current = true; playWin() }
@@ -405,13 +409,14 @@ export default function Limbo({ balance, setBalance }) {
     <GameLayout title="Odds Climb" emoji="📈" color={COLOR}
       sidebar={
         <SideControls
-          bet={bet} setBet={setBet} target={target} setTarget={setTarget}
-          rolling={rolling} balance={balance} play={play} result={result}
+          bet={bet} target={target} setTarget={setTarget}
+          rolling={rolling} result={result}
           t={t} winChance={winChance} payout={payout}
         />
       }
     >
       <Panel style={{ background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden' }}>
+        <RoundHistoryBar rounds={roundHistory} />
         <style>{`
           @keyframes ocFlash {
             0%, 100% { color: #EF4444; }
@@ -483,6 +488,21 @@ export default function Limbo({ balance, setBalance }) {
           </div>
         </div>
       </Panel>
+
+      {/* Shell bet bay — one-shot mode: bet → settling (greyed) → bet again. No Auto tab. */}
+      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>
+        <BetPanel
+          bet={bet}
+          setBet={setBet}
+          max={balance}
+          inputDisabled={rolling}
+          chipDisabled={rolling}
+          showAuto={false}
+          button={rolling
+            ? { state: 'waiting', label: '结算中…', disabled: true }
+            : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: play, disabled: bet > balance || bet < 1 }}
+        />
+      </div>
     </GameLayout>
   )
 }
@@ -497,23 +517,9 @@ const darkChip = {
   background: '#1a2230', color: '#8a97a6', border: '1.5px solid #243142',
 }
 
-function SideControls({ bet, setBet, target, setTarget, rolling, balance, play, result, t, winChance, payout }) {
+function SideControls({ bet, target, setTarget, rolling, result, t, winChance, payout }) {
   return (
     <Panel style={{ background: '#101923', borderColor: '#243142', padding: 18 }}>
-      <div style={{ marginBottom: 16 }}>
-        <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Bet Amount</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input type="number" min="1" value={bet}
-            onChange={e => setBet(Math.max(1, Number(e.target.value)))}
-            disabled={rolling}
-            style={{ ...darkInput, flex: 1, width: 'auto', minWidth: 0, minHeight: 40 }}
-          />
-          <button onClick={() => setBet(b => Math.max(1, Math.floor(b / 2)))} disabled={rolling}
-            style={{ ...darkChip, flex: '0 0 auto', padding: '10px 12px', fontSize: 13 }}>½</button>
-          <button onClick={() => setBet(b => b * 2)} disabled={rolling}
-            style={{ ...darkChip, flex: '0 0 auto', padding: '10px 12px', fontSize: 13 }}>2×</button>
-        </div>
-      </div>
       <div style={{ marginBottom: 16 }}>
         <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Target Odds</label>
         <input type="number" min="1.01" step="0.01" value={target}
@@ -535,9 +541,6 @@ function SideControls({ bet, setBet, target, setTarget, rolling, balance, play, 
         <StatBox label="Payout" value={`$${payout.toFixed(2)}`} color={AMBER} />
         <StatBox label="Profit" value={`$${(payout - bet).toFixed(2)}`} color={COLOR} />
       </div>
-      <ActionButton onClick={play} color={COLOR} disabled={rolling || bet > balance || bet < 1}>
-        {rolling ? '📈 Climbing...' : '⚽ Kick Off'}
-      </ActionButton>
       {result && (
         <div style={{ marginTop: 14, padding: '12px 16px', borderRadius: 12,
           background: result.win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
