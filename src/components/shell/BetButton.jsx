@@ -30,7 +30,9 @@ const STATES = {
   },
 }
 
-export default function BetButton({ state, label, onClick, disabled }) {
+// `sub` renders a second, larger line (Spribe's「下注 / $10.00」pattern);
+// `stretch` makes the button fill its flex parent's height.
+export default function BetButton({ state, label, sub, onClick, disabled, stretch }) {
   const s = STATES[state] || STATES.bet
   return (
     <>
@@ -46,7 +48,8 @@ export default function BetButton({ state, label, onClick, disabled }) {
         disabled={disabled}
         style={{
           width: '100%',
-          padding: 14,
+          padding: stretch ? '6px 10px' : 14,
+          ...(stretch ? { height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 } : {}),
           borderRadius: RADIUS.btn,
           border: 'none',
           fontWeight: 800,
@@ -60,6 +63,7 @@ export default function BetButton({ state, label, onClick, disabled }) {
         }}
       >
         {label}
+        {sub && <span style={{ fontSize: 21, fontWeight: 900, lineHeight: 1 }}>{sub}</span>}
       </button>
     </>
   )

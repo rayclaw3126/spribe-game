@@ -9,47 +9,47 @@ import BetButton from './BetButton'
 // and auto-cashout controls through the `auto` prop:
 //   { betOn, cashOn, cashMult, onToggleBet, onToggleCash, onCashMult }
 
-const inputStyle = {
-  flex: 1, minWidth: 0, padding: '10px 14px', borderRadius: RADIUS.input,
-  minHeight: 40, boxSizing: 'border-box',
-  border: `1.5px solid ${COLORS.borderLight}`,
-  background: COLORS.bg, color: COLORS.text,
-  fontSize: 15, fontWeight: 600,
-}
-const stepBtnStyle = {
-  padding: '10px 12px', borderRadius: RADIUS.input, fontSize: 13, fontWeight: 700,
+const roundBtnStyle = disabled => ({
+  width: 26, height: 26, flex: '0 0 auto',
+  borderRadius: RADIUS.pill,
   background: COLORS.surface, color: COLORS.textMuted,
-  border: `1.5px solid ${COLORS.borderLight}`,
-}
+  border: `1px solid ${COLORS.borderLight}`,
+  fontSize: 15, fontWeight: 800, lineHeight: 1,
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  opacity: disabled ? 0.5 : 1,
+})
 
 // showAuto=false hides the Bet/Auto tab row entirely (one-shot / multi-step
 // games where auto-bet has no meaning); `auto` is then not required.
-export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled, button, hint, auto, showAuto = true }) {
+// (hosts may still pass `max`; presets are fixed since the Spribe-parity pass)
+// bare=true drops the card chrome (border/radius/own background) so the panel
+// melts into a host-provided full-width strip.
+export default function BetPanel({ bet, setBet, inputDisabled, chipDisabled, button, hint, auto, showAuto = true, bare = false }) {
   const [tab, setTab] = useState('bet')
   const activeTab = showAuto ? tab : 'bet'
 
   return (
     <div style={{
-      background: COLORS.panel,
-      border: `1.5px solid ${COLORS.borderLight}`,
-      borderRadius: RADIUS.panel,
-      padding: SPACE.lg + 2,
+      background: bare ? 'transparent' : COLORS.panel,
+      border: bare ? 'none' : `1.5px solid ${COLORS.borderLight}`,
+      borderRadius: bare ? 0 : RADIUS.panel,
+      padding: SPACE.md,
       boxSizing: 'border-box',
       minWidth: 0,
     }}>
       {/* Bet / Auto tabs */}
       {showAuto && (
         <div style={{
-          display: 'flex', gap: SPACE.xs, width: 'fit-content', margin: `0 auto ${SPACE.lg}px`,
+          display: 'flex', gap: SPACE.xs, width: 'fit-content', margin: `0 auto ${SPACE.sm}px`,
           background: COLORS.bg, border: `1px solid ${COLORS.borderLight}`,
-          borderRadius: RADIUS.pill, padding: 3,
+          borderRadius: RADIUS.pill, padding: 2,
         }}>
           {[['bet', 'Bet'], ['auto', 'Auto']].map(([key, label]) => (
             <button key={key} type="button" onClick={() => setTab(key)} style={{
-              padding: `5px ${SPACE.lg + 6}px`,
+              padding: `3px ${SPACE.lg + 4}px`,
               borderRadius: RADIUS.pill,
               border: 'none',
-              fontSize: 13, fontWeight: 800,
+              fontSize: 12, fontWeight: 800,
               background: tab === key ? COLORS.surface : 'transparent',
               color: tab === key ? COLORS.text : COLORS.textFaint,
               cursor: 'pointer',
@@ -61,34 +61,52 @@ export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled
         </div>
       )}
 
-      {activeTab === 'bet' ? (
-        <>
-          <div style={{ display: 'flex', gap: SPACE.sm, marginBottom: SPACE.sm }}>
-            <input
-              type="number" min="1" value={bet}
-              onChange={e => setBet(Math.max(1, Number(e.target.value)))}
-              disabled={inputDisabled}
-              style={inputStyle}
-            />
-            <button onClick={() => setBet(b => Math.max(1, Math.floor(b / 2)))} disabled={inputDisabled} style={stepBtnStyle}>½</button>
-            <button onClick={() => setBet(b => Math.max(1, b * 2))} disabled={inputDisabled} style={stepBtnStyle}>2×</button>
-          </div>
-          <ChipQuickBet value={bet} max={max} onSelect={setBet} disabled={chipDisabled} />
-        </>
-      ) : (
-        <AutoControls auto={auto} />
-      )}
-
-      <div style={{ marginTop: SPACE.md }}>
-        <BetButton
-          state={button.state}
-          label={button.label}
-          onClick={button.onClick}
-          disabled={button.disabled}
-        />
+      {/* Spribe-style split: controls left, big action button right */}
+      <div style={{ display: 'flex', gap: SPACE.sm + 2, alignItems: 'stretch' }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'center' }}>
+          {activeTab === 'bet' ? (
+            <>
+              {/* amount row: − | value | + (step 10) */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: COLORS.bg, border: `1.5px solid ${COLORS.borderLight}`,
+                borderRadius: RADIUS.input, padding: '4px 6px',
+              }}>
+                <button type="button" disabled={inputDisabled} style={roundBtnStyle(inputDisabled)}
+                  onClick={() => setBet(b => Math.max(1, b - 10))}>−</button>
+                <input
+                  type="number" min="1" value={bet}
+                  onChange={e => setBet(Math.max(1, Number(e.target.value)))}
+                  disabled={inputDisabled}
+                  style={{
+                    flex: 1, minWidth: 0, textAlign: 'center',
+                    background: 'transparent', border: 'none',
+                    color: COLORS.text, fontSize: 15, fontWeight: 800,
+                  }}
+                />
+                <button type="button" disabled={inputDisabled} style={roundBtnStyle(inputDisabled)}
+                  onClick={() => setBet(b => b + 10)}>+</button>
+              </div>
+              <ChipQuickBet value={bet} onSelect={setBet} disabled={chipDisabled} />
+            </>
+          ) : (
+            <AutoControls auto={auto} />
+          )}
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex' }}>
+          <BetButton
+            state={button.state}
+            label={button.label}
+            sub={button.sub}
+            onClick={button.onClick}
+            disabled={button.disabled}
+            stretch
+          />
+        </div>
       </div>
+
       {hint && (
-        <div style={{ marginTop: SPACE.md, color: COLORS.textMuted, fontSize: 13, lineHeight: 1.5 }}>
+        <div style={{ marginTop: 6, color: COLORS.textMuted, fontSize: 11, lineHeight: 1.4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {hint}
         </div>
       )}

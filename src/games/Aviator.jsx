@@ -8,6 +8,7 @@ import { createArenaFx, drawArenaFx, drawWaiting, makeFeedBots } from '../compon
 import BetFeed from '../components/shell/BetFeed'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
+import bayBgUrl from '../assets/shared/bay_bg.png'
 
 const GREEN = '#16C784'
 const HISTORY_SEED = [1.42, 2.81, 1.06, 5.24, 1.88, 3.37, 9.12, 1.19, 2.05, 4.63]
@@ -577,15 +578,16 @@ export default function Aviator({ balance, setBalance }) {
     const p = panels[i]
     if (phase === 'flying') {
       if (!p.playerBet) return { state: 'waiting', label: '等待下一局', disabled: true }
-      if (p.cashedOut) return { state: 'waiting', label: `已兑现 $${money(p.cashedOut.win)}`, disabled: true }
-      return { state: 'cashout', label: `兑现 $${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(i), disabled: false }
+      if (p.cashedOut) return { state: 'waiting', label: '已兑现', sub: `$${money(p.cashedOut.win)}`, disabled: true }
+      return { state: 'cashout', label: '兑现', sub: `$${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(i), disabled: false }
     }
     if (canBetPhase && p.playerBet) {
-      return { state: 'cancel', label: '取消', onClick: () => cancelBetFor(i), disabled: false }
+      return { state: 'cancel', label: '取消', sub: `$${money(p.playerBet.amount)}`, onClick: () => cancelBetFor(i), disabled: false }
     }
     return {
       state: 'bet',
-      label: `下注 $${money(p.bet)}`,
+      label: '下注',
+      sub: `$${money(p.bet)}`,
       onClick: () => placeBetFor(i),
       disabled: !canBetPhase || !!p.playerBet || p.bet > balance,
     }
@@ -687,8 +689,9 @@ export default function Aviator({ balance, setBalance }) {
             {muted ? '🔇' : '🔊'}
           </button>
 
-          {/* Big multiplier + status — centered overlay */}
-          <div style={{
+          {/* Big multiplier + status — centered overlay. Hidden while betting:
+              the canvas waiting bay (ball + 等待下一局 + progress) owns that phase. */}
+          {phase !== 'betting' && <div style={{
             position: 'absolute', inset: 0,
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             pointerEvents: 'none', textAlign: 'center',
@@ -710,7 +713,7 @@ export default function Aviator({ balance, setBalance }) {
             <div style={{ color: '#8a97a6', fontSize: 13, fontWeight: 600, marginTop: 8 }}>
               {statusText}
             </div>
-          </div>
+          </div>}
         </div>
       </Panel>
   )
@@ -720,6 +723,7 @@ export default function Aviator({ balance, setBalance }) {
   const locked0 = !canBetPhase || !!p0.playerBet
   const bay = (
     <BetPanel
+      bare={isDesk}
       bet={p0.bet}
       setBet={next => setBetFor(0, next)}
       max={balance}
@@ -776,6 +780,11 @@ export default function Aviator({ balance, setBalance }) {
             <div style={{
               flex: '0 0 auto', minHeight: LAYOUT.bottomH,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
+              // full-bleed strip: cancel the column padding, ambient art under a
+              // dark scrim so the controls stay readable, hairline on top
+              margin: '0 -12px -12px',
+              background: `linear-gradient(rgba(10,17,25,0.78), rgba(10,17,25,0.78)), url(${bayBgUrl}) center / cover no-repeat`,
+              borderTop: `1px solid ${COLORS.border}`,
             }}>
               {/* d. single centered bay */}
               <div style={{ width: LAYOUT.bayW, maxWidth: '100%' }}>{bay}</div>
