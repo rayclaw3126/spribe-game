@@ -6,12 +6,17 @@ import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetPanel from '../components/shell/BetPanel'
 import { createArenaFx, drawArenaFx, drawWaiting, makeFeedBots } from '../components/shell/arenaFx'
 import BetFeed from '../components/shell/BetFeed'
+import WinToast from '../components/shell/WinToast'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 
 const GREEN = '#16C784'
 const HISTORY_SEED = [1.42, 2.81, 1.06, 5.24, 1.88, 3.37, 9.12, 1.19, 2.05, 4.63]
+// Betting window — the countdown, the waiting-bay progress bar and auto-bet
+// all pace off this single constant.
+const BETTING_MS = 5000
+const BETTING_S = BETTING_MS / 1000
 
 function generateCrash() {
   const r = Math.random()
@@ -48,7 +53,7 @@ export default function Aviator({ balance, setBalance }) {
   const ballRef = useRef(null)
   const frameRef = useRef(null)
   const phaseRef = useRef('betting')
-  const countdownRef = useRef(3)
+  const countdownRef = useRef(BETTING_S)
   const startRef = useRef(0)
   const crashRef = useRef(2)
   const multRef = useRef(1)
@@ -66,16 +71,25 @@ export default function Aviator({ balance, setBalance }) {
   const bettingStartRef = useRef(0)
   const launchAtRef = useRef(0)
   const roundIdRef = useRef(0)   // keys the player's feed row per round
+  const crashAtRef = useRef(0)   // crash timestamp — drives the ball fly-out
   if (fxRef.current === null) fxRef.current = createArenaFx()
+
+  function pushToast(mult, win) {
+    const id = ++toastIdRef.current
+    setToasts(t => [...t, { id, mult, win }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
+  }
 
   const [panels, setPanels] = useState(() => [makePanel(), makePanel()])
   const [phase, setPhase] = useState('betting')
-  const [countdown, setCountdown] = useState(3)
+  const [countdown, setCountdown] = useState(BETTING_S)
   const [multiplier, setMultiplier] = useState(1)
   const [crashPoint, setCrashPoint] = useState(null)
   const [history, setHistory] = useState(HISTORY_SEED)
   const [players, setPlayers] = useState(() => makeFeedBots())
   const [myBets, setMyBets] = useState([])   // player's last 20 settled rounds (display only)
+  const [toasts, setToasts] = useState([])   // cash-out toasts (display only)
+  const toastIdRef = useRef(0)
   const [online, setOnline] = useState(() => Math.floor(rand(820, 980)))
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
@@ -244,8 +258,8 @@ export default function Aviator({ balance, setBalance }) {
     burstRef.current = false
     flashRef.current = 0
     setPhase('betting')
-    countdownRef.current = 3
-    setCountdown(3)
+    countdownRef.current = BETTING_S
+    setCountdown(BETTING_S)
     setMultiplier(1)
     setCrashPoint(null)
     panelsRef.current = panelsRef.current.map(p => ({ ...p, playerBet: null, cashedOut: null, note: '' }))
@@ -270,6 +284,7 @@ export default function Aviator({ balance, setBalance }) {
 
   function crashRound() {
     phaseRef.current = 'crashed'
+    crashAtRef.current = performance.now()
     flashRef.current = 0.7
     stopEngine()
     playCrash()
@@ -318,6 +333,7 @@ export default function Aviator({ balance, setBalance }) {
     })
     credit(win)
     setMyBets(m => [{ bet: p.playerBet.amount, mult, win }, ...m].slice(0, 20))
+    pushToast(mult, win)
     playDing()
   }
 
@@ -441,9 +457,24 @@ export default function Aviator({ balance, setBalance }) {
     if (mode === 'betting') {
       drawWaiting(ctx, {
         W, H, dpr, now: performance.now(), img,
-        progress: (performance.now() - bettingStartRef.current) / 3000,
+        progress: (performance.now() - bettingStartRef.current) / BETTING_MS,
       })
-    } else if (img?.complete && mode !== 'crashed') {
+    } else if (mode === 'crashed') {
+      // Fly-out: for ~400ms the ball accelerates along the curve's tangent
+      // off-canvas, spinning faster. Fresh full repaint each frame — no trails.
+      const t = (performance.now() - crashAtRef.current) / 400
+      if (img?.complete && t < 1) {
+        const dirX = W * 0.66
+        const dirY = -1.45 * Math.pow(Math.max(progress, 0.001), 0.45) * (H * 0.58)
+        const len = Math.hypot(dirX, dirY) || 1
+        const dist = t * t * 900 * dpr
+        ctx.save()
+        ctx.translate(x + (dirX / len) * dist, y + (dirY / len) * dist)
+        ctx.rotate(performance.now() / 60)
+        ctx.drawImage(img, -r, -r, r * 2, r * 2)
+        ctx.restore()
+      }
+    } else if (img?.complete) {
       const sinceLaunch = performance.now() - launchAtRef.current
       let bx = x, by = y
       if (sinceLaunch < 300) {
@@ -650,6 +681,9 @@ export default function Aviator({ balance, setBalance }) {
               border: '1px solid #172333',
             }}
           />
+
+          {/* Cash-out toast stack — top center of the arena */}
+          <WinToast toasts={toasts} />
 
           {/* BGM toggle — canvas top-right (left of mute) */}
           <button

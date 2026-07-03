@@ -39,6 +39,10 @@ export const COLORS = {
   fxBarFill: '#16C784',
   fxWaitText: '#8a97a6',
 
+  // Win toast
+  toastBg: 'rgba(13,42,31,0.95)',
+  toastBorder: 'rgba(22,199,132,0.55)',
+
   // Bet feed
   feedLive: '#facc15',
   feedWin: '#86efac',
