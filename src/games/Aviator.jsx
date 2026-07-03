@@ -3,6 +3,7 @@ import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetPanel from '../components/shell/BetPanel'
+import { createArenaFx, drawArenaFx, drawWaiting } from '../components/shell/arenaFx'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
@@ -78,6 +79,11 @@ export default function Aviator({ balance, setBalance }) {
   // the rAF loop and timers all see committed values instantly (race safety).
   const panelsRef = useRef(null)
   const balanceRef = useRef(balance)
+  // Backdrop FX + waiting-ceremony timing (pure visuals)
+  const fxRef = useRef(null)
+  const bettingStartRef = useRef(0)
+  const launchAtRef = useRef(0)
+  if (fxRef.current === null) fxRef.current = createArenaFx()
 
   const [panels, setPanels] = useState(() => [makePanel(), makePanel()])
   const [phase, setPhase] = useState('betting')
@@ -247,6 +253,7 @@ export default function Aviator({ balance, setBalance }) {
 
   function resetRound() {
     phaseRef.current = 'betting'
+    bettingStartRef.current = performance.now()
     multRef.current = 1
     particlesRef.current = []
     burstRef.current = false
@@ -268,6 +275,7 @@ export default function Aviator({ balance, setBalance }) {
     const cp = Number(generateCrash().toFixed(2))
     crashRef.current = cp
     startRef.current = performance.now()
+    launchAtRef.current = performance.now()
     phaseRef.current = 'flying'
     setPhase('flying')
     setCrashPoint(cp)
@@ -365,6 +373,9 @@ export default function Aviator({ balance, setBalance }) {
     ctx.fillStyle = '#0a1119'
     ctx.fillRect(0, 0, W, H)
 
+    // Speed-sense backdrop: rotating radial wedges + parallax star drift.
+    drawArenaFx(ctx, fxRef.current, { W, H, dpr, now: performance.now(), mode, mult: current })
+
     // Rising climb line — straight, thick, solid, green→red gradient (longer = redder).
     const startX = pad
     const startY = baseY
@@ -431,11 +442,25 @@ export default function Aviator({ balance, setBalance }) {
 
     // Waving ball — transparent PNG, flying along the curve + rotating.
     // On crash the ball vanishes (it has exploded into debris above).
+    // While betting: waiting bay (center ball + label + countdown bar); at
+    // launch the ball glides from center onto the curve (no position jump).
     const img = ballRef.current
     const r = (isMobile ? 23 : 30) * dpr
-    if (img?.complete && mode !== 'crashed') {
+    if (mode === 'betting') {
+      drawWaiting(ctx, {
+        W, H, dpr, now: performance.now(), img,
+        progress: (performance.now() - bettingStartRef.current) / 3000,
+      })
+    } else if (img?.complete && mode !== 'crashed') {
+      const sinceLaunch = performance.now() - launchAtRef.current
+      let bx = x, by = y
+      if (sinceLaunch < 300) {
+        const k = sinceLaunch / 300
+        bx = W / 2 + (x - W / 2) * k
+        by = H / 2 + (y - H / 2) * k
+      }
       ctx.save()
-      ctx.translate(x, y)
+      ctx.translate(bx, by)
       ctx.rotate((performance.now() / 240) + progress * 8)
       ctx.drawImage(img, -r, -r, r * 2, r * 2)
       ctx.restore()

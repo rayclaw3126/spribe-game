@@ -29,6 +29,15 @@ export const COLORS = {
 
   white: '#ffffff',
   shadow: 'rgba(0,0,0,0.35)',
+
+  // Arena backdrop FX (crash games) — radial wedges + parallax star drift
+  fxWedgeDim: 'rgba(22,199,132,0.03)',
+  fxWedgeBright: 'rgba(22,199,132,0.05)',
+  fxStarFar: 'rgba(125,138,153,0.4)',
+  fxStarNear: 'rgba(93,202,165,0.55)',
+  fxBarTrack: '#1a2230',
+  fxBarFill: '#16C784',
+  fxWaitText: '#8a97a6',
 }
 
 export const RADIUS = {
