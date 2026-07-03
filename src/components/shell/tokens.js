@@ -88,6 +88,24 @@ export const KENO = {
   xDark: 'rgba(0,0,0,0.16)',  // giant side chevrons
 }
 
+// Streak Roll — sampled from the Spribe Hotline reference shot
+export const HOTLINE = {
+  bgOuter: '#25367f',    // 仿 Spribe 宝蓝（面板边缘）
+  bgCenter: '#3a4fa5',   // 仿 Spribe 宝蓝（中央）
+  band: '#4157b0',       // card-strip band
+  bar: '#1d2b5e',        // top/bottom bars, pills, track
+  cardRed: '#f05561',
+  cardRedDeep: '#d23a48',
+  cardNavy: '#1d2c47',
+  cardNavyDot: '#16233a',
+  fire: '#ffb300',
+  fireDeep: '#f28c17',
+  gold: '#ffd54f',       // selection frame / DEMO pill
+  blue: '#2f6fe0',       // round action buttons
+  black: '#0d0d10',      // BLACK bet button
+  orange: '#f28c17',
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',

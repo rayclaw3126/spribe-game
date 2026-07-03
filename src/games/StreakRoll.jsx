@@ -1,17 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import RoundHistoryBar from '../components/shell/RoundHistoryBar'
-import BetPanel from '../components/shell/BetPanel'
+import { COLORS, RADIUS, HOTLINE } from '../components/shell/tokens'
+import { useIsMobile } from '../hooks/useMediaQuery'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
-const COLOR = '#16C784'
 const VALS = [0, 1.5, 0, 2, 0, 1.5, 0, 3, 0, 1.5, 0, 2]
 const CELL_W = 72
 const GAP = 8
 const STEP = CELL_W + GAP
 const SPIN_MS = 4000
-// Layered cell colours: 0× dark, higher = brighter/greener
-const colorFor = v => v === 0 ? '#232c39' : v < 2 ? '#137a52' : v < 3 ? '#16a06a' : '#1fe39a'
 
 // 复制成长条：够长且能无缝停在中段
 const STRIP = Array.from({ length: 60 }, (_, i) => VALS[i % VALS.length])
@@ -33,7 +30,7 @@ export default function StreakRoll({ balance, setBalance }) {
   const [offset, setOffset] = useState(0)
   const [rolling, setRolling] = useState(false)
   const [result, setResult] = useState(null)
-  const [roundHistory, setRoundHistory] = useState([])   // landed multiplier per round, newest first
+  const [, setRoundHistory] = useState([])   // landed multiplier per round (display bookkeeping)
   const [winCell, setWinCell] = useState(null)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
@@ -147,149 +144,250 @@ export default function StreakRoll({ balance, setBalance }) {
       else playLose()
     }, 4200)
   }
-
+  const isMobile = useIsMobile()
   const won = result && result.win
   const bigWin = result && result.mult >= 2
 
+  // ---------- visual layer (Spribe Hotline 1:1) ----------
+  const navPill = {
+    padding: '5px 16px', borderRadius: RADIUS.pill,
+    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
+    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
+  }
+  const circleBtn = {
+    width: 30, height: 30, borderRadius: RADIUS.pill,
+    background: HOTLINE.bar, color: COLORS.white,
+    border: '1px solid rgba(255,255,255,0.35)',
+    fontSize: 15, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
+  }
+  const betBigBtn = (bg, fg) => ({
+    minWidth: 108, padding: '9px 0', borderRadius: RADIUS.pill,
+    background: bg, color: fg,
+    border: '1px solid rgba(255,255,255,0.3)',
+    fontSize: 13, fontWeight: 900, letterSpacing: 0.5,
+    cursor: 'not-allowed', opacity: 0.92,
+    display: 'inline-flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.25,
+  })
+  const tri = up => ({
+    width: 0, height: 0, margin: '0 auto',
+    borderLeft: '9px solid transparent', borderRight: '9px solid transparent',
+    [up ? 'borderBottom' : 'borderTop']: '10px solid rgba(255,255,255,0.75)',
+  })
+
+  // card face: red / navy alternating, golden fire for the top multiplier
+  const cardFace = v => v >= 3
+    ? { background: `radial-gradient(circle at 50% 35%, ${HOTLINE.gold}, ${HOTLINE.fire} 55%, ${HOTLINE.fireDeep})`, border: `2px solid ${HOTLINE.gold}` }
+    : v > 0
+      ? { background: `linear-gradient(160deg, ${HOTLINE.cardRed}, ${HOTLINE.cardRedDeep})`, border: '2px solid rgba(255,255,255,0.25)' }
+      : { background: HOTLINE.cardNavy, border: '2px solid rgba(0,0,0,0.3)' }
+
   return (
-    <GameLayout title="Streak Roll" emoji="🎯" color={COLOR}
-      sidebar={
-        <Panel>
-          <div style={{ background: 'var(--bg2)', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8, fontWeight: 600 }}>Roll payouts</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {[...new Set(VALS)].sort((a, b) => a - b).map(v => (
-                <span key={v} style={{
-                  fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 8,
-                  background: v === 0 ? 'var(--bg2)' : colorFor(v) + '33',
-                  color: v === 0 ? 'var(--text3)' : v >= 3 ? '#7dffcf' : '#6EE7B7',
-                  border: `1px solid ${colorFor(v)}`,
-                }}>{v}×</span>
-              ))}
-            </div>
-          </div>
-          {result && (
-            <div style={{
-              marginTop: 14, padding: '12px 16px', borderRadius: 12,
-              background: result.win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-              color: result.win ? '#6EE7B7' : '#FCA5A5',
-              fontWeight: 600, fontSize: 14, animation: 'winPop 0.4s ease',
-            }}>
-              {result.win ? '🎉' : '💔'} Landed {result.mult}× — {result.win ? `Won $${result.payout.toFixed(2)}!` : 'No win'}
-            </div>
+    <GameLayout title="Streak Roll" emoji="🎯" color={HOTLINE.blue}>
+      <Panel style={{
+        background: `radial-gradient(circle at 50% 30%, ${HOTLINE.bgCenter}, ${HOTLINE.bgOuter})`,
+        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+      }}>
+        {/* ---- top bar ---- */}
+        <div style={{
+          margin: isMobile ? '-12px -12px 14px' : '-18px -18px 16px',
+          padding: '8px 14px',
+          background: HOTLINE.bar,
+          display: 'flex', alignItems: 'center', gap: 10, position: 'relative',
+        }}>
+          <span style={navPill}>STREAK ROLL ▾</span>
+          <span style={{
+            padding: '5px 14px', borderRadius: RADIUS.pill,
+            background: HOTLINE.orange, color: COLORS.white,
+            fontSize: 12, fontWeight: 800,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}>
+            <span style={{
+              width: 15, height: 15, borderRadius: RADIUS.pill,
+              background: 'rgba(0,0,0,0.3)', fontSize: 10, fontWeight: 900,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}>?</span>
+            How to Play?
+          </span>
+          {!isMobile && (
+            <span style={{
+              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+              padding: '4px 18px', borderRadius: RADIUS.pill,
+              background: 'rgba(255,179,0,0.18)', border: `1px solid ${HOTLINE.gold}`,
+              color: HOTLINE.gold, fontSize: 11, fontWeight: 900, letterSpacing: 2,
+            }}>DEMO MODE</span>
           )}
-        </Panel>
-      }
-    >
-      <Panel style={{ position: 'relative', minHeight: 340, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-        <RoundHistoryBar rounds={roundHistory} />
+          <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 13, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
+          </span>
+          <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
+            width: 30, height: 30, borderRadius: RADIUS.pill,
+            background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
+            color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+            fontSize: 13, cursor: 'pointer',
+          }}>🎵</button>
+          <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
+            width: 30, height: 30, borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+            border: '1px solid rgba(255,255,255,0.25)',
+            fontSize: 14, cursor: 'pointer',
+          }}>{muted ? '🔇' : '🔊'}</button>
+        </div>
+
         <style>{`
           @keyframes srParticle { from { transform: translate(0,0); opacity:1 } to { transform: translate(var(--tx), var(--ty)); opacity:0 } }
           @keyframes srGlow { from { transform: translate(-50%,-50%) scale(0.4); opacity:0.85 } to { transform: translate(-50%,-50%) scale(2.3); opacity:0 } }
         `}</style>
 
-        {/* Audio toggles */}
-        <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-          position: 'absolute', top: 12, right: 60, width: 40, height: 40, borderRadius: '50%', zIndex: 6,
-          background: bgmOn ? 'rgba(22,199,132,0.18)' : 'var(--bg2)', color: bgmOn ? COLOR : 'var(--text3)',
-          border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : 'var(--border)'}`, fontSize: 16, cursor: 'pointer',
-        }}>🎵</button>
-        <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-          position: 'absolute', top: 12, right: 12, width: 40, height: 40, borderRadius: '50%', zIndex: 6,
-          background: 'var(--bg2)', color: muted ? 'var(--text3)' : COLOR, border: '1px solid var(--border)', fontSize: 18, cursor: 'pointer',
-        }}>{muted ? '🔇' : '🔊'}</button>
+        {/* ---- thin progress row: bead left, small button right ---- */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: 720, margin: '0 auto 18px' }}>
+          <span style={{ width: 10, height: 10, borderRadius: RADIUS.pill, background: 'rgba(255,255,255,0.8)', flex: '0 0 auto' }} />
+          <div style={{ flex: 1, height: 6, borderRadius: RADIUS.pill, background: HOTLINE.bar }} />
+          <button type="button" disabled style={{
+            padding: '3px 12px', borderRadius: RADIUS.pill, flex: '0 0 auto',
+            background: HOTLINE.blue, color: COLORS.white,
+            border: '1px solid rgba(255,255,255,0.4)',
+            fontSize: 11, fontWeight: 900, cursor: 'not-allowed',
+          }}>⟲˅</button>
+        </div>
 
-        <div ref={viewRef} style={{
-          position: 'relative', width: '100%', maxWidth: 520, height: 100, margin: '0 auto', flex: '0 0 auto',
-          overflow: 'hidden', borderRadius: 12,
-          border: '1.5px solid var(--border)', background: 'var(--bg2)',
-          boxShadow: won && bigWin ? '0 0 24px rgba(57,255,176,0.35)' : 'none',
+        {/* ---- card strip band ---- */}
+        <div style={{
+          background: HOTLINE.band, borderRadius: 14,
+          padding: '10px 0 10px', margin: '0 auto', maxWidth: 860,
         }}>
-          {/* Center pointer — metallic + glow */}
-          <div style={{
-            position: 'absolute', left: '50%', top: 0, bottom: 0, width: 3,
-            background: 'linear-gradient(180deg,#ffffff,#9aa7b5)',
-            transform: 'translateX(-50%)', zIndex: 3,
-            boxShadow: '0 0 8px rgba(245,166,35,0.7)',
-          }} />
-          <div style={{
-            position: 'absolute', left: '50%', top: 1, transform: 'translateX(-50%)',
-            width: 0, height: 0, borderLeft: '9px solid transparent', borderRight: '9px solid transparent',
-            borderTop: '12px solid #ffffff', zIndex: 4, filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))',
-          }} />
-          <div style={{
-            position: 'absolute', left: '50%', bottom: 1, transform: 'translateX(-50%)',
-            width: 0, height: 0, borderLeft: '9px solid transparent', borderRight: '9px solid transparent',
-            borderBottom: '12px solid #ffffff', zIndex: 4, filter: 'drop-shadow(0 -1px 2px rgba(0,0,0,0.6))',
-          }} />
-
-          {/* 两端渐隐 */}
-          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 60, zIndex: 2, background: 'linear-gradient(90deg, var(--bg2), transparent)' }} />
-          <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 60, zIndex: 2, background: 'linear-gradient(270deg, var(--bg2), transparent)' }} />
-
-          {/* 滚动条 */}
-          <div style={{
-            display: 'flex', gap: GAP, position: 'absolute', top: 22, left: 0,
-            transform: `translateX(${-offset}px)`,
-            transition: rolling ? `transform ${SPIN_MS}ms cubic-bezier(0.15,0.55,0.25,1)` : 'none',
+          <div style={tri(false)} />
+          <div ref={viewRef} style={{
+            position: 'relative', width: '100%', height: 96,
+            overflow: 'hidden', margin: '8px 0',
           }}>
-            {STRIP.map((v, i) => {
-              const isWin = !rolling && winCell === i
-              return (
-                <div key={i} style={{
-                  width: CELL_W, height: 56, flexShrink: 0, borderRadius: 8,
-                  background: isWin ? '#39ffb0' : colorFor(v),
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 16, fontWeight: 800, fontFamily: "'Space Grotesk', system-ui, sans-serif",
-                  color: isWin ? '#04342c' : v >= 3 ? '#04342c' : v === 0 ? '#8a97a6' : '#ffffff',
-                  border: `2px solid ${isWin ? '#eafff5' : '#0e1520'}`,
-                  boxShadow: isWin ? '0 0 18px rgba(57,255,176,0.95)' : 'none',
-                  transform: isWin ? 'scale(1.06)' : 'scale(1)',
-                  transition: 'box-shadow 0.2s, transform 0.2s',
-                }}>{v}×</div>
-              )
-            })}
-          </div>
+            {/* fade edges */}
+            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 60, zIndex: 2, background: `linear-gradient(90deg, ${HOTLINE.band}, transparent)` }} />
+            <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 60, zIndex: 2, background: `linear-gradient(270deg, ${HOTLINE.band}, transparent)` }} />
 
-          {/* Win FX (high mult ≥2×): burst + glow at the pointer */}
-          {won && bigWin && (
-            <div key={`fx-${winCell}`} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
-              <div style={{
-                position: 'absolute', left: '50%', top: '50%', width: 90, height: 90, borderRadius: '50%',
-                background: 'radial-gradient(circle, rgba(57,255,176,0.6), rgba(57,255,176,0))',
-                animation: 'srGlow 0.7s ease-out forwards',
-              }} />
-              {Array.from({ length: 14 }).map((_, k) => {
-                const a = (Math.PI * 2 * k) / 14
-                const dist = 70 + (k % 3) * 14
+            {/* rolling strip — same offset/transition mechanics as before */}
+            <div style={{
+              display: 'flex', gap: GAP, position: 'absolute', top: 12, left: 0,
+              transform: `translateX(${-offset}px)`,
+              transition: rolling ? `transform ${SPIN_MS}ms cubic-bezier(0.15,0.55,0.25,1)` : 'none',
+            }}>
+              {STRIP.map((v, i) => {
+                const isWin = !rolling && winCell === i
                 return (
-                  <span key={k} style={{
-                    position: 'absolute', left: '50%', top: '50%', width: 6, height: 6, borderRadius: '50%',
-                    background: k % 2 ? '#eafff5' : '#39ffb0',
-                    '--tx': `${Math.cos(a) * dist}px`, '--ty': `${Math.sin(a) * dist}px`,
-                    animation: 'srParticle 0.8s ease-out forwards', animationDelay: `${(k % 4) * 0.03}s`,
-                  }} />
+                  <div key={i} style={{
+                    width: CELL_W, height: 72, flexShrink: 0, borderRadius: 10,
+                    ...cardFace(v),
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: isWin ? `0 0 18px ${HOTLINE.gold}` : '0 2px 6px rgba(0,0,0,0.3)',
+                    transform: isWin ? 'scale(1.06)' : 'scale(1)',
+                    transition: 'box-shadow 0.2s, transform 0.2s',
+                    fontSize: v >= 3 ? 26 : 8, lineHeight: 1,
+                  }}>
+                    {v >= 3
+                      ? '🔥'
+                      : v > 0
+                        ? <span style={{ fontSize: 8 }}>⚽</span>
+                        : <span style={{ fontSize: 8, opacity: 0.35 }}>⚽</span>}
+                  </div>
                 )
               })}
             </div>
-          )}
+
+            {/* center golden selection frame */}
+            <div style={{
+              position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+              width: CELL_W + 14, height: 88, borderRadius: 12,
+              border: `3px solid ${HOTLINE.gold}`,
+              boxShadow: `0 0 12px rgba(255,213,79,0.45)`,
+              pointerEvents: 'none', zIndex: 3,
+            }} />
+
+            {/* win FX (high mult ≥2×): burst + glow at the pointer */}
+            {won && bigWin && (
+              <div key={`fx-${winCell}`} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
+                <div style={{
+                  position: 'absolute', left: '50%', top: '50%', width: 90, height: 90, borderRadius: '50%',
+                  background: 'radial-gradient(circle, rgba(255,213,79,0.6), rgba(255,213,79,0))',
+                  animation: 'srGlow 0.7s ease-out forwards',
+                }} />
+                {Array.from({ length: 14 }).map((_, k) => {
+                  const a = (Math.PI * 2 * k) / 14
+                  const dist = 70 + (k % 3) * 14
+                  return (
+                    <span key={k} style={{
+                      position: 'absolute', left: '50%', top: '50%', width: 6, height: 6, borderRadius: '50%',
+                      background: k % 2 ? '#fff3cd' : HOTLINE.gold,
+                      '--tx': `${Math.cos(a) * dist}px`, '--ty': `${Math.sin(a) * dist}px`,
+                      animation: 'srParticle 0.8s ease-out forwards', animationDelay: `${(k % 4) * 0.03}s`,
+                    }} />
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          <div style={tri(true)} />
+        </div>
+
+        {/* ---- High risk mode toggle (disabled placeholder) ---- */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '5px 16px', borderRadius: RADIUS.pill,
+            background: HOTLINE.bar, border: '1px solid rgba(255,255,255,0.25)',
+            color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.6, cursor: 'not-allowed',
+          }}>
+            <span style={{
+              width: 30, height: 16, borderRadius: RADIUS.pill, position: 'relative',
+              background: 'rgba(255,255,255,0.2)', display: 'inline-block',
+            }}>
+              <span style={{ position: 'absolute', top: 2, left: 2, width: 12, height: 12, borderRadius: RADIUS.pill, background: 'rgba(255,255,255,0.7)' }} />
+            </span>
+            High risk mode
+          </span>
+        </div>
+
+        {/* ---- bottom bet band ---- */}
+        <div style={{
+          margin: isMobile ? '14px -12px -12px' : '18px -18px -18px',
+          padding: '12px 18px',
+          background: HOTLINE.bar,
+          display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap',
+        }}>
+          <div style={{
+            padding: '5px 22px', borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
+            textAlign: 'center',
+          }}>
+            <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <input
+              type="number" min="1" value={bet}
+              onChange={e => setBet(Math.max(1, Number(e.target.value)))}
+              style={{
+                width: 72, background: 'transparent', border: 'none', textAlign: 'center',
+                color: COLORS.white, fontSize: 15, fontWeight: 900,
+              }}
+            />
+          </div>
+          <button type="button" onClick={() => setBet(b => Math.max(1, b - 10))} style={circleBtn}>−</button>
+          <button type="button" style={{ ...circleBtn, fontSize: 12 }} title="筹码">≡</button>
+          <button type="button" onClick={() => setBet(b => b + 10)} style={circleBtn}>+</button>
+          <button type="button" disabled title="自动" style={{
+            width: 40, height: 40, borderRadius: RADIUS.pill,
+            background: HOTLINE.blue, color: COLORS.white,
+            border: '2px solid rgba(255,255,255,0.4)',
+            fontSize: 16, fontWeight: 900, cursor: 'not-allowed',
+          }}>⟳</button>
+          {/* three bet buttons — wired up in H2; roll kept referenced but unreachable */}
+          <button type="button" disabled onClick={roll} style={betBigBtn(`linear-gradient(160deg, ${HOTLINE.cardRed}, ${HOTLINE.cardRedDeep})`, COLORS.white)}>
+            <span>RED</span><span>X2</span>
+          </button>
+          <button type="button" disabled style={betBigBtn(`radial-gradient(circle at 50% 30%, ${HOTLINE.gold}, ${HOTLINE.fireDeep})`, COLORS.white)}>
+            <span>🔥</span><span>X32</span>
+          </button>
+          <button type="button" disabled style={betBigBtn(HOTLINE.black, COLORS.white)}>
+            <span>BLACK</span><span>X2</span>
+          </button>
         </div>
       </Panel>
-
-      {/* Shell bet bay — one-shot mode, no Auto tab */}
-      <div style={{ maxWidth: 480, margin: '14px auto 0' }}>
-        <BetPanel
-          bet={bet}
-          setBet={setBet}
-          max={balance}
-          inputDisabled={rolling}
-          chipDisabled={rolling}
-          showAuto={false}
-          button={rolling
-            ? { state: 'waiting', label: '结算中…', disabled: true }
-            : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: roll, disabled: bet > balance || bet < 1 }}
-        />
-      </div>
     </GameLayout>
   )
 }
