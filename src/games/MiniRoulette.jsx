@@ -1,37 +1,45 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import { COLORS, RADIUS, LAYOUT, ROULETTE } from '../components/shell/tokens'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
+import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
+import bgmUrl from '../assets/covers/bgm.mp3'
 
-// Static Team Roulette board — pure UI, no betting/spin/settlement logic.
-// Pixel-level copy of the Spribe Mini Roulette reference screenshot
-// (scratchpad/roulette-ref-1.jpg). Only the hover player-card keeps the
-// sports theme; it is invisible at rest.
+// Team Roulette — full bet/spin/settle round on the Spribe-replica board.
+// Standard 12-number mini-roulette paytable:
+//   single number 11.4× · red/black 1.9× · odd/even 1.9× · 1-6 / 7-12 1.9×
+// (payout credited = stake × multiplier; stake was deducted at placement)
 
 const playerGlob = import.meta.glob('../assets/roulette/player_*.png', { eager: true, import: 'default' })
 const PLAYER = Object.keys(playerGlob).sort().map(k => playerGlob[k])
 
 const CX = 150, CY = 150, R = 130
-// Wheel order and colors read straight from the reference (perfect alternation).
 const WHEEL_ORDER = [11, 1, 9, 5, 4, 10, 6, 12, 2, 8, 7, 3]
 const RED_SET = new Set([1, 3, 5, 8, 10, 12])
 const ROW_EVEN = [2, 4, 6, 8, 10, 12]
 const ROW_ODD = [1, 3, 5, 7, 9, 11]
-const OUTSIDE = ['1-6', 'Even', 'black', 'red', 'Odd', '7-12']
-const CHIPS = [
-  { label: '1', color: ROULETTE.chipGrey },
-  { label: '10', color: ROULETTE.chipRed },
-  { label: '50', color: ROULETTE.chipBlue },
-  { label: '100', color: ROULETTE.chipGreen },
-  { label: '500', color: ROULETTE.chipBlack },
-  { label: '1K', color: ROULETTE.chipPurple },
+const OUTSIDE = [
+  { key: 'low', label: '1-6' },
+  { key: 'even', label: 'Even' },
+  { key: 'black', label: 'black' },
+  { key: 'red', label: 'red' },
+  { key: 'odd', label: 'Odd' },
+  { key: 'high', label: '7-12' },
 ]
-
-// static fake draw history for the desktop strip
-const FAKE_DRAWS = [6, 11, 3, 8, 1, 12, 4, 9, 5, 2, 10, 7, 3, 8, 11]
+const CHIPS = [
+  { label: '1', value: 1, color: ROULETTE.chipGrey },
+  { label: '10', value: 10, color: ROULETTE.chipRed },
+  { label: '50', value: 50, color: ROULETTE.chipBlue },
+  { label: '100', value: 100, color: ROULETTE.chipGreen },
+  { label: '500', value: 500, color: ROULETTE.chipBlack },
+  { label: '1K', value: 1000, color: ROULETTE.chipPurple },
+]
+const SPIN_MS = 3500
+const SINGLE_MULT = 11.4
+const OUTSIDE_MULT = 1.9
 
 const rad = d => (d * Math.PI) / 180
 function sectorPath(i, r = R) {
@@ -41,46 +49,332 @@ function sectorPath(i, r = R) {
   return `M${CX},${CY} L${x1},${y1} A${r},${r} 0 0,1 ${x2},${y2} Z`
 }
 const numColor = n => (RED_SET.has(n) ? ROULETTE.red : ROULETTE.black)
-
-// glossy disc face (bet grid + chips)
 const gloss = base => `radial-gradient(circle at 35% 28%, rgba(255,255,255,0.36), rgba(255,255,255,0) 45%), ${base}`
 
-export default function MiniRoulette({ balance }) {
+// The single source of truth tying a result number to a wheel stop position:
+// rotating the wheel by -(sector center angle) brings that sector to the
+// 12 o'clock pointer where the golden ball rests.
+const sectorCenterDeg = n => WHEEL_ORDER.indexOf(n) * 30 + 15
+
+function rollNumber() {
+  return 1 + Math.floor(Math.random() * 12)
+}
+
+// cubic-bezier(0.15,0.55,0.25,1) inversion — keeps the tick schedule in sync
+// with the CSS spin transition (same helper family as Penalty Wheel).
+function makeBezier(x1, y1, x2, y2) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by
+  const sx = t => ((ax * t + bx) * t + cx) * t
+  const sy = t => ((ay * t + by) * t + cy) * t
+  const dx = t => (3 * ax * t + 2 * bx) * t + cx
+  return x => { let t = x; for (let i = 0; i < 6; i++) { const e = sx(t) - x; const d = dx(t); if (Math.abs(e) < 1e-4 || d === 0) break; t -= e / d } return sy(t) }
+}
+const EASE = makeBezier(0.15, 0.55, 0.25, 1)
+function timeForProgress(y) {
+  let lo = 0, hi = 1
+  for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (EASE(m) < y) lo = m; else hi = m }
+  return (lo + hi) / 2
+}
+
+function winMult(key, n) {
+  if (key === `n${n}`) return SINGLE_MULT
+  const red = RED_SET.has(n)
+  if (key === 'red' && red) return OUTSIDE_MULT
+  if (key === 'black' && !red) return OUTSIDE_MULT
+  if (key === 'odd' && n % 2 === 1) return OUTSIDE_MULT
+  if (key === 'even' && n % 2 === 0) return OUTSIDE_MULT
+  if (key === 'low' && n <= 6) return OUTSIDE_MULT
+  if (key === 'high' && n >= 7) return OUTSIDE_MULT
+  return 0
+}
+
+export default function MiniRoulette({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [hoverNum, setHoverNum] = useState(null)
   const [chip, setChip] = useState('10')
-  const [feedBets] = useState(() => makeFeedBots())   // static fake feed, all rows「进行中」
+  const [bets, setBets] = useState({})           // key → staked amount
+  const [betStack, setBetStack] = useState([])   // placement order, for Back
+  const [lastBets, setLastBets] = useState(null) // previous round, for Rebet
+  const [spinning, setSpinning] = useState(false)
+  const [rotation, setRotation] = useState(0)
+  const [winKeys, setWinKeys] = useState(null)   // Set — winning cells highlight
+  const [draws, setDraws] = useState([])         // real draw history
+  const [toasts, setToasts] = useState([])
+  const [note, setNote] = useState('')
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())
+  const [muted, setMuted] = useState(false)
+  const [bgmOn, setBgmOn] = useState(false)
 
-  const pillBtn = {
+  const balanceRef = useRef(balance)
+  const betsRef = useRef(bets)
+  const pendingRef = useRef(null)
+  const timersRef = useRef([])
+  const tickTimersRef = useRef([])
+  const toastIdRef = useRef(0)
+  const audioRef = useRef({ ctx: null, muted: false })
+  const bgmRef = useRef({ audio: null })
+  useEffect(() => { balanceRef.current = balance }, [balance])
+  useEffect(() => { betsRef.current = bets }, [bets])
+  useEffect(() => { audioRef.current.muted = muted }, [muted])
+  useEffect(() => () => {
+    timersRef.current.forEach(clearTimeout)
+    tickTimersRef.current.forEach(clearTimeout)
+    stopBgm()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const later = (fn, ms) => { timersRef.current.push(setTimeout(fn, ms)) }
+
+  // ---------- SFX (Web Audio synth, 🔊-gated) ----------
+  function ensureAudio() {
+    if (audioRef.current.ctx) return audioRef.current.ctx
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    const ctx = new AC()
+    if (ctx.state === 'suspended') ctx.resume()
+    audioRef.current.ctx = ctx
+    return ctx
+  }
+  function playChip() {   // placing / undoing / clearing a bet — short chip clack
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); const g = ctx.createGain()
+    o.type = 'square'; o.frequency.value = 540 + Math.random() * 220
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(0.07, t + 0.004)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.06)
+  }
+  function playTick() {   // ball click while the wheel decelerates
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); const g = ctx.createGain()
+    o.type = 'square'; o.frequency.value = 900 + Math.random() * 250
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(0.04, t + 0.002)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.035)
+  }
+  function playLand() {   // ball settles into the pocket
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); const g = ctx.createGain()
+    o.type = 'sine'; o.frequency.setValueAtTime(240, t); o.frequency.exponentialRampToValueAtTime(90, t + 0.14)
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.2)
+  }
+  function playWin() {   // rising chime, same frame as the gold highlight
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    ;[720, 960, 1280].forEach((f, i) => {
+      const o = ctx.createOscillator(); const g = ctx.createGain()
+      o.type = 'sine'; o.frequency.value = f
+      const s = t + i * 0.08
+      g.gain.setValueAtTime(0.0001, s)
+      g.gain.exponentialRampToValueAtTime(0.12, s + 0.02)
+      g.gain.exponentialRampToValueAtTime(0.0001, s + 0.26)
+      o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.28)
+    })
+  }
+  // ticks per 30° crossing, spaced by the same bezier as the CSS transition
+  function scheduleTicks(baseRot, delta) {
+    tickTimersRef.current.forEach(clearTimeout)
+    tickTimersRef.current = []
+    const startK = Math.ceil(baseRot / 30)
+    const endK = Math.floor((baseRot + delta) / 30)
+    for (let k = startK; k <= endK; k++) {
+      const y = (k * 30 - baseRot) / delta
+      const tms = timeForProgress(y) * SPIN_MS
+      tickTimersRef.current.push(setTimeout(playTick, tms))
+    }
+    tickTimersRef.current.push(setTimeout(playLand, SPIN_MS - 30))
+  }
+
+  // ---------- BGM (real mp3, HTML Audio) — mirrors Breakaway ----------
+  function startBgm() {
+    if (bgmRef.current.audio) return
+    const audio = new Audio(bgmUrl)
+    audio.loop = true
+    audio.volume = 0.25            // quiet — stays under the SFX
+    audio.play().catch(() => {})   // ignore autoplay rejection (starts on the click gesture)
+    bgmRef.current.audio = audio
+  }
+  function stopBgm() {
+    if (bgmRef.current.audio) {
+      bgmRef.current.audio.pause()
+      bgmRef.current.audio = null
+    }
+  }
+  useEffect(() => {
+    // BGM starts on user interaction (BGM button click) — respects autoplay policy.
+    if (bgmOn) startBgm()
+    else stopBgm()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgmOn])
+
+  // Single money path (mirrors Aviator's credit()).
+  function creditBal(delta) {
+    balanceRef.current = Number((balanceRef.current + delta).toFixed(2))
+    setBalance(b => Number((b + delta).toFixed(2)))
+  }
+
+  const chipValue = CHIPS.find(c => c.label === chip).value
+  const totalBet = Object.values(bets).reduce((a, b) => a + b, 0)
+
+  function placeBet(key) {
+    if (spinning) return
+    if (chipValue > balanceRef.current) { setNote('余额不足，无法下注'); return }
+    setNote('')
+    setBets(b => ({ ...b, [key]: Number(((b[key] || 0) + chipValue).toFixed(2)) }))
+    setBetStack(s => [...s, { key, amount: chipValue }])
+    creditBal(-chipValue)
+    playChip()
+  }
+
+  function undoBet() {
+    if (spinning || !betStack.length) return
+    const last = betStack[betStack.length - 1]
+    setBetStack(s => s.slice(0, -1))
+    setBets(b => {
+      const next = { ...b, [last.key]: Number((b[last.key] - last.amount).toFixed(2)) }
+      if (next[last.key] <= 0) delete next[last.key]
+      return next
+    })
+    creditBal(last.amount)
+    setNote('')
+    playChip()
+  }
+
+  function clearBets() {
+    if (spinning || !totalBet) return
+    creditBal(Number(totalBet.toFixed(2)))
+    setBets({})
+    setBetStack([])
+    setNote('')
+    playChip()
+  }
+
+  function rebet() {
+    if (spinning || !lastBets) return
+    const entries = Object.entries(lastBets)
+    const total = entries.reduce((a, [, v]) => a + v, 0)
+    const refund = totalBet
+    if (total > balanceRef.current + refund) { setNote('余额不足，无法复用上局注单'); return }
+    if (refund) creditBal(Number(refund.toFixed(2)))
+    setBets({ ...lastBets })
+    setBetStack(entries.map(([key, amount]) => ({ key, amount })))
+    creditBal(-Number(total.toFixed(2)))
+    setNote('')
+  }
+
+  function pushToast(n, win) {
+    const id = ++toastIdRef.current
+    setToasts(t => [...t, { id, label: `号码 ${n}`, win }])
+    later(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
+  }
+
+  function spin() {
+    if (spinning || !totalBet) return
+    const n = rollNumber()
+    pendingRef.current = n
+    // land the winning sector under the 12 o'clock ball (same mapping as verify)
+    const current = ((rotation % 360) + 360) % 360
+    const targetMod = (360 - sectorCenterDeg(n)) % 360
+    const delta = ((targetMod - current) % 360 + 360) % 360 + 360 * 5
+    ensureAudio()
+    scheduleTicks(rotation, delta)
+    setRotation(r => r + delta)
+    setSpinning(true)
+    setWinKeys(null)
+    setNote('')
+    setFeedBets(makeFeedBots())   // fresh fake round rides along
+    later(settle, SPIN_MS + 150)
+  }
+
+  function settle() {
+    const n = pendingRef.current
+    const staked = betsRef.current
+    const winners = []
+    let payout = 0
+    Object.entries(staked).forEach(([key, amt]) => {
+      const mult = winMult(key, n)
+      if (mult > 0) {
+        winners.push(key)
+        payout = Number((payout + amt * mult).toFixed(2))
+      }
+    })
+    if (payout > 0) {
+      creditBal(payout)
+      pushToast(n, payout)
+      playWin()   // same frame as the gold highlight below
+    }
+    setWinKeys(new Set(winners))
+    setDraws(d => [n, ...d].slice(0, 20))
+    setLastBets({ ...staked })
+    setBets({})
+    setBetStack([])
+    setSpinning(false)
+    // fake feed rows settle for one round: some cash green, the rest grey out
+    setFeedBets(list => list.map(b => Math.random() < 0.45
+      ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+      : { ...b, status: 'crashed' }))
+    later(() => setWinKeys(null), 2600)
+  }
+
+  const pillBtn = enabled => ({
     padding: '6px 18px', borderRadius: RADIUS.pill,
     background: 'rgba(0,0,0,0.18)', color: COLORS.white,
     border: `1.5px solid ${COLORS.white}`,
-    fontSize: 12, fontWeight: 800, cursor: 'not-allowed', opacity: 0.55,
+    fontSize: 12, fontWeight: 800,
+    cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.5,
     display: 'inline-flex', alignItems: 'center', gap: 6,
-  }
+  })
   const cellBorder = `1px solid ${ROULETTE.line}`
 
-  const numCell = n => (
-    <button key={n} type="button"
-      onMouseEnter={() => setHoverNum(n)}
-      onMouseLeave={() => setHoverNum(null)}
-      style={{
-        border: cellBorder, background: 'transparent',
-        padding: '7px 0', cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-      <span style={{
-        width: 40, height: 40, borderRadius: RADIUS.pill,
-        background: gloss(numColor(n)),
-        border: `2px solid ${hoverNum === n ? COLORS.white : 'rgba(255,255,255,0.2)'}`,
-        color: COLORS.white, fontSize: 17, fontWeight: 900,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'border-color 0.15s',
-        fontFamily: "'Space Grotesk', sans-serif",
-      }}>{n}</span>
-    </button>
+  const betChip = amount => (
+    <span style={{
+      position: 'absolute', right: -6, bottom: -4,
+      minWidth: 22, height: 22, padding: '0 3px', borderRadius: RADIUS.pill,
+      background: gloss(ROULETTE.ball), color: ROULETTE.black,
+      border: '1.5px dashed rgba(255,255,255,0.9)',
+      fontSize: 9, fontWeight: 900,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      boxSizing: 'border-box',
+    }}>{amount}</span>
   )
+
+  const numCell = n => {
+    const key = `n${n}`
+    const won = winKeys?.has(key)
+    return (
+      <button key={n} type="button" title={`号码 ${n}`}
+        onClick={() => placeBet(key)}
+        onMouseEnter={() => setHoverNum(n)}
+        onMouseLeave={() => setHoverNum(null)}
+        style={{
+          border: cellBorder, background: 'transparent',
+          padding: '7px 0', cursor: spinning ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+        <span style={{ position: 'relative', display: 'inline-flex' }}>
+          <span style={{
+            width: 40, height: 40, borderRadius: RADIUS.pill,
+            background: gloss(numColor(n)),
+            border: `2px solid ${won ? ROULETTE.ball : hoverNum === n ? COLORS.white : 'rgba(255,255,255,0.2)'}`,
+            boxShadow: won ? `0 0 14px ${ROULETTE.ball}` : 'none',
+            color: COLORS.white, fontSize: 17, fontWeight: 900,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'border-color 0.15s, box-shadow 0.2s',
+            fontFamily: "'Space Grotesk', sans-serif",
+          }}>{n}</span>
+          {bets[key] > 0 && betChip(bets[key])}
+        </span>
+      </button>
+    )
+  }
 
   const gameCard = (
       <Panel style={{
@@ -88,7 +382,7 @@ export default function MiniRoulette({ balance }) {
         borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
-        {/* ---- top bar: name pill + How to Play + balance ---- */}
+        {/* ---- top bar ---- */}
         <div style={{
           margin: isMobile ? '-12px -12px 12px' : '-18px -18px 16px',
           padding: '8px 14px',
@@ -118,45 +412,75 @@ export default function MiniRoulette({ balance }) {
           <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 13, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
           </span>
+          {/* BGM toggle — left of mute, beside the balance */}
+          <button
+            type="button"
+            onClick={() => setBgmOn(v => !v)}
+            style={{
+              width: 30, height: 30, borderRadius: RADIUS.pill,
+              background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
+              color: COLORS.white,
+              border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+              fontSize: 13, cursor: 'pointer',
+            }}
+            title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
+          >
+            🎵
+          </button>
+          <button
+            type="button"
+            onClick={() => setMuted(v => !v)}
+            style={{
+              width: 30, height: 30, borderRadius: RADIUS.pill,
+              background: 'rgba(0,0,0,0.3)',
+              color: COLORS.white,
+              border: '1px solid rgba(255,255,255,0.25)',
+              fontSize: 14, cursor: 'pointer',
+            }}
+            title={muted ? '取消静音' : '静音'}
+          >
+            {muted ? '🔇' : '🔊'}
+          </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 16 : 26, alignItems: isMobile ? 'center' : 'flex-start' }}>
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 16 : 26, alignItems: isMobile ? 'center' : 'flex-start', position: 'relative' }}>
+          {/* cash-out style toast for wins */}
+          <WinToast toasts={toasts} />
 
           {/* ---- wheel ---- */}
           <div style={{ flex: '0 0 auto', width: isMobile ? 280 : 360 }}>
             <svg viewBox="0 0 300 300" width="100%">
-              {/* soft shadow + dark outer ring */}
               <circle cx={CX} cy={CY} r={R + 12} fill="rgba(0,0,0,0.25)" />
               <circle cx={CX} cy={CY} r={R + 6} fill={ROULETTE.rim} />
-              {/* sectors */}
-              {WHEEL_ORDER.map((n, i) => (
-                <path key={n} d={sectorPath(i)} fill={numColor(n)} stroke={ROULETTE.rim} strokeWidth="0.8" />
-              ))}
-              {/* two-tone depth: darker inner cone */}
-              <circle cx={CX} cy={CY} r="86" fill="rgba(0,0,0,0.26)" />
-              {/* numbers along the rim, reading outward */}
-              {WHEEL_ORDER.map((n, i) => {
-                const deg = i * 30 + 15
-                const a = rad(-90 + deg)
-                const x = CX + 108 * Math.cos(a)
-                const y = CY + 108 * Math.sin(a)
-                return (
-                  <text key={`t${n}`} x={x.toFixed(1)} y={y.toFixed(1)}
-                    fontSize="23" fontWeight="800" fill={COLORS.white}
-                    fontFamily="'Space Grotesk', sans-serif"
-                    textAnchor="middle" dominantBaseline="central"
-                    transform={`rotate(${deg}, ${x.toFixed(1)}, ${y.toFixed(1)})`}>
-                    {n}
-                  </text>
-                )
-              })}
-              {/* golden ball resting at the inner edge of sector 6 (as in the ref) */}
-              {(() => {
-                const idx = WHEEL_ORDER.indexOf(6)
-                const a = rad(-90 + idx * 30 + 15)
-                return <circle cx={(CX + 72 * Math.cos(a)).toFixed(1)} cy={(CY + 72 * Math.sin(a)).toFixed(1)} r="7" fill={ROULETTE.ball} stroke="rgba(0,0,0,0.35)" strokeWidth="1" />
-              })()}
-              {/* big warm-white hub with spinner cross (dots capping the arms) */}
+              {/* rotating group — sectors + numbers */}
+              <g style={{
+                transform: `rotate(${rotation}deg)`,
+                transformOrigin: `${CX}px ${CY}px`,
+                transition: spinning ? `transform ${SPIN_MS}ms cubic-bezier(0.15,0.55,0.25,1)` : 'none',
+              }}>
+                {WHEEL_ORDER.map((n, i) => (
+                  <path key={n} d={sectorPath(i)} fill={numColor(n)} stroke={ROULETTE.rim} strokeWidth="0.8" />
+                ))}
+                <circle cx={CX} cy={CY} r="86" fill="rgba(0,0,0,0.26)" />
+                {WHEEL_ORDER.map((n, i) => {
+                  const deg = i * 30 + 15
+                  const a = rad(-90 + deg)
+                  const x = CX + 108 * Math.cos(a)
+                  const y = CY + 108 * Math.sin(a)
+                  return (
+                    <text key={`t${n}`} x={x.toFixed(1)} y={y.toFixed(1)}
+                      fontSize="23" fontWeight="800" fill={COLORS.white}
+                      fontFamily="'Space Grotesk', sans-serif"
+                      textAnchor="middle" dominantBaseline="central"
+                      transform={`rotate(${deg}, ${x.toFixed(1)}, ${y.toFixed(1)})`}>
+                      {n}
+                    </text>
+                  )
+                })}
+              </g>
+              {/* fixed golden ball pointer at 12 o'clock — the stopped sector under it is the result */}
+              <circle cx={CX} cy={CY - 74} r="7" fill={ROULETTE.ball} stroke="rgba(0,0,0,0.35)" strokeWidth="1" />
+              {/* static hub */}
               <circle cx={CX} cy={CY} r="56" fill={ROULETTE.hub} />
               <g stroke={ROULETTE.black} strokeWidth="5" strokeLinecap="round">
                 <line x1={CX - 20} y1={CY - 20} x2={CX + 20} y2={CY + 20} />
@@ -173,12 +497,12 @@ export default function MiniRoulette({ balance }) {
           <div style={{ flex: 1, minWidth: 0, position: 'relative', width: '100%', paddingTop: isMobile ? 0 : 26 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ color: COLORS.white, fontSize: 13, fontWeight: 900 }}>
-                <span style={{ opacity: 0.75, fontWeight: 700 }}>Bet: </span>0.00 USD
+                <span style={{ opacity: 0.75, fontWeight: 700 }}>Bet: </span>{totalBet.toFixed(2)} USD
               </span>
               <span style={{ color: COLORS.white, fontSize: 12, fontWeight: 800, textDecoration: 'underline', cursor: 'default' }}>Paytable</span>
             </div>
 
-            <div style={{ border: cellBorder, background: 'rgba(255,255,255,0.02)' }}>
+            <div style={{ border: cellBorder }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)' }}>
                 {ROW_EVEN.map(numCell)}
               </div>
@@ -186,32 +510,39 @@ export default function MiniRoulette({ balance }) {
                 {ROW_ODD.map(numCell)}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)' }}>
-                {OUTSIDE.map(label => {
-                  const dot = label === 'red' ? ROULETTE.red : label === 'black' ? ROULETTE.black : null
+                {OUTSIDE.map(({ key, label }) => {
+                  const dot = key === 'red' ? ROULETTE.red : key === 'black' ? ROULETTE.black : null
+                  const won = winKeys?.has(key)
                   return (
-                    <button key={label} type="button" style={{
-                      border: cellBorder, background: 'transparent',
-                      color: COLORS.white, fontSize: 12, fontWeight: 700,
-                      padding: '6px 0', cursor: 'pointer', minHeight: 46,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      {dot
-                        ? <span style={{ width: 36, height: 36, borderRadius: RADIUS.pill, background: gloss(dot), display: 'inline-block' }} />
-                        : label}
+                    <button key={key} type="button" title={label}
+                      onClick={() => placeBet(key)}
+                      style={{
+                        border: cellBorder,
+                        background: won ? 'rgba(255,179,0,0.18)' : 'transparent',
+                        color: COLORS.white, fontSize: 12, fontWeight: 700,
+                        padding: '6px 0', cursor: spinning ? 'not-allowed' : 'pointer', minHeight: 46,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'background 0.2s',
+                      }}>
+                      <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 36, minHeight: 36 }}>
+                        {dot
+                          ? <span style={{ width: 36, height: 36, borderRadius: RADIUS.pill, background: gloss(dot), display: 'inline-block' }} />
+                          : label}
+                        {bets[key] > 0 && betChip(bets[key])}
+                      </span>
                     </button>
                   )
                 })}
               </div>
             </div>
 
-            {/* Back / Clear left, Rebet right */}
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button type="button" disabled style={pillBtn}>↩ Back</button>
-              <button type="button" disabled style={pillBtn}>✕ Clear</button>
-              <button type="button" disabled style={{ ...pillBtn, marginLeft: 'auto' }}>⟳ Rebet</button>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+              <button type="button" disabled={spinning || !betStack.length} onClick={undoBet} style={pillBtn(!spinning && betStack.length > 0)}>↩ Back</button>
+              <button type="button" disabled={spinning || !totalBet} onClick={clearBets} style={pillBtn(!spinning && totalBet > 0)}>✕ Clear</button>
+              {note && <span style={{ color: ROULETTE.ball, fontSize: 12, fontWeight: 800 }}>{note}</span>}
+              <button type="button" disabled={spinning || !lastBets} onClick={rebet} style={{ ...pillBtn(!spinning && !!lastBets), marginLeft: 'auto' }}>⟳ Rebet</button>
             </div>
 
-            {/* hover player card — invisible at rest */}
             {hoverNum && (
               <div style={{
                 position: 'absolute', top: isMobile ? -8 : 18, right: 0, transform: 'translateY(-100%)',
@@ -231,7 +562,7 @@ export default function MiniRoulette({ balance }) {
           </div>
         </div>
 
-        {/* ---- chip rail band (inset, rounded) + SPIN ---- */}
+        {/* ---- chip rail + SPIN ---- */}
         <div style={{
           margin: isMobile ? '14px 0 0' : '18px 8px 0',
           padding: '10px 18px',
@@ -257,13 +588,15 @@ export default function MiniRoulette({ balance }) {
               </button>
             )
           })}
-          <button type="button" disabled style={{
+          <button type="button" onClick={spin} disabled={spinning || !totalBet} title="SPIN" style={{
             width: 62, height: 62, borderRadius: RADIUS.pill, marginLeft: 14,
             background: `radial-gradient(circle at 40% 32%, #1c8f45, ${ROULETTE.band})`,
             color: COLORS.white,
             border: '2px dashed rgba(255,255,255,0.6)',
             fontSize: 22, fontWeight: 900,
-            cursor: 'not-allowed',
+            cursor: spinning || !totalBet ? 'not-allowed' : 'pointer',
+            opacity: spinning || !totalBet ? 0.55 : 1,
+            transition: 'opacity 0.15s',
           }}>
             ⟳
           </button>
@@ -297,7 +630,7 @@ export default function MiniRoulette({ balance }) {
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
             <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
-              <RoundHistoryBar rounds={FAKE_DRAWS} variant="roulette" />
+              <RoundHistoryBar rounds={draws} variant="roulette" />
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
               {gameCard}
@@ -308,7 +641,7 @@ export default function MiniRoulette({ balance }) {
     )
   }
 
-  // ---- stacked layout (<1024): unchanged ----
+  // ---- stacked layout (<1024) ----
   return (
     <GameLayout title="Team Roulette" emoji="⚽" color={COLORS.green}>
       {gameCard}

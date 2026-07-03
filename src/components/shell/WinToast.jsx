@@ -30,7 +30,7 @@ export default function WinToast({ toasts }) {
           fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap',
           animation: 'shellToastIn 200ms ease-out, shellToastOut 300ms ease-in 2.5s forwards',
         }}>
-          已兑现 {t.mult.toFixed(2)}× <span style={{ color: COLORS.green, fontWeight: 900 }}>+${t.win.toFixed(2)}</span>
+          {t.label ?? `已兑现 ${t.mult.toFixed(2)}×`} <span style={{ color: COLORS.green, fontWeight: 900 }}>+${t.win.toFixed(2)}</span>
         </div>
       ))}
     </div>
