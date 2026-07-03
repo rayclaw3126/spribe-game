@@ -1,20 +1,58 @@
-import { useState } from 'react'
-import GameLayout, { Panel, BetInput, ActionButton } from '../components/GameLayout'
+import { useEffect, useRef, useState } from 'react'
+import GameLayout, { Panel, ActionButton } from '../components/GameLayout'
+import { useIsMobile } from '../hooks/useMediaQuery'
+import ballUrl from '../assets/covers/ball-3d.png'
 
 const COLOR = '#16C784'
+const FILL_TOP = '#5DCAA5'
+const AMBER = '#F59E0B'
 const HOUSE_EDGE = 0.99
 const MAX_MULT = 1000000
+const CLIMB_MS = 1400
+const TICKS = [1, 1.5, 2, 3, 5, 10, 100]
+
+function rand(min, max) {
+  return min + Math.random() * (max - min)
+}
+
+// Shared log mapping for fill, ball and target line: 1× at the bottom,
+// 10× at 80% height, everything above compressed asymptotically to the top.
+function meterNorm(v) {
+  if (v <= 1) return 0
+  const l = Math.log10(v)
+  if (l <= 1) return l * 0.8
+  return 0.8 + 0.2 * (1 - 1 / l)
+}
+
+function easeOutCubic(p) {
+  return 1 - Math.pow(1 - p, 3)
+}
 
 export default function Limbo({ balance, setBalance }) {
+  const isMobile = useIsMobile()
+  const canvasRef = useRef(null)
+  const ballRef = useRef(null)
+  const frameRef = useRef(null)
+  const phaseRef = useRef('idle')          // idle | climbing | done
+  const animRef = useRef(null)             // { to, start, bet, t }
+  const multRef = useRef(1)
+  const targetRef = useRef(2)
+  const particlesRef = useRef([])
+  const burstRef = useRef(false)           // pending win burst
+  const bounceRef = useRef(0)              // loss bounce start timestamp
+  const isMobileRef = useRef(false)
+
   const [bet, setBet] = useState(10)
   const [target, setTarget] = useState(2.0)
   const [rolling, setRolling] = useState(false)
   const [result, setResult] = useState(null)
-  const [animMult, setAnimMult] = useState(null)
+  const [multiplier, setMultiplier] = useState(1)
 
   const t = Math.max(1.01, target || 1.01)
   const winChance = Math.min(99, (HOUSE_EDGE / t) * 100)
   const payout = parseFloat((bet * t).toFixed(2))
+  targetRef.current = t
+  isMobileRef.current = isMobile
 
   function play() {
     if (bet > balance || rolling) return
@@ -23,96 +61,322 @@ export default function Limbo({ balance, setBalance }) {
     setRolling(true)
     const r = Math.random()
     const finalMult = Math.min(MAX_MULT, Math.max(1, parseFloat((HOUSE_EDGE / r).toFixed(2))))
-    let ticks = 0
-    const id = setInterval(() => {
-      setAnimMult(parseFloat((1 + Math.random() * Math.min(finalMult * 1.3, 20)).toFixed(2)))
-      ticks++
-      if (ticks >= 16) {
-        clearInterval(id)
-        setAnimMult(finalMult)
-        const win = finalMult >= t
-        const profit = win ? parseFloat((bet * t).toFixed(2)) : 0
-        if (win) setBalance(b => parseFloat((b + profit).toFixed(2)))
-        setResult({ mult: finalMult, win, profit })
-        setRolling(false)
-      }
-    }, 55)
+    animRef.current = { to: finalMult, start: performance.now(), bet, t }
+    particlesRef.current = []
+    burstRef.current = false
+    bounceRef.current = 0
+    multRef.current = 1
+    setMultiplier(1)
+    phaseRef.current = 'climbing'
   }
 
-  const displayMult = animMult !== null ? animMult : 1.00
+  function settle() {
+    const { to, bet: b, t: tt } = animRef.current
+    phaseRef.current = 'done'
+    multRef.current = to
+    setMultiplier(to)
+    const win = to >= tt
+    const profit = win ? parseFloat((b * tt).toFixed(2)) : 0
+    if (win) setBalance(bb => parseFloat((bb + profit).toFixed(2)))
+    setResult({ mult: to, win, profit })
+    setRolling(false)
+    if (win) burstRef.current = true
+    else bounceRef.current = performance.now()
+  }
+
+  function drawMeter() {
+    const cv = canvasRef.current
+    if (!cv) return
+    const ctx = cv.getContext('2d')
+    const dpr = window.devicePixelRatio || 1
+    const W = Math.round(cv.clientWidth * dpr)
+    const H = Math.round(cv.clientHeight * dpr)
+    if (!W || !H) return
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H }
+    const mobile = isMobileRef.current
+    const now = performance.now()
+    const mult = multRef.current
+    const tv = targetRef.current
+
+    ctx.fillStyle = '#0a1119'
+    ctx.fillRect(0, 0, W, H)
+
+    const padY = 28 * dpr
+    const trackW = (mobile ? 40 : 54) * dpr
+    const trackX = W * (mobile ? 0.26 : 0.30)
+    const top = padY
+    const bottom = H - padY
+    const innerH = bottom - top
+    const yOf = v => bottom - meterNorm(v) * innerH
+
+    // Track
+    ctx.beginPath()
+    ctx.roundRect(trackX, top, trackW, innerH, trackW / 2)
+    ctx.fillStyle = '#111b27'
+    ctx.fill()
+    ctx.strokeStyle = '#232c39'
+    ctx.lineWidth = 1.5 * dpr
+    ctx.stroke()
+
+    // Scale ticks — same log mapping as fill and target line.
+    ctx.font = `700 ${10.5 * dpr}px 'Space Grotesk', sans-serif`
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    TICKS.forEach(v => {
+      const y = yOf(v)
+      ctx.strokeStyle = '#243142'
+      ctx.lineWidth = 1.5 * dpr
+      ctx.beginPath()
+      ctx.moveTo(trackX - 8 * dpr, y)
+      ctx.lineTo(trackX, y)
+      ctx.stroke()
+      ctx.fillStyle = mult >= v ? '#86efac' : '#7d8a99'
+      ctx.fillText(`${v}×`, trackX - 12 * dpr, y)
+    })
+
+    // Fill — clipped to the rounded track, green gradient climbing with the result.
+    const yFill = yOf(mult)
+    ctx.save()
+    ctx.beginPath()
+    ctx.roundRect(trackX, top, trackW, innerH, trackW / 2)
+    ctx.clip()
+    const grad = ctx.createLinearGradient(0, bottom, 0, top)
+    grad.addColorStop(0, COLOR)
+    grad.addColorStop(1, FILL_TOP)
+    ctx.fillStyle = grad
+    ctx.fillRect(trackX, yFill, trackW, bottom - yFill + trackW)
+    if (mult > 1.001) {
+      ctx.strokeStyle = FILL_TOP
+      ctx.lineWidth = 2.5 * dpr
+      ctx.shadowColor = COLOR
+      ctx.shadowBlur = 14 * dpr
+      ctx.beginPath()
+      ctx.moveTo(trackX + 3 * dpr, yFill)
+      ctx.lineTo(trackX + trackW - 3 * dpr, yFill)
+      ctx.stroke()
+      ctx.shadowBlur = 0
+    }
+    ctx.restore()
+
+    // Target line — amber, positioned by the same mapping.
+    const yT = Math.max(top + 8 * dpr, yOf(tv))
+    ctx.strokeStyle = AMBER
+    ctx.lineWidth = 2 * dpr
+    ctx.shadowColor = AMBER
+    ctx.shadowBlur = 6 * dpr
+    ctx.beginPath()
+    ctx.moveTo(trackX - 6 * dpr, yT)
+    ctx.lineTo(trackX + trackW + 6 * dpr, yT)
+    ctx.stroke()
+    ctx.shadowBlur = 0
+    ctx.font = `800 ${11.5 * dpr}px 'Space Grotesk', sans-serif`
+    ctx.textAlign = 'left'
+    ctx.fillStyle = AMBER
+    ctx.fillText(`目标 ${tv.toFixed(2)}×`, trackX + trackW + 12 * dpr, yT)
+
+    // Grass-litter trail while climbing (same particle look as Aviator).
+    const ballX = trackX + trackW / 2
+    if (phaseRef.current === 'climbing') {
+      particlesRef.current.push({
+        x: ballX + rand(-14, 14) * dpr,
+        y: yFill + rand(6, 20) * dpr,
+        vx: rand(-1.2, 1.2) * dpr,
+        vy: rand(0.4, 1.4) * dpr,
+        life: 1,
+        color: Math.random() > 0.5 ? '#4ade80' : '#2f9e5a',
+      })
+    }
+
+    // Win burst — one-time green/gold debris from the ball position.
+    if (burstRef.current) {
+      burstRef.current = false
+      for (let i = 0; i < 30; i++) {
+        const a = (Math.PI * 2 * i) / 30 + rand(-0.28, 0.28)
+        const sp = rand(2.5, 6) * dpr
+        particlesRef.current.push({
+          x: ballX,
+          y: yFill,
+          vx: Math.cos(a) * sp,
+          vy: Math.sin(a) * sp - rand(0, 1.5) * dpr,
+          g: 0.14 * dpr,
+          life: 1,
+          decay: 0.016,
+          size: rand(3, 5) * dpr,
+          color: Math.random() > 0.5 ? '#4ade80' : '#facc15',
+        })
+      }
+    }
+
+    particlesRef.current = particlesRef.current
+      .map(p => ({ ...p, x: p.x + p.vx, y: p.y + p.vy, vy: p.vy + (p.g || 0), life: p.life - (p.decay || 0.025) }))
+      .filter(p => p.life > 0)
+    particlesRef.current.forEach(p => {
+      ctx.globalAlpha = p.life
+      ctx.fillStyle = p.color
+      const w = p.size || 4 * dpr
+      const h = p.size || 2 * dpr
+      ctx.fillRect(p.x, p.y, w, h)
+    })
+    ctx.globalAlpha = 1
+
+    // Ball — rides the fill top; gentle bob when idle, dip-and-spring on a loss.
+    let ballY = yFill
+    if (phaseRef.current === 'idle') ballY += Math.sin(now / 600) * 3 * dpr
+    if (bounceRef.current) {
+      const p = (now - bounceRef.current) / 650
+      if (p < 1) ballY += Math.sin(p * Math.PI) * (1 - p * 0.4) * 22 * dpr
+      else bounceRef.current = 0
+    }
+    const img = ballRef.current
+    const r = (mobile ? 16 : 21) * dpr
+    if (img?.complete) {
+      ctx.save()
+      ctx.translate(ballX, ballY)
+      if (phaseRef.current === 'climbing') ctx.rotate(now / 240)
+      ctx.drawImage(img, -r, -r, r * 2, r * 2)
+      ctx.restore()
+    }
+  }
+
+  useEffect(() => {
+    const img = new Image()
+    img.src = ballUrl
+    ballRef.current = img
+
+    const animate = now => {
+      if (phaseRef.current === 'climbing' && animRef.current) {
+        const p = Math.min(1, (now - animRef.current.start) / CLIMB_MS)
+        const v = 1 + (animRef.current.to - 1) * easeOutCubic(p)
+        multRef.current = v
+        setMultiplier(Number(v.toFixed(2)))
+        if (p >= 1) settle()
+      }
+      drawMeter()
+      frameRef.current = requestAnimationFrame(animate)
+    }
+    frameRef.current = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(frameRef.current)
+    // The meter loop owns round settlement through refs; restarting it on render would duplicate frames.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const isWin = result?.win
 
   return (
     <GameLayout title="Odds Climb" emoji="📈" color={COLOR}
       sidebar={
-        <Panel>
-          <BetInput bet={bet} setBet={setBet}
-            onHalf={() => setBet(b => Math.max(1, Math.floor(b / 2)))}
-            onDouble={() => setBet(b => b * 2)}
-            disabled={rolling}
-          />
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
-              Target Odds
-            </label>
-            <input type="number" min="1.01" step="0.01" value={target}
-              onChange={e => setTarget(Math.max(1.01, Number(e.target.value)))}
-              disabled={rolling}
-              style={{ width: '100%', padding: '10px 14px', borderRadius: 10,
-                border: '1.5px solid var(--border)', fontSize: 15, fontWeight: 600,
-                background: 'var(--surface2)', color: 'var(--text)' }}
-            />
-            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-              {[1.5, 2, 5, 10].map(v => (
-                <button key={v} onClick={() => setTarget(v)} disabled={rolling} style={{
-                  flex: 1, padding: '6px', borderRadius: 8, fontSize: 12, fontWeight: 700,
-                  background: 'var(--bg2)', color: 'var(--text2)', border: '1.5px solid var(--border)' }}>{v}×</button>
-              ))}
-            </div>
-          </div>
-          <div style={{ background: 'var(--bg2)', borderRadius: 12, padding: '12px 14px',
-            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
-            <StatBox label="Win Chance" value={`${winChance.toFixed(1)}%`} color={COLOR} />
-            <StatBox label="Multiplier" value={`${t.toFixed(2)}×`} color='#10B981' />
-            <StatBox label="Payout" value={`$${payout.toFixed(2)}`} color='#F59E0B' />
-            <StatBox label="Profit" value={`$${(payout - bet).toFixed(2)}`} color={COLOR} />
-          </div>
-          <ActionButton onClick={play} color={COLOR} disabled={rolling || bet > balance || bet < 1}>
-            {rolling ? '📈 Climbing...' : '⚽ Kick Off'}
-          </ActionButton>
-          {result && (
-            <div style={{ marginTop: 14, padding: '12px 16px', borderRadius: 12,
-              background: result.win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-              color: result.win ? '#6EE7B7' : '#FCA5A5',
-              fontWeight: 600, fontSize: 14, animation: 'winPop 0.4s ease' }}>
-              {result.win ? '🎉' : '💔'} Final {result.mult.toFixed(2)}× — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Below target'}
-            </div>
-          )}
-        </Panel>
+        <SideControls
+          bet={bet} setBet={setBet} target={target} setTarget={setTarget}
+          rolling={rolling} balance={balance} play={play} result={result}
+          t={t} winChance={winChance} payout={payout}
+        />
       }
     >
-      <Panel style={{ minHeight: 320, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontSize: 72, fontWeight: 800, lineHeight: 1,
-          fontFamily: "'Space Grotesk', sans-serif",
-          color: result ? (isWin ? '#10B981' : '#EF4444') : COLOR,
-          animation: rolling ? 'pulse 0.3s ease-in-out infinite' : result ? 'winPop 0.4s ease' : 'float 3s ease-in-out infinite',
-          marginBottom: 12 }}>
-          {displayMult.toFixed(2)}×
+      <Panel style={{ background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden' }}>
+        <style>{`
+          @keyframes ocFlash {
+            0%, 100% { color: #EF4444; }
+            25%, 75% { color: #ff9d94; }
+            50% { color: #EF4444; }
+          }
+        `}</style>
+        <div style={{ position: 'relative' }}>
+          <canvas ref={canvasRef} style={{ width: '100%', height: isMobile ? 300 : 420, display: 'block', borderRadius: 12 }} />
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0, right: isMobile ? '2%' : '8%',
+            width: isMobile ? 150 : 220,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            pointerEvents: 'none', textAlign: 'center',
+          }}>
+            <div style={{
+              fontSize: isMobile ? 40 : 64, fontWeight: 800, lineHeight: 1,
+              fontFamily: "'Space Grotesk', sans-serif",
+              color: result ? (isWin ? '#10B981' : '#EF4444') : COLOR,
+              animation: result ? (isWin ? 'winPop 0.4s ease' : 'ocFlash 0.6s ease') : 'none',
+              marginBottom: 12,
+            }}>
+              {multiplier.toFixed(2)}×
+            </div>
+            <p style={{ color: '#7d8a99', fontSize: 13, lineHeight: 1.5 }}>
+              {rolling ? 'Odds climbing...' : result
+                ? (isWin ? `Reached ${result.mult.toFixed(2)}× — above your ${t.toFixed(2)}× target!` : `Stopped at ${result.mult.toFixed(2)}× — needed ${t.toFixed(2)}×`)
+                : 'Set target odds, kick off — win if final ≥ your target'}
+            </p>
+          </div>
         </div>
-        <p style={{ color: 'var(--text3)', fontSize: 14, textAlign: 'center' }}>
-          {rolling ? 'Odds climbing...' : result
-            ? (isWin ? `Reached ${result.mult.toFixed(2)}× — above your ${t.toFixed(2)}× target!` : `Stopped at ${result.mult.toFixed(2)}× — needed ${t.toFixed(2)}×`)
-            : 'Set target odds, kick off — win if final ≥ your target'}
-        </p>
       </Panel>
     </GameLayout>
+  )
+}
+
+const darkInput = {
+  width: '100%', padding: '10px 14px', borderRadius: 10, boxSizing: 'border-box',
+  border: '1.5px solid #243142', fontSize: 15, fontWeight: 600,
+  background: '#0a1119', color: '#e8edf2',
+}
+const darkChip = {
+  flex: 1, padding: '6px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+  background: '#1a2230', color: '#8a97a6', border: '1.5px solid #243142',
+}
+
+function SideControls({ bet, setBet, target, setTarget, rolling, balance, play, result, t, winChance, payout }) {
+  return (
+    <Panel style={{ background: '#101923', borderColor: '#243142', padding: 18 }}>
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Bet Amount</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input type="number" min="1" value={bet}
+            onChange={e => setBet(Math.max(1, Number(e.target.value)))}
+            disabled={rolling}
+            style={{ ...darkInput, flex: 1, width: 'auto', minWidth: 0, minHeight: 40 }}
+          />
+          <button onClick={() => setBet(b => Math.max(1, Math.floor(b / 2)))} disabled={rolling}
+            style={{ ...darkChip, flex: '0 0 auto', padding: '10px 12px', fontSize: 13 }}>½</button>
+          <button onClick={() => setBet(b => b * 2)} disabled={rolling}
+            style={{ ...darkChip, flex: '0 0 auto', padding: '10px 12px', fontSize: 13 }}>2×</button>
+        </div>
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Target Odds</label>
+        <input type="number" min="1.01" step="0.01" value={target}
+          onChange={e => setTarget(Math.max(1.01, Number(e.target.value)))}
+          disabled={rolling}
+          style={darkInput}
+        />
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          {[1.5, 2, 5, 10].map(v => (
+            <button key={v} onClick={() => setTarget(v)} disabled={rolling}
+              style={{ ...darkChip, borderColor: t === v ? 'rgba(22,199,132,0.5)' : '#243142', color: t === v ? COLOR : '#8a97a6' }}>{v}×</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ background: '#1a2230', border: '1px solid #232c39', borderRadius: 12, padding: '12px 14px',
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+        <StatBox label="Win Chance" value={`${winChance.toFixed(1)}%`} color={COLOR} />
+        <StatBox label="Multiplier" value={`${t.toFixed(2)}×`} color='#10B981' />
+        <StatBox label="Payout" value={`$${payout.toFixed(2)}`} color={AMBER} />
+        <StatBox label="Profit" value={`$${(payout - bet).toFixed(2)}`} color={COLOR} />
+      </div>
+      <ActionButton onClick={play} color={COLOR} disabled={rolling || bet > balance || bet < 1}>
+        {rolling ? '📈 Climbing...' : '⚽ Kick Off'}
+      </ActionButton>
+      {result && (
+        <div style={{ marginTop: 14, padding: '12px 16px', borderRadius: 12,
+          background: result.win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+          border: `1px solid ${result.win ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
+          color: result.win ? '#6EE7B7' : '#FCA5A5',
+          fontWeight: 600, fontSize: 14, animation: 'winPop 0.4s ease' }}>
+          {result.win ? '🎉' : '💔'} Final {result.mult.toFixed(2)}× — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Below target'}
+        </div>
+      )}
+    </Panel>
   )
 }
 
 function StatBox({ label, value, color }) {
   return (
     <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 11, color: '#7d8a99', marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: 15, fontWeight: 700, color }}>{value}</div>
     </div>
   )

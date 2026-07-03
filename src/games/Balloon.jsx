@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import GameLayout, { Panel, ActionButton } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import ballUrl from '../assets/covers/ball-3d.png'
+import bgmUrl from '../assets/covers/bgm.mp3'
 
 const GREEN = '#16C784'
 const ROBOTS = ['Striker88', 'GoalRush', 'PitchPro', 'VARKing', 'Crossbar', 'Derby7', 'UltraBet', 'FastBoot', 'Sweeper', 'TopBins', 'NorthEnd', 'CapTen']
@@ -61,6 +62,7 @@ export default function Balloon({ balance, setBalance }) {
   const burstRef = useRef(false)
   const flashRef = useRef(0)
   const audioRef = useRef({ ctx: null, muted: false, engine: null })
+  const bgmRef = useRef({ audio: null })
 
   const [bet, setBet] = useState(10)
   const [phase, setPhase] = useState('betting')
@@ -73,6 +75,7 @@ export default function Balloon({ balance, setBalance }) {
   const [players, setPlayers] = useState(() => makeBots())
   const [online, setOnline] = useState(() => Math.floor(rand(820, 980)))
   const [muted, setMuted] = useState(false)
+  const [bgmOn, setBgmOn] = useState(false)
   const [message, setMessage] = useState('')
 
   const displayPlayers = useMemo(() => {
@@ -194,6 +197,23 @@ export default function Balloon({ balance, setBalance }) {
     noise.stop(ctx.currentTime + 0.45)
     boom.stop(ctx.currentTime + 0.5)
     whistle.stop(ctx.currentTime + 0.5)
+  }
+
+  // Background music — real looping casino track (HTML Audio), independent of SFX mute.
+  function startBgm() {
+    if (bgmRef.current.audio) return
+    const audio = new Audio(bgmUrl)
+    audio.loop = true
+    audio.volume = 0.25            // quiet — stays under the SFX (ding/crash)
+    audio.play().catch(() => {})   // ignore autoplay rejection (starts on the click gesture)
+    bgmRef.current.audio = audio
+  }
+
+  function stopBgm() {
+    if (bgmRef.current.audio) {
+      bgmRef.current.audio.pause()
+      bgmRef.current.audio = null
+    }
   }
 
   function resetRound() {
@@ -390,6 +410,14 @@ export default function Balloon({ balance, setBalance }) {
   }, [muted])
 
   useEffect(() => {
+    // BGM starts on user interaction (BGM button click) — respects autoplay policy.
+    if (bgmOn) startBgm()
+    else stopBgm()
+    // BGM nodes are managed imperatively through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgmOn])
+
+  useEffect(() => {
     const onlineTimer = setInterval(() => {
       setOnline(v => Math.max(600, Math.min(1200, v + Math.floor(rand(-7, 9)))))
     }, 1500)
@@ -436,6 +464,7 @@ export default function Balloon({ balance, setBalance }) {
       clearInterval(countdownTimer)
       cancelAnimationFrame(frameRef.current)
       stopEngine()
+      stopBgm()
     }
     // The arena loop owns round transitions through refs; restarting it on render would duplicate timers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -590,6 +619,25 @@ export default function Balloon({ balance, setBalance }) {
               </span>
             ))}
           </div>
+
+          {/* BGM toggle — canvas top-right (left of mute) */}
+          <button
+            type="button"
+            onClick={() => setBgmOn(v => !v)}
+            style={{
+              position: 'absolute', top: 10, right: 58,
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)',
+              color: bgmOn ? GREEN : '#7d8a99',
+              border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : '#232c39'}`,
+              fontSize: 16,
+            }}
+            title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
+          >
+            🎵
+          </button>
 
           {/* Mute — canvas top-right */}
           <button
