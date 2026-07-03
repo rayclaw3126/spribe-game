@@ -1,7 +1,10 @@
-export default function GameLayout({ title, emoji, color = '#7C3AED', children, sidebar }) {
+import { useIsMobile } from '../hooks/useMediaQuery'
+
+export default function GameLayout({ title, emoji, color = '#16C784', children, sidebar }) {
+  const isMobile = useIsMobile()
   return (
     <div style={{
-      maxWidth: 960, margin: '0 auto', padding: '32px 24px',
+      maxWidth: 960, margin: '0 auto', padding: isMobile ? '16px 12px' : '32px 24px',
       animation: 'fadeIn 0.4s ease',
     }}>
       {/* Game title bar */}
@@ -9,26 +12,26 @@ export default function GameLayout({ title, emoji, color = '#7C3AED', children, 
         display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28,
       }}>
         <div style={{
-          width: 48, height: 48, borderRadius: 14,
+          width: isMobile ? 40 : 48, height: isMobile ? 40 : 48, borderRadius: 14,
           background: color + '20',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 24,
         }}>{emoji}</div>
         <h2 style={{
           fontFamily: "'Space Grotesk', sans-serif",
-          fontWeight: 800, fontSize: 26, color: 'var(--text)',
+          fontWeight: 800, fontSize: isMobile ? 21 : 26, color: 'var(--text)',
         }}>{title}</h2>
       </div>
 
       {/* Content */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: sidebar ? '1fr 300px' : '1fr',
-        gap: 20,
+        gridTemplateColumns: isMobile ? '1fr' : (sidebar ? '1fr 300px' : '1fr'),
+        gap: isMobile ? 14 : 20,
         alignItems: 'start',
       }}>
-        <div>{children}</div>
-        {sidebar && <div>{sidebar}</div>}
+        <div style={{ minWidth: 0 }}>{children}</div>
+        {sidebar && <div style={{ minWidth: 0 }}>{sidebar}</div>}
       </div>
     </div>
   )
@@ -41,6 +44,7 @@ export function Panel({ children, style = {} }) {
       border: '1.5px solid var(--border)',
       borderRadius: 'var(--radius-lg)',
       padding: 24,
+      boxSizing: 'border-box',
       boxShadow: 'var(--shadow)',
       ...style,
     }}>
@@ -61,7 +65,7 @@ export function BetInput({ bet, setBet, onHalf, onDouble, disabled }) {
           onChange={e => setBet(Math.max(1, Number(e.target.value)))}
           disabled={disabled}
           style={{
-            flex: 1, padding: '10px 14px', borderRadius: 10,
+            flex: 1, minWidth: 0, padding: '10px 14px', borderRadius: 10, minHeight: 40, boxSizing: 'border-box',
             border: '1.5px solid var(--border)', fontSize: 15, fontWeight: 600,
             background: 'var(--surface2)', color: 'var(--text)',
           }}
@@ -81,7 +85,7 @@ export function BetInput({ bet, setBet, onHalf, onDouble, disabled }) {
   )
 }
 
-export function ActionButton({ onClick, disabled, children, color = '#7C3AED', variant = 'primary' }) {
+export function ActionButton({ onClick, disabled, children, color = '#16C784', variant = 'primary' }) {
   const base = {
     width: '100%', padding: '14px', borderRadius: 12,
     fontWeight: 700, fontSize: 16, cursor: disabled ? 'not-allowed' : 'pointer',
@@ -114,9 +118,9 @@ export function ResultBadge({ result, win, profit }) {
   return (
     <div style={{
       padding: '14px 20px', borderRadius: 14,
-      background: win ? '#D1FAE5' : '#FEE2E2',
-      border: `2px solid ${win ? '#6EE7B7' : '#FECACA'}`,
-      color: win ? '#065F46' : '#991B1B',
+      background: win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+      border: `2px solid ${win ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
+      color: win ? '#6EE7B7' : '#FCA5A5',
       fontWeight: 700, fontSize: 15,
       display: 'flex', alignItems: 'center', gap: 10,
       animation: 'winPop 0.4s ease',

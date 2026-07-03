@@ -1,47 +1,80 @@
+import coverBreakaway from '../assets/covers/cover-breakaway.png'
+import coverDribble from '../assets/covers/cover-dribble.png'
+import coverFreeKick from '../assets/covers/cover-free-kick.png'
+import coverGoal from '../assets/covers/cover-goal.png'
+import coverLongShot from '../assets/covers/cover-long-shot.png'
+import coverRatingHiLo from '../assets/covers/cover-rating-hi-lo.png'
+import coverTeamKeno from '../assets/covers/cover-team-keno.png'
+import coverTotalGoals from '../assets/covers/cover-total-goals.png'
+import coverOddsClimb from '../assets/covers/cover-odds-climb.png'
+import coverPenaltyWheel from '../assets/covers/cover-penalty-wheel.png'
+import coverStreakRoll from '../assets/covers/cover-streak-roll.png'
+import coverStrikerTower from '../assets/covers/cover-striker-tower.png'
+
 const GAMES = [
-  { id: 'Aviator',  emoji: '✈️',  name: 'Aviator',  desc: 'Cash out before it flies away!', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)' },
-  { id: 'Dice',     emoji: '🎲',  name: 'Dice',     desc: 'Roll the dice, beat the odds.',   color: '#2563EB', bg: 'linear-gradient(135deg, #DBEAFE, #BFDBFE)' },
-  { id: 'Plinko',   emoji: '🔮',  name: 'Plinko',   desc: 'Drop the ball, win big!',         color: '#D97706', bg: 'linear-gradient(135deg, #FEF3C7, #FDE68A)' },
-  { id: 'Goal',     emoji: '⚽',  name: 'Goal',     desc: 'Score past the goalkeeper!',      color: '#059669', bg: 'linear-gradient(135deg, #D1FAE5, #A7F3D0)' },
-  { id: 'HiLo',     emoji: '🃏',  name: 'Hi-Lo',    desc: 'Higher or lower? You decide.',    color: '#DC2626', bg: 'linear-gradient(135deg, #FEE2E2, #FECACA)' },
-  { id: 'Mines',    emoji: '💣',  name: 'Mines',    desc: 'Dodge the mines, grab the gems.', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)' },
-  { id: 'Keno',     emoji: '🎯',  name: 'Keno',     desc: 'Pick your lucky numbers!',        color: '#DB2777', bg: 'linear-gradient(135deg, #FCE7F3, #FBCFE8)' },
-  { id: 'Balloon',  emoji: '🎈',  name: 'Balloon',  desc: 'Inflate it, don\'t pop it!',     color: '#EA580C', bg: 'linear-gradient(135deg, #FFEDD5, #FED7AA)' },
+  { id: 'Aviator',  emoji: '🏃',  name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
+  { id: 'Dice',     emoji: '⚽',  name: 'Total Goals',     desc: 'Over or under? Call the score.',   color: '#2563EB', bg: 'linear-gradient(135deg, #DBEAFE, #BFDBFE)', cover: coverTotalGoals },
+  { id: 'Plinko',   emoji: '⚽',  name: 'Free Kick',   desc: 'Curl it into the zone!',         color: '#D97706', bg: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', cover: coverFreeKick },
+  { id: 'Goal',     emoji: '⚽',  name: 'Goal',     desc: 'Score past the goalkeeper!',      color: '#059669', bg: 'linear-gradient(135deg, #D1FAE5, #A7F3D0)', cover: coverGoal },
+  { id: 'HiLo',     emoji: '📊',  name: 'Rating Hi-Lo',    desc: 'Higher or lower rating?',    color: '#DC2626', bg: 'linear-gradient(135deg, #FEE2E2, #FECACA)', cover: coverRatingHiLo },
+  { id: 'Mines',    emoji: '👟',  name: 'Dribble',    desc: 'Beat defenders, avoid tackles.', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverDribble },
+  { id: 'Keno',     emoji: '⚽',  name: 'Team Keno', desc: 'Pick the winning teams!',        color: '#DB2777', bg: 'linear-gradient(135deg, #FCE7F3, #FBCFE8)', cover: coverTeamKeno },
+  { id: 'Balloon',  emoji: '🥅',  name: 'Long Shot',  desc: "Shoot far, don't fly out!",     color: '#EA580C', bg: 'linear-gradient(135deg, #FFEDD5, #FED7AA)', cover: coverLongShot },
+  { id: 'Limbo',    emoji: '📈',  name: 'Odds Climb', desc: 'Set target odds, kick off to climb!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverOddsClimb },
+  { id: 'PenaltyWheel', emoji: '⚽', name: 'Penalty Wheel', desc: 'Spin the wheel, land a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverPenaltyWheel },
+  { id: 'StreakRoll', emoji: '🎯', name: 'Streak Roll', desc: 'Roll the strip, stop on a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll },
+  { id: 'Tower', emoji: '🏆', name: 'Striker Tower', desc: 'Climb the tower, dodge defenders!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStrikerTower },
 ]
 
 export default function Lobby({ onSelect, balance }) {
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 24px' }}>
-      {/* Hero */}
-      <div style={{ textAlign: 'center', marginBottom: 56, animation: 'fadeIn 0.6s ease' }}>
-        <div style={{ fontSize: 56, marginBottom: 12, animation: 'float 3s ease-in-out infinite' }}>💎</div>
+    <div style={{ maxWidth: 1120, margin: '0 auto', padding: '32px 24px 40px', color: '#e8edf2' }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 22,
+      }}>
         <h1 style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
           fontFamily: "'Space Grotesk', sans-serif",
-          fontWeight: 800, fontSize: 48, letterSpacing: '-1.5px',
-          background: 'linear-gradient(135deg, #7C3AED, #A855F7, #EC4899)',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          marginBottom: 12,
-        }}>Welcome to Spribe Gems</h1>
-        <p style={{ fontSize: 18, color: 'var(--text2)', maxWidth: 500, margin: '0 auto', lineHeight: 1.6 }}>
-          8 premium mini-games. Pure fun, zero stress. Pick your game and play!
-        </p>
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 20,
-          background: 'linear-gradient(135deg, #7C3AED22, #A855F722)',
-          border: '1px solid #DDD6FE', borderRadius: 50, padding: '10px 24px',
+          fontWeight: 800,
+          fontSize: 28,
+          color: '#e8edf2',
+          margin: 0,
         }}>
-          <span style={{ fontSize: 18 }}>💰</span>
-          <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--primary)' }}>
-            Balance: ${balance.toFixed(2)}
-          </span>
+          <span style={{ color: '#16c784', fontSize: 24 }}>⚽</span>
+          电子游戏
+        </h1>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {['热门', '全部', '新游'].map((chip, index) => {
+            const active = index === 0
+            return (
+              <button key={chip} type="button" style={{
+                background: active ? '#16c784' : '#1a2230',
+                color: active ? '#06251a' : '#8a97a6',
+                border: `1px solid ${active ? '#16c784' : '#232c39'}`,
+                borderRadius: 999,
+                padding: '8px 14px',
+                fontSize: 13,
+                fontWeight: 800,
+              }}>
+                {chip}
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      {/* Game Grid */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-        gap: 20,
+        gap: 16,
       }}>
         {GAMES.map((g, i) => (
           <GameCard key={g.id} game={g} index={i} onSelect={onSelect} />
@@ -49,7 +82,7 @@ export default function Lobby({ onSelect, balance }) {
       </div>
 
       {/* Footer note */}
-      <p style={{ textAlign: 'center', color: 'var(--text3)', fontSize: 13, marginTop: 48 }}>
+      <p style={{ textAlign: 'center', color: '#7d8a99', fontSize: 13, marginTop: 42 }}>
         🎮 All games use demo balance — play responsibly and have fun!
       </p>
     </div>
@@ -61,60 +94,63 @@ function GameCard({ game, index, onSelect }) {
     <button
       onClick={() => onSelect(game.id)}
       style={{
-        background: 'var(--surface)',
-        border: '1.5px solid var(--border)',
-        borderRadius: 'var(--radius-lg)',
-        padding: 0, overflow: 'hidden',
+        background: '#1a2230',
+        border: '1px solid #232c39',
+        borderRadius: 12,
+        padding: 18,
         textAlign: 'left', cursor: 'pointer',
-        transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
+        transition: 'transform 0.2s, border-color 0.2s, background 0.2s',
         animation: `fadeIn 0.5s ease ${index * 0.06}s both`,
-        boxShadow: 'var(--shadow)',
+        minHeight: 178,
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.transform = 'translateY(-4px)'
-        e.currentTarget.style.boxShadow = 'var(--shadow-lg)'
-        e.currentTarget.style.borderColor = game.color + '55'
+        e.currentTarget.style.transform = 'translateY(-3px)'
+        e.currentTarget.style.borderColor = '#3a4657'
+        e.currentTarget.style.background = '#1d2736'
       }}
       onMouseLeave={e => {
         e.currentTarget.style.transform = 'translateY(0)'
-        e.currentTarget.style.boxShadow = 'var(--shadow)'
-        e.currentTarget.style.borderColor = 'var(--border)'
+        e.currentTarget.style.borderColor = '#232c39'
+        e.currentTarget.style.background = '#1a2230'
       }}
     >
-      {/* Top color band */}
-      <div style={{
-        background: game.bg, height: 100,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 48, position: 'relative',
-      }}>
-        <span style={{ animation: 'float 3s ease-in-out infinite', display: 'block' }}>
-          {game.emoji}
-        </span>
+      {game.cover ? (
         <div style={{
-          position: 'absolute', top: 10, right: 10,
-          background: game.color, color: '#fff',
-          fontSize: 10, fontWeight: 700, borderRadius: 6, padding: '3px 8px',
-          letterSpacing: '0.5px', textTransform: 'uppercase',
-        }}>PLAY</div>
-      </div>
-      {/* Info */}
-      <div style={{ padding: '16px 18px 18px' }}>
-        <div style={{ fontWeight: 700, fontSize: 17, color: 'var(--text)', marginBottom: 4 }}>
-          {game.name}
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>
-          {game.desc}
-        </div>
-        <div style={{
-          marginTop: 14,
-          background: game.color + '15',
-          color: game.color,
-          fontWeight: 600, fontSize: 13,
-          padding: '8px 14px', borderRadius: 10,
-          textAlign: 'center',
+          margin: '-18px -18px 16px', height: 120, overflow: 'hidden',
+          borderRadius: '12px 12px 0 0',
         }}>
-          Play Now →
+          <img src={game.cover} alt={game.name} style={{
+            width: '100%', height: '100%', objectFit: 'cover', display: 'block',
+          }} />
         </div>
+      ) : (
+        <div style={{
+          width: 52,
+          height: 52,
+          borderRadius: 12,
+          background: '#232c39',
+          border: '1px solid #2b3543',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#16c784',
+          fontSize: 26,
+          marginBottom: 16,
+        }}>
+          {game.emoji}
+        </div>
+      )}
+      <div style={{ fontWeight: 800, fontSize: 17, color: '#e8edf2', marginBottom: 6 }}>
+        {game.name}
+      </div>
+      <div style={{ fontSize: 13, color: '#8a97a6', lineHeight: 1.5, minHeight: 40 }}>
+        {game.desc}
+      </div>
+      <div style={{
+        marginTop: 16,
+        color: '#16c784',
+        fontWeight: 800,
+        fontSize: 13,
+      }}>
+        进入 →
       </div>
     </button>
   )

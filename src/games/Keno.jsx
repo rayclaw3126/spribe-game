@@ -1,7 +1,10 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel, BetInput, ActionButton } from '../components/GameLayout'
+import { useIsMobile } from '../hooks/useMediaQuery'
+import bgmUrl from '../assets/covers/bgm.mp3'
 
-const COLOR = '#DB2777'
+const COLOR = '#16C784'
+const TEAMS = ['MUN','MCI','ARS','CHE','LIV','TOT','NEW','AVL','RMA','BAR','ATM','SEV','VAL','VIL','JUV','INT','MIL','NAP','ROM','LAZ','BAY','BVB','RBL','B04','FRA','PSG','MAR','LYO','MON','LIL','BEN','POR','SPO','AJA','PSV','FEY','CEL','RAN','GAL','FEN']
 const TOTAL = 40
 const DRAW = 20
 
@@ -20,16 +23,79 @@ const PAYOUTS = {
 }
 
 export default function Keno({ balance, setBalance }) {
+  const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
   const [selected, setSelected] = useState([])
   const [drawn, setDrawn] = useState([])
   const [drawing, setDrawing] = useState(false)
   const [phase, setPhase] = useState('idle') // idle | drawing | done
   const [message, setMessage] = useState(null)
+  const [muted, setMuted] = useState(false)
+  const [bgmOn, setBgmOn] = useState(false)
   const timerRef = useRef(null)
+  const audioRef = useRef({ ctx: null, muted: false })
+  const bgmRef = useRef({ audio: null })
+
+  useEffect(() => { audioRef.current.muted = muted }, [muted])
+  useEffect(() => {
+    if (bgmOn) { if (!bgmRef.current.audio) { const a = new Audio(bgmUrl); a.loop = true; a.volume = 0.25; a.play().catch(() => {}); bgmRef.current.audio = a } }
+    else if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgmOn])
+  useEffect(() => () => { if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null } }, [])
+
+  // ---------- audio (Web Audio synth) ----------
+  function ensureAudio() {
+    if (audioRef.current.ctx) return audioRef.current.ctx
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
+    audioRef.current.ctx = ctx; return ctx
+  }
+  function playPick() {   // soft click on select/deselect
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime; const o = ctx.createOscillator(); const g = ctx.createGain()
+    o.type = 'sine'; o.frequency.value = 560
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.07)
+  }
+  function playDraw() {   // "哒" per drawn team
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime; const o = ctx.createOscillator(); const g = ctx.createGain()
+    o.type = 'square'; o.frequency.value = 360 + Math.random() * 130
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.04, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.06)
+  }
+  function playMatch() {   // bright "叮" on a hit
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    ;[1180, 1770].forEach((f, i) => {
+      const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(i ? 0.05 : 0.1, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.26)
+      o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.28)
+    })
+  }
+  function playWin() {   // celebration
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    ;[660, 880, 1180, 1560].forEach((f, i) => {
+      const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f
+      const s = t + i * 0.1
+      g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.13, s + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.3)
+      o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.32)
+    })
+  }
+  function playLose() {   // low tone
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime; const o = ctx.createOscillator(); const g = ctx.createGain()
+    o.type = 'triangle'; o.frequency.setValueAtTime(300, t); o.frequency.exponentialRampToValueAtTime(110, t + 0.4)
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.13, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.44)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.46)
+  }
 
   function toggleNumber(n) {
     if (phase !== 'idle' || drawing) return
+    ensureAudio(); playPick()
     setSelected(s =>
       s.includes(n) ? s.filter(x => x !== n) : s.length < 10 ? [...s, n] : s
     )
@@ -52,6 +118,7 @@ export default function Keno({ balance, setBalance }) {
 
   async function play() {
     if (bet > balance || selected.length === 0) return
+    ensureAudio()
     setBalance(b => b - bet)
     setPhase('drawing')
     setDrawing(true)
@@ -67,6 +134,8 @@ export default function Keno({ balance, setBalance }) {
       await new Promise(r => setTimeout(r, 80))
       drawResult.push(shuffled[i])
       setDrawn([...drawResult])
+      playDraw()
+      if (selected.includes(shuffled[i])) playMatch()
     }
 
     const matches = selected.filter(n => shuffled.includes(n)).length
@@ -75,7 +144,8 @@ export default function Keno({ balance, setBalance }) {
     const mult = payout_table[matches] || 0
     const payout = parseFloat((bet * mult).toFixed(2))
 
-    if (payout > 0) setBalance(b => parseFloat((b + payout).toFixed(2)))
+    if (payout > 0) { setBalance(b => parseFloat((b + payout).toFixed(2))); playWin() }
+    else playLose()
 
     const matchStr = `${matches}/${picks} matched`
     setMessage(
@@ -101,7 +171,7 @@ export default function Keno({ balance, setBalance }) {
     : 0
 
   return (
-    <GameLayout title="Keno" emoji="🎯" color={COLOR}
+    <GameLayout title="Team Keno" emoji="⚽" color={COLOR}
       sidebar={
         <Panel>
           <BetInput bet={bet} setBet={setBet}
@@ -130,8 +200,8 @@ export default function Keno({ balance, setBalance }) {
               ))}
               <button onClick={clearSelection} disabled={phase !== 'idle'} style={{
                 padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700,
-                background: '#FEE2E2', color: '#991B1B',
-                border: '1.5px solid #FECACA',
+                background: 'rgba(239,68,68,0.15)', color: '#FCA5A5',
+                border: '1.5px solid rgba(239,68,68,0.35)',
                 cursor: phase !== 'idle' ? 'not-allowed' : 'pointer',
               }}>Clear</button>
             </div>
@@ -162,7 +232,7 @@ export default function Keno({ balance, setBalance }) {
 
           {phase === 'idle' ? (
             <ActionButton onClick={play} color={COLOR} disabled={selected.length === 0 || bet > balance || bet < 1}>
-              🎯 Play Keno
+              ⚽ Play Team Keno
             </ActionButton>
           ) : phase === 'done' ? (
             <ActionButton onClick={reset} color={COLOR}>
@@ -180,8 +250,8 @@ export default function Keno({ balance, setBalance }) {
           {message && (
             <div style={{
               marginTop: 14, padding: '12px 16px', borderRadius: 12,
-              background: message.win ? '#D1FAE5' : '#FEE2E2',
-              color: message.win ? '#065F46' : '#991B1B',
+              background: message.win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+              color: message.win ? '#6EE7B7' : '#FCA5A5',
               fontWeight: 600, fontSize: 13, animation: 'winPop 0.4s ease',
             }}>
               {message.win ? '🎉' : '🎯'} {message.text}
@@ -215,10 +285,23 @@ export default function Keno({ balance, setBalance }) {
       }
     >
       <Panel>
+        {/* Audio toggles */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 10 }}>
+          <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
+            width: 38, height: 38, borderRadius: '50%',
+            background: bgmOn ? 'rgba(22,199,132,0.18)' : 'var(--bg2)', color: bgmOn ? COLOR : 'var(--text3)',
+            border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : 'var(--border)'}`, fontSize: 15, cursor: 'pointer',
+          }}>🎵</button>
+          <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
+            width: 38, height: 38, borderRadius: '50%',
+            background: 'var(--bg2)', color: muted ? 'var(--text3)' : COLOR, border: '1px solid var(--border)', fontSize: 16, cursor: 'pointer',
+          }}>{muted ? '🔇' : '🔊'}</button>
+        </div>
+
         {/* Number grid */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(10, 1fr)',
+          gridTemplateColumns: isMobile ? 'repeat(4, 1fr)' : 'repeat(8, 1fr)',
           gap: 6,
         }}>
           {Array.from({ length: TOTAL }, (_, i) => i + 1).map(n => {
@@ -233,10 +316,10 @@ export default function Keno({ balance, setBalance }) {
                 style={{
                   aspectRatio: '1',
                   borderRadius: 10,
-                  fontSize: 13, fontWeight: 700,
-                  border: `2px solid ${isMatch ? '#10B981' : isDrawn ? '#C4B5FD' : isSelected ? COLOR : 'var(--border)'}`,
-                  background: isMatch ? '#D1FAE5' : isDrawn ? '#EDE9FE' : isSelected ? COLOR + '20' : 'var(--surface)',
-                  color: isMatch ? '#065F46' : isDrawn ? '#7C3AED' : isSelected ? COLOR : 'var(--text3)',
+                  fontSize: isMobile ? 11 : 12, fontWeight: 700,
+                  border: `2px solid ${isMatch ? '#10B981' : isDrawn ? 'var(--border)' : isSelected ? COLOR : 'var(--border)'}`,
+                  background: isMatch ? '#D1FAE5' : isDrawn ? 'var(--bg2)' : isSelected ? COLOR + '20' : 'var(--surface)',
+                  color: isMatch ? '#065F46' : isDrawn ? 'var(--text3)' : isSelected ? COLOR : 'var(--text3)',
                   cursor: phase === 'idle' ? 'pointer' : 'default',
                   transition: 'all 0.15s',
                   animation: isDrawn && !isMatch ? 'popIn 0.25s ease' : isMatch ? 'winPop 0.35s ease' : 'none',
@@ -245,7 +328,7 @@ export default function Keno({ balance, setBalance }) {
                 onMouseEnter={e => phase === 'idle' && !isSelected && (e.currentTarget.style.background = COLOR + '12')}
                 onMouseLeave={e => phase === 'idle' && !isSelected && (e.currentTarget.style.background = 'var(--surface)')}
               >
-                {n}
+                {TEAMS[n - 1]}
               </button>
             )
           })}
@@ -255,7 +338,7 @@ export default function Keno({ balance, setBalance }) {
         <div style={{ display: 'flex', gap: 16, marginTop: 16, flexWrap: 'wrap' }}>
           {[
             { color: COLOR + '20', border: COLOR, label: 'Selected' },
-            { color: '#EDE9FE', border: '#C4B5FD', label: 'Drawn' },
+            { color: 'var(--bg2)', border: 'var(--border)', label: 'Drawn' },
             { color: '#D1FAE5', border: '#10B981', label: 'Match!' },
           ].map(item => (
             <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text3)' }}>
@@ -267,7 +350,7 @@ export default function Keno({ balance, setBalance }) {
 
         {phase === 'idle' && selected.length === 0 && (
           <p style={{ textAlign: 'center', color: 'var(--text3)', fontSize: 14, marginTop: 16 }}>
-            Select 1–10 lucky numbers, then press Play!
+            Pick 1–10 winning teams, then press Play!
           </p>
         )}
       </Panel>
