@@ -38,7 +38,20 @@ export const COLORS = {
   fxBarTrack: '#1a2230',
   fxBarFill: '#16C784',
   fxWaitText: '#8a97a6',
+
+  // Bet feed
+  feedLive: '#facc15',
+  feedWin: '#86efac',
+  feedLose: '#5b6878',
+  feedYouBg: 'rgba(22,199,132,0.14)',
+  feedYouBorder: 'rgba(22,199,132,0.45)',
 }
+
+// Avatar chips pick a stable color by username hash.
+export const AVATAR_COLORS = [
+  '#7C3AED', '#2563EB', '#0891B2', '#16A34A',
+  '#CA8A04', '#EA580C', '#DC2626', '#DB2777',
+]
 
 export const RADIUS = {
   pill: 999,

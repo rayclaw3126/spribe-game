@@ -8,6 +8,22 @@ import { COLORS } from './tokens'
 const WEDGES = 12
 const STARS_PER_LAYER = 36
 
+const FEED_NAMES = ['striker88', 'goalrush', 'pitchpro', 'varking', 'crossbar', 'derby7', 'ultrabet', 'fastboot', 'sweeper', 'topbins', 'northend', 'capten', 'winger11', 'boxtobox', 'playmakr', 'trequarti', 'falsenine', 'libero5', 'poacher9', 'regista', 'gaffer', 'tikitaka']
+
+// 18–30 fake feed bets per round; amounts 1–500 weighted towards small
+// stakes. Display-only — these rows never touch the balance.
+export function makeFeedBots() {
+  const count = 18 + Math.floor(Math.random() * 13)
+  return Array.from({ length: count }, (_, i) => ({
+    id: `${Date.now()}-${i}-${Math.random()}`,
+    name: FEED_NAMES[Math.floor(Math.random() * FEED_NAMES.length)],
+    bet: Math.max(1, Math.round(500 * Math.pow(Math.random(), 2.8))),
+    target: 1.15 + Math.random() * 4.5,
+    status: 'live',
+    payout: null,
+  }))
+}
+
 export function createArenaFx() {
   const wedges = new Float64Array(WEDGES)
   for (let i = 0; i < WEDGES; i++) wedges[i] = (Math.PI * 2 * i) / WEDGES

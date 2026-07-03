@@ -3,12 +3,12 @@ import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetPanel from '../components/shell/BetPanel'
-import { createArenaFx, drawArenaFx, drawWaiting } from '../components/shell/arenaFx'
+import { createArenaFx, drawArenaFx, drawWaiting, makeFeedBots } from '../components/shell/arenaFx'
+import BetFeed from '../components/shell/BetFeed'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
 const GREEN = '#16C784'
-const ROBOTS = ['Striker88', 'GoalRush', 'PitchPro', 'VARKing', 'Crossbar', 'Derby7', 'UltraBet', 'FastBoot', 'Sweeper', 'TopBins', 'NorthEnd', 'CapTen']
 const HISTORY_SEED = [1.42, 2.81, 1.06, 5.24, 1.88, 3.37, 9.12, 1.19, 2.05, 4.63]
 
 function generateCrash() {
@@ -25,12 +25,6 @@ function money(n) {
   return Number(n).toFixed(2)
 }
 
-function maskName(name) {
-  if (name.startsWith('你')) return name
-  if (name.length <= 2) return name[0] + '***'
-  return `${name[0]}***${name[name.length - 1]}`
-}
-
 // One bet bay's full state — both panels share the same money path.
 function makePanel() {
   return {
@@ -43,21 +37,6 @@ function makePanel() {
     note: '',      // per-round hint, cleared on reset
     autoNote: '',  // sticky hint (auto-bet stopped), cleared on re-enable
   }
-}
-
-function makeBots() {
-  const count = Math.floor(rand(6, 15))
-  return Array.from({ length: count }, (_, i) => {
-    const bet = Math.round(rand(3, 80))
-    return {
-      id: `${Date.now()}-${i}-${Math.random()}`,
-      name: ROBOTS[Math.floor(Math.random() * ROBOTS.length)],
-      bet,
-      target: rand(1.25, 5.8),
-      status: 'live',
-      payout: null,
-    }
-  })
 }
 
 export default function Aviator({ balance, setBalance }) {
@@ -83,6 +62,7 @@ export default function Aviator({ balance, setBalance }) {
   const fxRef = useRef(null)
   const bettingStartRef = useRef(0)
   const launchAtRef = useRef(0)
+  const roundIdRef = useRef(0)   // keys the player's feed row per round
   if (fxRef.current === null) fxRef.current = createArenaFx()
 
   const [panels, setPanels] = useState(() => [makePanel(), makePanel()])
@@ -91,7 +71,8 @@ export default function Aviator({ balance, setBalance }) {
   const [multiplier, setMultiplier] = useState(1)
   const [crashPoint, setCrashPoint] = useState(null)
   const [history, setHistory] = useState(HISTORY_SEED)
-  const [players, setPlayers] = useState(() => makeBots())
+  const [players, setPlayers] = useState(() => makeFeedBots())
+  const [myBets, setMyBets] = useState([])   // player's last 20 settled rounds (display only)
   const [online, setOnline] = useState(() => Math.floor(rand(820, 980)))
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
@@ -115,7 +96,7 @@ export default function Aviator({ balance, setBalance }) {
   const displayPlayers = useMemo(() => {
     const p = panels[0]
     const you = p.playerBet ? [{
-      id: 'you0',
+      id: `you-${roundIdRef.current}`,
       name: '你',
       bet: p.playerBet.amount,
       target: p.cashedOut?.mult || null,
@@ -123,7 +104,7 @@ export default function Aviator({ balance, setBalance }) {
       payout: p.cashedOut?.win || null,
       you: true,
     }] : []
-    return [...you, ...players].slice(0, 15)
+    return [...you, ...players]
   }, [panels, phase, players])
 
   function ensureAudio() {
@@ -254,6 +235,7 @@ export default function Aviator({ balance, setBalance }) {
   function resetRound() {
     phaseRef.current = 'betting'
     bettingStartRef.current = performance.now()
+    roundIdRef.current += 1
     multRef.current = 1
     particlesRef.current = []
     burstRef.current = false
@@ -265,7 +247,7 @@ export default function Aviator({ balance, setBalance }) {
     setCrashPoint(null)
     panelsRef.current = panelsRef.current.map(p => ({ ...p, playerBet: null, cashedOut: null, note: '' }))
     setPanels(panelsRef.current)
-    setPlayers(makeBots())
+    setPlayers(makeFeedBots())
     setMessage('')
     stopEngine()
     autoBetsOnRoundStart()
@@ -292,6 +274,12 @@ export default function Aviator({ balance, setBalance }) {
     setCrashPoint(crashRef.current)
     setHistory(h => [Number(crashRef.current.toFixed(2)), ...h].slice(0, 20))
     setPlayers(list => list.map(p => p.status === 'live' ? { ...p, status: 'crashed' } : p))
+    // record the player's lost stake in the feed's My Bets (display only)
+    panelsRef.current.forEach(p => {
+      if (p.playerBet && !p.cashedOut) {
+        setMyBets(m => [{ bet: p.playerBet.amount, mult: 0, win: 0 }, ...m].slice(0, 20))
+      }
+    })
     setMessage(`本轮 ${crashRef.current.toFixed(2)}× 飞了`)
     setTimeout(resetRound, 2200)
   }
@@ -326,6 +314,7 @@ export default function Aviator({ balance, setBalance }) {
       note: `已${targetMult ? '自动兑现' : '套现'} ${mult.toFixed(2)}× — +$${money(win)}`,
     })
     credit(win)
+    setMyBets(m => [{ bet: p.playerBet.amount, mult, win }, ...m].slice(0, 20))
     playDing()
   }
 
@@ -531,14 +520,21 @@ export default function Aviator({ balance, setBalance }) {
         multRef.current = capped
         setMultiplier(Number(capped.toFixed(2)))
         updateEngine(capped)
-        setPlayers(list => list.map(p => {
-          if (p.status !== 'live') return p
-          if (capped >= p.target && capped < crashRef.current) {
-            const payout = Number((p.bet * p.target).toFixed(2))
-            return { ...p, status: 'cashed', payout, target: Number(p.target.toFixed(2)) }
-          }
-          return p
-        }))
+        setPlayers(list => {
+          // same computation as before, but keep the array identity when no
+          // row changed so the feed doesn't re-render every frame
+          let changed = false
+          const next = list.map(p => {
+            if (p.status !== 'live') return p
+            if (capped >= p.target && capped < crashRef.current) {
+              changed = true
+              const payout = Number((p.bet * p.target).toFixed(2))
+              return { ...p, status: 'cashed', payout, target: Number(p.target.toFixed(2)) }
+            }
+            return p
+          })
+          return changed ? next : list
+        })
         // Auto-cashout — settles at the panel's target multiplier. capped never
         // exceeds the crash point, so this only fires when target ≤ crash.
         panelsRef.current.forEach((p, i) => {
@@ -603,47 +599,11 @@ export default function Aviator({ balance, setBalance }) {
       title="Breakaway"
       emoji="✈️"
       color={GREEN}
-      sidebar={
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Panel style={{ background: '#101923', borderColor: '#243142', padding: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <strong style={{ color: '#e8edf2', fontSize: 14 }}>实时下注</strong>
-              <span style={{ color: GREEN, fontSize: 12, fontWeight: 800 }}>{online} 在线</span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: isMobile ? 220 : 360, overflow: 'hidden' }}>
-              {displayPlayers.map(p => (
-                <div key={p.id} style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr auto',
-                  gap: 8,
-                  alignItems: 'center',
-                  padding: '9px 10px',
-                  borderRadius: 10,
-                  background: p.you ? 'rgba(22,199,132,0.14)' : '#1a2230',
-                  border: `1px solid ${p.you ? 'rgba(22,199,132,0.45)' : '#232c39'}`,
-                }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ color: p.you ? '#d7ffe8' : '#e8edf2', fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {maskName(p.name)}
-                    </div>
-                    <div style={{ color: '#7d8a99', fontSize: 12 }}>${money(p.bet)}</div>
-                  </div>
-                  <div style={{
-                    color: p.status === 'cashed' ? GREEN : p.status === 'crashed' ? '#f87171' : '#facc15',
-                    fontSize: 12,
-                    fontWeight: 900,
-                    textAlign: 'right',
-                  }}>
-                    {p.status === 'cashed' ? `+${Number(p.target).toFixed(2)}×` : p.status === 'crashed' ? '爆' : '进行中'}
-                    {p.payout && <div style={{ color: '#8a97a6', fontWeight: 700 }}>${money(p.payout)}</div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        </div>
-      }
     >
+      {/* Spribe-style layout: bet feed on the left (desktop) / below (mobile) */}
+      <div style={{ display: isMobile ? 'block' : 'grid', gridTemplateColumns: '300px minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
+        {!isMobile && <BetFeed bets={displayPlayers} myBets={myBets} online={online} maxHeight={560} />}
+        <div style={{ minWidth: 0 }}>
       <Panel style={{ background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden' }}>
         <style>{`
           @keyframes bkShake {
@@ -767,6 +727,14 @@ export default function Aviator({ balance, setBalance }) {
             />
           )
         })()}
+      </div>
+
+      {isMobile && (
+        <div style={{ marginTop: 14 }}>
+          <BetFeed bets={displayPlayers} myBets={myBets} online={online} maxHeight={300} />
+        </div>
+      )}
+        </div>
       </div>
     </GameLayout>
   )
