@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import GameLayout, { Panel, ActionButton } from '../components/GameLayout'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import ballUrl from '../assets/covers/ball-3d.png'
+import bgmUrl from '../assets/covers/bgm.mp3'
 
 const COLOR = '#16C784'
 const FILL_TOP = '#5DCAA5'
@@ -41,18 +42,132 @@ export default function Limbo({ balance, setBalance }) {
   const burstRef = useRef(false)           // pending win burst
   const bounceRef = useRef(0)              // loss bounce start timestamp
   const isMobileRef = useRef(false)
+  const audioRef = useRef({ ctx: null, muted: false, engine: null })
+  const bgmRef = useRef({ audio: null })
 
   const [bet, setBet] = useState(10)
   const [target, setTarget] = useState(2.0)
   const [rolling, setRolling] = useState(false)
   const [result, setResult] = useState(null)
   const [multiplier, setMultiplier] = useState(1)
+  const [muted, setMuted] = useState(false)
+  const [bgmOn, setBgmOn] = useState(false)
 
   const t = Math.max(1.01, target || 1.01)
   const winChance = Math.min(99, (HOUSE_EDGE / t) * 100)
   const payout = parseFloat((bet * t).toFixed(2))
   targetRef.current = t
   isMobileRef.current = isMobile
+
+  function ensureAudio() {
+    if (audioRef.current.ctx) return audioRef.current.ctx
+    const AudioCtx = window.AudioContext || window.webkitAudioContext
+    if (!AudioCtx) return null
+    const ctx = new AudioCtx()
+    if (ctx.state === 'suspended') ctx.resume()
+    audioRef.current.ctx = ctx
+    return ctx
+  }
+
+  function stopEngine() {
+    const engine = audioRef.current.engine
+    if (!engine) return
+    engine.gain.gain.cancelScheduledValues(engine.ctx.currentTime)
+    engine.gain.gain.setTargetAtTime(0, engine.ctx.currentTime, 0.04)
+    setTimeout(() => {
+      try {
+        engine.osc.stop()
+        engine.lfo.stop()
+      } catch {
+        // Oscillators may already be stopped after rapid route changes.
+      }
+    }, 180)
+    audioRef.current.engine = null
+  }
+
+  // Climb tone — Aviator's engine voice, pitch driven by the fill height (same log mapping).
+  function startEngine() {
+    const ctx = audioRef.current.ctx
+    if (!ctx || audioRef.current.muted) return
+    if (ctx.state === 'suspended') ctx.resume()
+    stopEngine()
+    const osc = ctx.createOscillator()
+    const lfo = ctx.createOscillator()
+    const lfoGain = ctx.createGain()
+    const gain = ctx.createGain()
+    osc.type = 'sawtooth'
+    osc.frequency.value = 70
+    lfo.frequency.value = 18
+    lfoGain.gain.value = 11
+    gain.gain.value = 0.0001
+    lfo.connect(lfoGain)
+    lfoGain.connect(osc.frequency)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start()
+    lfo.start()
+    gain.gain.setTargetAtTime(0.045, ctx.currentTime, 0.08)
+    audioRef.current.engine = { ctx, osc, lfo, gain }
+  }
+
+  function updateEngine(mult) {
+    const engine = audioRef.current.engine
+    if (!engine || audioRef.current.muted) return
+    engine.osc.frequency.setTargetAtTime(70 + meterNorm(mult) * 260, engine.ctx.currentTime, 0.05)
+  }
+
+  // Win — short rising chime, fired on the same frame as the particle burst.
+  function playWin() {
+    const ctx = ensureAudio()
+    if (!ctx || audioRef.current.muted) return
+    const gain = ctx.createGain()
+    gain.gain.value = 0.001
+    gain.connect(ctx.destination)
+    ;[660, 880, 1320].forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      osc.connect(gain)
+      osc.start(ctx.currentTime + i * 0.06)
+      osc.stop(ctx.currentTime + 0.28 + i * 0.06)
+    })
+    gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.03)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
+  }
+
+  // Loss — low falling thud, fired on the same frame as the ball's dip-and-spring.
+  function playLoss() {
+    const ctx = ensureAudio()
+    if (!ctx || audioRef.current.muted) return
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime(220, ctx.currentTime)
+    osc.frequency.exponentialRampToValueAtTime(58, ctx.currentTime + 0.45)
+    gain.gain.value = 0.001
+    osc.connect(gain).connect(ctx.destination)
+    osc.start()
+    gain.gain.exponentialRampToValueAtTime(0.16, ctx.currentTime + 0.03)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
+    osc.stop(ctx.currentTime + 0.55)
+  }
+
+  // Background music — real looping casino track (HTML Audio), independent of SFX mute.
+  function startBgm() {
+    if (bgmRef.current.audio) return
+    const audio = new Audio(bgmUrl)
+    audio.loop = true
+    audio.volume = 0.25            // quiet — stays under the SFX (ding/crash)
+    audio.play().catch(() => {})   // ignore autoplay rejection (starts on the click gesture)
+    bgmRef.current.audio = audio
+  }
+
+  function stopBgm() {
+    if (bgmRef.current.audio) {
+      bgmRef.current.audio.pause()
+      bgmRef.current.audio = null
+    }
+  }
 
   function play() {
     if (bet > balance || rolling) return
@@ -68,6 +183,8 @@ export default function Limbo({ balance, setBalance }) {
     multRef.current = 1
     setMultiplier(1)
     phaseRef.current = 'climbing'
+    ensureAudio()
+    startEngine()
   }
 
   function settle() {
@@ -80,8 +197,9 @@ export default function Limbo({ balance, setBalance }) {
     if (win) setBalance(bb => parseFloat((bb + profit).toFixed(2)))
     setResult({ mult: to, win, profit })
     setRolling(false)
-    if (win) burstRef.current = true
-    else bounceRef.current = performance.now()
+    stopEngine()
+    if (win) { burstRef.current = true; playWin() }
+    else { bounceRef.current = performance.now(); playLoss() }
   }
 
   function drawMeter() {
@@ -249,16 +367,37 @@ export default function Limbo({ balance, setBalance }) {
         const v = 1 + (animRef.current.to - 1) * easeOutCubic(p)
         multRef.current = v
         setMultiplier(Number(v.toFixed(2)))
+        updateEngine(v)
         if (p >= 1) settle()
       }
       drawMeter()
       frameRef.current = requestAnimationFrame(animate)
     }
     frameRef.current = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(frameRef.current)
+    return () => {
+      cancelAnimationFrame(frameRef.current)
+      stopEngine()
+      stopBgm()
+    }
     // The meter loop owns round settlement through refs; restarting it on render would duplicate frames.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    audioRef.current.muted = muted
+    if (muted) stopEngine()
+    if (!muted && phaseRef.current === 'climbing') startEngine()
+    // Audio nodes are managed imperatively through refs to avoid restarting the loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [muted])
+
+  useEffect(() => {
+    // BGM starts on user interaction (BGM button click) — respects autoplay policy.
+    if (bgmOn) startBgm()
+    else stopBgm()
+    // BGM nodes are managed imperatively through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgmOn])
 
   const isWin = result?.win
 
@@ -282,6 +421,45 @@ export default function Limbo({ balance, setBalance }) {
         `}</style>
         <div style={{ position: 'relative' }}>
           <canvas ref={canvasRef} style={{ width: '100%', height: isMobile ? 300 : 420, display: 'block', borderRadius: 12 }} />
+
+          {/* BGM toggle — canvas top-right (left of mute) */}
+          <button
+            type="button"
+            onClick={() => setBgmOn(v => !v)}
+            style={{
+              position: 'absolute', top: 10, right: 58,
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)',
+              color: bgmOn ? COLOR : '#7d8a99',
+              border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : '#232c39'}`,
+              fontSize: 16,
+            }}
+            title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
+          >
+            🎵
+          </button>
+
+          {/* Mute — canvas top-right */}
+          <button
+            type="button"
+            onClick={() => setMuted(v => !v)}
+            style={{
+              position: 'absolute', top: 10, right: 10,
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              background: 'rgba(26,34,48,0.85)',
+              color: muted ? '#7d8a99' : COLOR,
+              border: '1px solid #232c39',
+              fontSize: 18,
+            }}
+            title={muted ? '取消静音' : '静音'}
+          >
+            {muted ? '🔇' : '🔊'}
+          </button>
+
           <div style={{
             position: 'absolute', top: 0, bottom: 0, right: isMobile ? '2%' : '8%',
             width: isMobile ? 150 : 220,
