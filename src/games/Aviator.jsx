@@ -25,9 +25,23 @@ function money(n) {
 }
 
 function maskName(name) {
-  if (name === '你') return name
+  if (name.startsWith('你')) return name
   if (name.length <= 2) return name[0] + '***'
   return `${name[0]}***${name[name.length - 1]}`
+}
+
+// One bet bay's full state — both panels share the same money path.
+function makePanel() {
+  return {
+    bet: 10,
+    playerBet: null,
+    cashedOut: null,
+    autoBet: false,
+    autoCashOn: false,
+    autoCashMult: 2.0,
+    note: '',      // per-round hint, cleared on reset
+    autoNote: '',  // sticky hint (auto-bet stopped), cleared on re-enable
+  }
 }
 
 function makeBots() {
@@ -51,6 +65,7 @@ export default function Aviator({ balance, setBalance }) {
   const ballRef = useRef(null)
   const frameRef = useRef(null)
   const phaseRef = useRef('betting')
+  const countdownRef = useRef(3)
   const startRef = useRef(0)
   const crashRef = useRef(2)
   const multRef = useRef(1)
@@ -59,15 +74,16 @@ export default function Aviator({ balance, setBalance }) {
   const flashRef = useRef(0)
   const audioRef = useRef({ ctx: null, muted: false, engine: null })
   const bgmRef = useRef({ audio: null })
+  // Synchronous mirrors — actions guard/settle through these so rapid clicks,
+  // the rAF loop and timers all see committed values instantly (race safety).
+  const panelsRef = useRef(null)
+  const balanceRef = useRef(balance)
 
-  const [bet, setBet] = useState(10)
-  const [bet2, setBet2] = useState(10)   // panel 2 display bay — local amount only, betting not wired yet
+  const [panels, setPanels] = useState(() => [makePanel(), makePanel()])
   const [phase, setPhase] = useState('betting')
   const [countdown, setCountdown] = useState(3)
   const [multiplier, setMultiplier] = useState(1)
   const [crashPoint, setCrashPoint] = useState(null)
-  const [playerBet, setPlayerBet] = useState(null)
-  const [cashedOut, setCashedOut] = useState(null)
   const [history, setHistory] = useState(HISTORY_SEED)
   const [players, setPlayers] = useState(() => makeBots())
   const [online, setOnline] = useState(() => Math.floor(rand(820, 980)))
@@ -75,18 +91,34 @@ export default function Aviator({ balance, setBalance }) {
   const [bgmOn, setBgmOn] = useState(false)
   const [message, setMessage] = useState('')
 
+  if (panelsRef.current === null) panelsRef.current = panels
+
+  useEffect(() => { balanceRef.current = balance }, [balance])
+
+  function updatePanel(i, patch) {
+    panelsRef.current = panelsRef.current.map((p, j) => (j === i ? { ...p, ...patch } : p))
+    setPanels(panelsRef.current)
+  }
+
+  // Single money path — every balance change in the game goes through here.
+  function credit(delta) {
+    balanceRef.current = Number((balanceRef.current + delta).toFixed(2))
+    setBalance(b => Number((b + delta).toFixed(2)))
+  }
+
   const displayPlayers = useMemo(() => {
-    const you = playerBet ? [{
-      id: 'you',
+    const p = panels[0]
+    const you = p.playerBet ? [{
+      id: 'you0',
       name: '你',
-      bet: playerBet.amount,
-      target: cashedOut?.mult || null,
-      status: cashedOut ? 'cashed' : phase === 'crashed' ? 'crashed' : 'live',
-      payout: cashedOut?.win || null,
+      bet: p.playerBet.amount,
+      target: p.cashedOut?.mult || null,
+      status: p.cashedOut ? 'cashed' : phase === 'crashed' ? 'crashed' : 'live',
+      payout: p.cashedOut?.win || null,
       you: true,
     }] : []
     return [...you, ...players].slice(0, 15)
-  }, [cashedOut, phase, playerBet, players])
+  }, [panels, phase, players])
 
   function ensureAudio() {
     if (audioRef.current.ctx) return audioRef.current.ctx
@@ -220,14 +252,16 @@ export default function Aviator({ balance, setBalance }) {
     burstRef.current = false
     flashRef.current = 0
     setPhase('betting')
+    countdownRef.current = 3
     setCountdown(3)
     setMultiplier(1)
     setCrashPoint(null)
-    setPlayerBet(null)
-    setCashedOut(null)
+    panelsRef.current = panelsRef.current.map(p => ({ ...p, playerBet: null, cashedOut: null, note: '' }))
+    setPanels(panelsRef.current)
     setPlayers(makeBots())
     setMessage('')
     stopEngine()
+    autoBetsOnRoundStart()
   }
 
   function launchRound() {
@@ -254,31 +288,55 @@ export default function Aviator({ balance, setBalance }) {
     setTimeout(resetRound, 2200)
   }
 
-  function placeBet() {
-    if (phase !== 'betting' || playerBet || bet < 1 || bet > balance) return
-    ensureAudio()
-    const amount = Number(bet)
-    setBalance(b => Number((b - amount).toFixed(2)))
-    setPlayerBet({ amount })
-    setMessage(`已下注 $${money(amount)}，本轮生效`)
+  function placeBetFor(i, { auto = false } = {}) {
+    const p = panelsRef.current[i]
+    if (phaseRef.current !== 'betting' || p.playerBet || p.bet < 1 || p.bet > balanceRef.current) return
+    if (!auto) ensureAudio()
+    const amount = Number(p.bet)
+    updatePanel(i, { playerBet: { amount }, note: `已下注 $${money(amount)}，本轮生效` })
+    credit(-amount)
   }
 
-  function cancelBet() {
-    if (phase !== 'betting' || !playerBet) return
-    setBalance(b => Number((b + playerBet.amount).toFixed(2)))
-    setPlayerBet(null)
-    setMessage('已取消下注')
+  function cancelBetFor(i) {
+    const p = panelsRef.current[i]
+    if (phaseRef.current !== 'betting' || !p.playerBet) return
+    const amount = p.playerBet.amount
+    updatePanel(i, { playerBet: null, note: '已取消下注' })
+    credit(amount)
   }
 
-  function cashOut() {
-    if (phase !== 'flying' || !playerBet || cashedOut) return
-    ensureAudio()
-    const mult = Number(multRef.current.toFixed(2))
-    const win = Number((playerBet.amount * mult).toFixed(2))
-    setBalance(b => Number((b + win).toFixed(2)))
-    setCashedOut({ mult, win })
-    setMessage(`已套现 ${mult.toFixed(2)}× — +$${money(win)}`)
+  // Manual cashout settles at the current multiplier; auto passes its target
+  // and settles at exactly that (not the trigger frame's multiplier).
+  function cashOutFor(i, targetMult = null) {
+    const p = panelsRef.current[i]
+    if (phaseRef.current !== 'flying' || !p.playerBet || p.cashedOut) return
+    if (!targetMult) ensureAudio()
+    const mult = targetMult ?? Number(multRef.current.toFixed(2))
+    const win = Number((p.playerBet.amount * mult).toFixed(2))
+    updatePanel(i, {
+      cashedOut: { mult, win },
+      note: `已${targetMult ? '自动兑现' : '套现'} ${mult.toFixed(2)}× — +$${money(win)}`,
+    })
+    credit(win)
     playDing()
+  }
+
+  function toggleAutoBet(i) {
+    const p = panelsRef.current[i]
+    const next = !p.autoBet
+    updatePanel(i, { autoBet: next, autoNote: '' })
+    if (next && phaseRef.current === 'betting' && !p.playerBet) placeBetFor(i, { auto: true })
+  }
+
+  function autoBetsOnRoundStart() {
+    panelsRef.current.forEach((p, i) => {
+      if (!p.autoBet) return
+      if (p.bet < 1 || p.bet > balanceRef.current) {
+        updatePanel(i, { autoBet: false, autoNote: '余额不足，自动下注已停' })
+        return
+      }
+      placeBetFor(i, { auto: true })
+    })
   }
 
   function drawArena(current, mode = phaseRef.current) {
@@ -432,13 +490,12 @@ export default function Aviator({ balance, setBalance }) {
     resetRound()
     const countdownTimer = setInterval(() => {
       if (phaseRef.current !== 'betting') return
-      setCountdown(c => {
-        if (c <= 1) {
-          launchRound()
-          return 0
-        }
-        return c - 1
-      })
+      // Tick through a ref, then set state — calling launchRound() inside the
+      // setCountdown updater made StrictMode double-invoke it (two crash rolls).
+      const next = countdownRef.current - 1
+      countdownRef.current = Math.max(0, next)
+      setCountdown(countdownRef.current)
+      if (next <= 0) launchRound()
     }, 1000)
 
     const animate = now => {
@@ -457,6 +514,13 @@ export default function Aviator({ balance, setBalance }) {
           }
           return p
         }))
+        // Auto-cashout — settles at the panel's target multiplier. capped never
+        // exceeds the crash point, so this only fires when target ≤ crash.
+        panelsRef.current.forEach((p, i) => {
+          if (p.autoCashOn && p.playerBet && !p.cashedOut && capped >= p.autoCashMult) {
+            cashOutFor(i, p.autoCashMult)
+          }
+        })
         if (next >= crashRef.current) crashRound()
       }
       drawArena(multRef.current)
@@ -474,8 +538,7 @@ export default function Aviator({ balance, setBalance }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const canBet = phase === 'betting' && !playerBet
-  const canCash = phase === 'flying' && playerBet && !cashedOut
+  const canBetPhase = phase === 'betting'
   const bigColor = phase === 'crashed'
     ? '#e2564a'
     : multiplier < 2.5 ? '#16C784' : multiplier < 6 ? '#e0b100' : '#e2564a'
@@ -486,15 +549,29 @@ export default function Aviator({ balance, setBalance }) {
     : phase === 'flying'
       ? '飞行中 — 及时套现!'
       : '球飞了 — 下一轮马上来'
-  const potentialWin = playerBet ? playerBet.amount * multiplier : 0
+  // Shell BetButton state per bay — mapped from phase/playerBet/cashedOut only.
+  function panelButton(i) {
+    const p = panels[i]
+    if (phase === 'flying') {
+      if (!p.playerBet) return { state: 'waiting', label: '等待下一局', disabled: true }
+      if (p.cashedOut) return { state: 'waiting', label: `已兑现 $${money(p.cashedOut.win)}`, disabled: true }
+      return { state: 'cashout', label: `兑现 $${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(i), disabled: false }
+    }
+    if (canBetPhase && p.playerBet) {
+      return { state: 'cancel', label: '取消', onClick: () => cancelBetFor(i), disabled: false }
+    }
+    return {
+      state: 'bet',
+      label: `下注 $${money(p.bet)}`,
+      onClick: () => placeBetFor(i),
+      disabled: !canBetPhase || !!p.playerBet || p.bet > balance,
+    }
+  }
 
-  // Shell BetButton state — mapped from existing phase/playerBet/cashedOut only.
-  const btnState = phase === 'flying' ? 'cashout' : (phase === 'betting' && playerBet) ? 'cancel' : 'bet'
-  const btnLabel = btnState === 'cashout'
-    ? `兑现 $${money(potentialWin)}`
-    : btnState === 'cancel' ? '取消' : `下注 $${money(bet)}`
-  const btnDisabled = btnState === 'cashout' ? !canCash : btnState === 'bet' ? (!canBet || bet > balance) : false
-  const btnClick = btnState === 'cashout' ? cashOut : btnState === 'cancel' ? cancelBet : placeBet
+  function setBetFor(i, next) {
+    const p = panelsRef.current[i]
+    updatePanel(i, { bet: typeof next === 'function' ? next(p.bet) : next })
+  }
 
   return (
     <GameLayout
@@ -638,31 +715,33 @@ export default function Aviator({ balance, setBalance }) {
         </div>
       </Panel>
 
-      {/* Dual bet bays — Spribe-style bottom placement; stacked on mobile */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
-        gap: 14,
-        marginTop: 14,
-      }}>
-        <BetPanel
-          bet={bet}
-          setBet={setBet}
-          max={balance}
-          inputDisabled={!canBet}
-          chipDisabled={!canBet}
-          button={{ state: btnState, label: btnLabel, onClick: btnClick, disabled: btnDisabled }}
-          hint={message}
-        />
-        <BetPanel
-          bet={bet2}
-          setBet={setBet2}
-          max={balance}
-          inputDisabled={false}
-          chipDisabled={false}
-          button={{ state: 'bet', label: `下注 $${money(bet2)}`, onClick: undefined, disabled: true }}
-          hint="第二注即将开通"
-        />
+      {/* Single bet bay — dual-bay panel architecture retained, only bay 0 rendered.
+          Centered comfortable width on desktop, full width on mobile. */}
+      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>
+        {(() => {
+          const i = 0
+          const p = panels[i]
+          const locked = !canBetPhase || !!p.playerBet
+          return (
+            <BetPanel
+              bet={p.bet}
+              setBet={next => setBetFor(i, next)}
+              max={balance}
+              inputDisabled={locked}
+              chipDisabled={locked}
+              button={panelButton(i)}
+              hint={p.note || p.autoNote || message}
+              auto={{
+                betOn: p.autoBet,
+                cashOn: p.autoCashOn,
+                cashMult: p.autoCashMult,
+                onToggleBet: () => toggleAutoBet(i),
+                onToggleCash: () => updatePanel(i, { autoCashOn: !panelsRef.current[i].autoCashOn }),
+                onCashMult: v => updatePanel(i, { autoCashMult: v }),
+              }}
+            />
+          )
+        })()}
       </div>
     </GameLayout>
   )

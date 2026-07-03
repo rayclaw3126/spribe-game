@@ -22,6 +22,12 @@ const STATES = {
     boxShadow: `0 4px 18px ${COLORS.amberGlow}`,
     animation: 'shellBreath 1.4s ease-in-out infinite',
   },
+  // Greyed hold state — no bet in flight ("等待下一局") or already cashed out.
+  waiting: {
+    background: COLORS.surface,
+    boxShadow: 'none',
+    animation: 'none',
+  },
 }
 
 export default function BetButton({ state, label, onClick, disabled }) {

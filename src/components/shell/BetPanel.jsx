@@ -5,8 +5,9 @@ import BetButton from './BetButton'
 
 // One Spribe-style bet bay: Bet/Auto tabs on top, amount input with ½/2×,
 // chip quick-bets, and the three-state BetButton. Purely presentational —
-// the host wires its own state in via props. The Auto tab is a disabled
-// skeleton (auto-bet toggle + auto-cashout multiplier) for a later shell run.
+// the host wires its own state in via props. The Auto tab exposes auto-bet
+// and auto-cashout controls through the `auto` prop:
+//   { betOn, cashOn, cashMult, onToggleBet, onToggleCash, onCashMult }
 
 const inputStyle = {
   flex: 1, minWidth: 0, padding: '10px 14px', borderRadius: RADIUS.input,
@@ -21,7 +22,7 @@ const stepBtnStyle = {
   border: `1.5px solid ${COLORS.borderLight}`,
 }
 
-export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled, button, hint }) {
+export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled, button, hint, auto }) {
   const [tab, setTab] = useState('bet')
 
   return (
@@ -70,7 +71,7 @@ export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled
           <ChipQuickBet value={bet} max={max} onSelect={setBet} disabled={chipDisabled} />
         </>
       ) : (
-        <AutoSkeleton />
+        <AutoControls auto={auto} />
       )}
 
       <div style={{ marginTop: SPACE.md }}>
@@ -78,7 +79,7 @@ export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled
           state={button.state}
           label={button.label}
           onClick={button.onClick}
-          disabled={button.disabled || tab === 'auto'}
+          disabled={button.disabled}
         />
       </div>
       {hint && (
@@ -90,41 +91,73 @@ export default function BetPanel({ bet, setBet, max, inputDisabled, chipDisabled
   )
 }
 
-// Disabled skeleton for the future auto-bet shell run.
-function AutoSkeleton() {
+function Toggle({ on, onClick }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      width: 36, height: 20, borderRadius: RADIUS.pill, padding: 0,
+      background: on ? COLORS.greenTint : COLORS.surface,
+      border: `1.5px solid ${on ? COLORS.green : COLORS.borderLight}`,
+      position: 'relative', display: 'inline-block', cursor: 'pointer',
+    }}>
+      <span style={{
+        position: 'absolute', top: 2, left: on ? 19 : 2, width: 13, height: 13,
+        borderRadius: RADIUS.pill,
+        background: on ? COLORS.green : COLORS.textFaint,
+        transition: 'left 0.15s ease',
+      }} />
+    </button>
+  )
+}
+
+// Auto-bet + auto-cashout controls. The multiplier input is committed on
+// blur/Enter: min 1.01, anything invalid falls back to 2.00.
+function AutoControls({ auto }) {
+  const [multText, setMultText] = useState(auto.cashMult.toFixed(2))
+  const [seenMult, setSeenMult] = useState(auto.cashMult)
+  if (auto.cashMult !== seenMult) {
+    // parent-driven change — resync the draft text (render-phase adjustment)
+    setSeenMult(auto.cashMult)
+    setMultText(auto.cashMult.toFixed(2))
+  }
+
+  function commitMult() {
+    let v = parseFloat(multText)
+    if (Number.isNaN(v) || v < 1.01) v = 2.0
+    v = Number(v.toFixed(2))
+    auto.onCashMult(v)
+    setMultText(v.toFixed(2))
+  }
+
   const row = {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: `${SPACE.sm + 2}px ${SPACE.md}px`,
     background: COLORS.bg, border: `1.5px solid ${COLORS.border}`,
     borderRadius: RADIUS.input, marginBottom: SPACE.sm,
-    opacity: 0.5, cursor: 'not-allowed',
   }
-  const label = { color: COLORS.textFaint, fontSize: 13, fontWeight: 700 }
+  const label = { color: COLORS.textMuted, fontSize: 13, fontWeight: 700 }
   return (
-    <div title="即将开通">
+    <div>
       <div style={row}>
         <span style={label}>自动下注</span>
-        {/* inert toggle */}
-        <span style={{
-          width: 36, height: 20, borderRadius: RADIUS.pill,
-          background: COLORS.surface, border: `1.5px solid ${COLORS.borderLight}`,
-          position: 'relative', display: 'inline-block',
-        }}>
-          <span style={{
-            position: 'absolute', top: 2, left: 2, width: 13, height: 13,
-            borderRadius: RADIUS.pill, background: COLORS.textFaint,
-          }} />
-        </span>
+        <Toggle on={auto.betOn} onClick={auto.onToggleBet} />
       </div>
       <div style={row}>
         <span style={label}>自动兑现</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: SPACE.xs }}>
-          <input disabled value="2.00" readOnly style={{
-            width: 64, padding: '4px 8px', textAlign: 'right',
-            borderRadius: RADIUS.input - 4, border: `1.5px solid ${COLORS.borderLight}`,
-            background: COLORS.surface, color: COLORS.textFaint,
-            fontSize: 13, fontWeight: 700,
-          }} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm }}>
+          <Toggle on={auto.cashOn} onClick={auto.onToggleCash} />
+          <input
+            value={multText}
+            onChange={e => setMultText(e.target.value)}
+            onBlur={commitMult}
+            onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
+            inputMode="decimal"
+            style={{
+              width: 64, padding: '4px 8px', textAlign: 'right',
+              borderRadius: RADIUS.input - 4, border: `1.5px solid ${COLORS.borderLight}`,
+              background: COLORS.surface, color: COLORS.text,
+              fontSize: 13, fontWeight: 700,
+            }}
+          />
           <span style={label}>×</span>
         </span>
       </div>
