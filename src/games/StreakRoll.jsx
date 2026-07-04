@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { COLORS, RADIUS, HOTLINE } from '../components/shell/tokens'
-import { useIsMobile } from '../hooks/useMediaQuery'
+import { COLORS, RADIUS, LAYOUT, HOTLINE } from '../components/shell/tokens'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import WinToast from '../components/shell/WinToast'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetFeed from '../components/shell/BetFeed'
+import { makeFeedBots } from '../components/shell/arenaFx'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
 const CELL_W = 64          // portrait cards, ref-proportioned (≈64×84)
@@ -52,7 +55,8 @@ export default function StreakRoll({ balance, setBalance }) {
   const [offset, setOffset] = useState(0)
   const [rolling, setRolling] = useState(false)
   const [result, setResult] = useState(null)
-  const [, setRoundHistory] = useState([])   // landed multiplier per round (display bookkeeping)
+  const [roundHistory, setRoundHistory] = useState([])   // landed multiplier per round, newest first
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [winCell, setWinCell] = useState(null)
   const [highRisk, setHighRisk] = useState(false)
   const cellRef = useRef(PATTERN_NORMAL.length)      // cell currently under the frame
@@ -269,6 +273,7 @@ export default function StreakRoll({ balance, setBalance }) {
     const pattern = highRisk ? PATTERN_HIGH : PATTERN_NORMAL
     const L = pattern.length
     const idx = Math.floor(Math.random() * L)
+    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only; after the roll)
     // always travel FORWARD: next copy's idx-cell plus 2 extra laps (2–4 laps total)
     const cur = cellRef.current
     const landCell = (Math.floor(cur / L) + 1) * L + idx + 2 * L
@@ -296,6 +301,10 @@ export default function StreakRoll({ balance, setBalance }) {
       }
       setResult({ color, landed, mult, payout, win })
       setRoundHistory(h => [mult, ...h].slice(0, 20))
+      // fake feed rows settle for the round: ~45% cash green, the rest grey out
+      setFeedBets(list => list.map(b => Math.random() < 0.45
+        ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+        : { ...b, status: 'crashed' }))
       setWinCell(eqCell)
       setRolling(false)
       rollingRef.current = false
@@ -306,6 +315,7 @@ export default function StreakRoll({ balance, setBalance }) {
     })
   }
   const isMobile = useIsMobile()
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const won = result && result.win
   const fireWin = result && result.win && result.landed === 'F'
   const mode = highRisk ? 'high' : 'normal'
@@ -345,11 +355,11 @@ export default function StreakRoll({ balance, setBalance }) {
       ? { background: `linear-gradient(160deg, ${HOTLINE.cardRed}, ${HOTLINE.cardRedDeep})`, border: '2px solid rgba(255,255,255,0.25)' }
       : { background: HOTLINE.cardNavy, border: '2px solid rgba(0,0,0,0.3)' }
 
-  return (
-    <GameLayout title="Streak Roll" emoji="🎯" color={HOTLINE.blue}>
+  const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 30%, ${HOTLINE.bgCenter}, ${HOTLINE.bgOuter})`,
         borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* ---- top bar ---- */}
         <div style={{
@@ -586,6 +596,49 @@ export default function StreakRoll({ balance, setBalance }) {
           })()}
         </div>
       </Panel>
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024), same bones as Team Keno ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Streak Roll</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={feedBets} myBets={[]} online={914} fill />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
+              <RoundHistoryBar rounds={roundHistory} />
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {gameCard}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- stacked layout (<1024): unchanged ----
+  return (
+    <GameLayout title="Streak Roll" emoji="🎯" color={HOTLINE.blue}>
+      {gameCard}
     </GameLayout>
   )
 }
