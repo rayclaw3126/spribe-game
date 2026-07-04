@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { COLORS, RADIUS, HILO } from '../components/shell/tokens'
-import { useIsMobile } from '../hooks/useMediaQuery'
+import { COLORS, RADIUS, LAYOUT, HILO } from '../components/shell/tokens'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
+import BetFeed from '../components/shell/BetFeed'
+import { makeFeedBots } from '../components/shell/arenaFx'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
 // 单HL2: Rating Hi-Lo gameplay — 1–13 probability multipliers, skip, streak
@@ -77,6 +79,7 @@ export default function HiLo({ balance, setBalance }) {
   const [cum, setCum] = useState(1)            // display copy of the running product
   const [steps, setSteps] = useState([])       // this round's flips {n, dir, correct}
   const [cardFlash, setCardFlash] = useState(null)   // 'win' | 'lose' | null
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
 
@@ -144,6 +147,7 @@ export default function HiLo({ balance, setBalance }) {
   function startGame() {
     if (phase === 'playing' || bet > balance || bet < 1) return
     const first = drawCard()   // draw first — SFX noise randoms must not sit ahead
+    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
     ensureAudio()
     setBalance(b => round2(b - bet))
     cumRef.current = 1
@@ -176,6 +180,7 @@ export default function HiLo({ balance, setBalance }) {
       } else {
         setCardFlash('lose')
         setPhase('done')                 // stake already deducted — round over
+        settleFeed()
         playWrong()
       }
       setFlipping(false)
@@ -191,12 +196,20 @@ export default function HiLo({ balance, setBalance }) {
     playFlip()
   }
 
+  // fake feed rows settle for the round: ~45% cash green, the rest grey out
+  function settleFeed() {
+    setFeedBets(list => list.map(b => Math.random() < 0.45
+      ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+      : { ...b, status: 'crashed' }))
+  }
+
   // single money path: every payout goes through here
   function cashOut() {
     if (phase !== 'playing' || flipping) return
     const payout = round2(bet * cumRef.current)
     setBalance(b => round2(b + payout))
     setPhase('done')
+    settleFeed()
     playCash()
   }
 
@@ -221,13 +234,56 @@ export default function HiLo({ balance, setBalance }) {
     fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
     cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.55 : 1,
   })
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
 
-  return (
-    <GameLayout title="Rating Hi-Lo" emoji="📊" color={HILO.green}>
+  // flip-history minis + count/multiplier badge — desktop renders it in the
+  // 34px skeleton row, mobile keeps it inside the card (never both)
+  const historyStrip = (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
+          <div style={{
+            flex: 1, minWidth: 0, background: HILO.band, borderRadius: 8,
+            padding: '6px 8px', display: 'flex', gap: 6, alignItems: 'center', overflow: 'hidden',
+          }}>
+            {(isMobile ? steps.slice(-4) : steps).map((h, i) => (
+              <div key={steps.length - i} style={{
+                position: 'relative', width: 34, height: 46, borderRadius: 5, flex: '0 0 auto',
+                background: '#ffffff',
+                border: `2px solid ${h.correct ? HILO.green : '#e04b3a'}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Jersey num={h.n} w={26} />
+                <span style={{
+                  position: 'absolute', top: -5, left: -5, width: 15, height: 15, borderRadius: '50%',
+                  background: h.dir === 'high' ? HILO.badgeUp : HILO.badgeDown, color: COLORS.white,
+                  fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: '1px solid rgba(255,255,255,0.6)',
+                }}>{h.dir === 'high' ? '↑' : '↓'}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{
+            flex: '0 0 auto', background: HILO.band, borderRadius: 8,
+            padding: '6px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+          }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
+              <span style={{ width: 11, height: 15, borderRadius: 2, background: '#ffffff', border: '1px solid rgba(0,0,0,0.4)', display: 'inline-block' }} />
+              {steps.length}
+            </span>
+            <span style={{
+              padding: '2px 10px', borderRadius: 4,
+              background: HILO.green, color: '#083a1b',
+              fontSize: 12, fontWeight: 900,
+            }}>{round2(cum).toFixed(2)}x</span>
+          </div>
+        </div>
+  )
+
+  const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 34%, ${HILO.bgCenter}, ${HILO.bgOuter})`,
         borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
         position: 'relative',
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* giant corner rating-card line art (ref A/K positions) */}
         <div style={{
@@ -287,44 +343,8 @@ export default function HiLo({ balance, setBalance }) {
           }}>{muted ? '🔇' : '🔊'}</button>
         </div>
 
-        {/* ---- upper region: history strip + card-count badge ---- */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', marginBottom: isMobile ? 16 : 22, position: 'relative', zIndex: 1 }}>
-          <div style={{
-            flex: 1, minWidth: 0, background: HILO.band, borderRadius: 8,
-            padding: '6px 8px', display: 'flex', gap: 6, alignItems: 'center', overflow: 'hidden',
-          }}>
-            {(isMobile ? steps.slice(-4) : steps).map((h, i) => (
-              <div key={steps.length - i} style={{
-                position: 'relative', width: 34, height: 46, borderRadius: 5, flex: '0 0 auto',
-                background: '#ffffff',
-                border: `2px solid ${h.correct ? HILO.green : '#e04b3a'}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <Jersey num={h.n} w={26} />
-                <span style={{
-                  position: 'absolute', top: -5, left: -5, width: 15, height: 15, borderRadius: '50%',
-                  background: h.dir === 'high' ? HILO.badgeUp : HILO.badgeDown, color: COLORS.white,
-                  fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  border: '1px solid rgba(255,255,255,0.6)',
-                }}>{h.dir === 'high' ? '↑' : '↓'}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{
-            flex: '0 0 auto', background: HILO.band, borderRadius: 8,
-            padding: '6px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-          }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
-              <span style={{ width: 11, height: 15, borderRadius: 2, background: '#ffffff', border: '1px solid rgba(0,0,0,0.4)', display: 'inline-block' }} />
-              {steps.length}
-            </span>
-            <span style={{
-              padding: '2px 10px', borderRadius: 4,
-              background: HILO.green, color: '#083a1b',
-              fontSize: 12, fontWeight: 900,
-            }}>{round2(cum).toFixed(2)}x</span>
-          </div>
-        </div>
+        {/* ---- upper region (mobile only — desktop 34px row has it) ---- */}
+        {!isDesk && <div style={{ marginBottom: isMobile ? 16 : 22, position: 'relative', zIndex: 1 }}>{historyStrip}</div>}
 
         {/* ---- center: hi/lo minis + face card + deck + skip ---- */}
         <div style={{
@@ -459,6 +479,50 @@ export default function HiLo({ balance, setBalance }) {
           )}
         </div>
       </Panel>
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024), same bones as Free Kick ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Rating Hi-Lo</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={feedBets} myBets={[]} online={914} fill />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            {/* history minis are 46px tall — row grows past 34px, still capped tight */}
+            <div style={{ flex: '0 0 auto', minHeight: LAYOUT.historyH }}>
+              {historyStrip}
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {gameCard}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- stacked layout (<1024): unchanged ----
+  return (
+    <GameLayout title="Rating Hi-Lo" emoji="📊" color={HILO.green}>
+      {gameCard}
     </GameLayout>
   )
 }
