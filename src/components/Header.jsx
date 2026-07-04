@@ -15,6 +15,7 @@ const GAME_NAMES = {
   StreakRoll: 'Streak Roll',
   HalfTime: 'Half Time',
   GoldenBoot: 'Golden Boot',
+  NumberUp: 'Number Up',
 }
 
 export default function Header({ balance, onHome, activeGame }) {

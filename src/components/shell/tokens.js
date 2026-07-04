@@ -91,6 +91,25 @@ export const KENO = {
   xDark: 'rgba(0,0,0,0.16)',  // giant side chevrons
 }
 
+// Number Up — 两位数球衣号码彩：绿系四键取 KENO 终态；球衣绿取 HiLo 球衣实心色
+// (#14803c，HiLo Jersey 组件同款)；金/红/蓝取共享。纯新增零删改
+export const NUMBERUP = {
+  bgOuter: '#0d4a20',   // = KENO.bgOuter（球场绿边缘）
+  bgCenter: '#28814a',  // = KENO.bgCenter（球场绿中央）
+  band: '#0b3d1c',      // = KENO.band（顶栏/注栏）
+  ctrl: '#11582a',      // = KENO.ctrl（chrome 控件底）
+  strip: 'rgba(0,0,0,0.32)',
+  jersey: '#14803c',    // HiLo 球衣实心绿 — 号码卡小图
+  gold: '#ffd54f',      // 共享金 — 选中金框/赔率字
+  sel: '#35d07f',       // 确认绿（共享）
+  selTint: 'rgba(53,208,127,0.16)',
+  text: '#e8f5ec',
+  dim: 'rgba(255,255,255,0.55)',
+  hi: '#e2564a',        // HIGH / 红珠（共享 crash red）
+  lo: '#2f6fe0',        // LOW / 蓝珠（共享 blue）
+  orange: '#f28c17',
+}
+
 // Golden Boot — 10 球员冲刺排名彩：金靴金 + 球场绿。绿系直接取 KENO 终态键值；
 // 金系从共享 gold(#ffd54f)/HOTLINE.fire(#ffb300)/orange(#f28c17) 推导，纯新增零删改
 export const GOLDENBOOT = {
