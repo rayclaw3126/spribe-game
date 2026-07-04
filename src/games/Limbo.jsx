@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { useIsMobile } from '../hooks/useMediaQuery'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
+import { COLORS, LAYOUT } from '../components/shell/tokens'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetPanel from '../components/shell/BetPanel'
+import BetFeed from '../components/shell/BetFeed'
+import { makeFeedBots } from '../components/shell/arenaFx'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
@@ -53,6 +56,7 @@ export default function Limbo({ balance, setBalance }) {
   const [result, setResult] = useState(null)
   const [multiplier, setMultiplier] = useState(1)
   const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round, newest first
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
 
@@ -179,6 +183,7 @@ export default function Limbo({ balance, setBalance }) {
     setRolling(true)
     const r = Math.random()
     const finalMult = Math.min(MAX_MULT, Math.max(1, parseFloat((HOUSE_EDGE / r).toFixed(2))))
+    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only; after the roll)
     animRef.current = { to: finalMult, start: performance.now(), bet, t }
     particlesRef.current = []
     burstRef.current = false
@@ -200,6 +205,10 @@ export default function Limbo({ balance, setBalance }) {
     if (win) setBalance(bb => parseFloat((bb + profit).toFixed(2)))
     setResult({ mult: to, win, profit })
     setRoundHistory(h => [to, ...h].slice(0, 20))
+    // fake feed rows settle for the round: ~45% cash green, the rest grey out
+    setFeedBets(list => list.map(b => Math.random() < 0.45
+      ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+      : { ...b, status: 'crashed' }))
     setRolling(false)
     stopEngine()
     if (win) { burstRef.current = true; playWin() }
@@ -404,19 +413,22 @@ export default function Limbo({ balance, setBalance }) {
   }, [bgmOn])
 
   const isWin = result?.win
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
 
-  return (
-    <GameLayout title="Odds Climb" emoji="📈" color={COLOR}
-      sidebar={
+  const side = (
         <SideControls
           bet={bet} target={target} setTarget={setTarget}
           rolling={rolling} result={result}
           t={t} winChance={winChance} payout={payout}
         />
-      }
-    >
-      <Panel style={{ background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden' }}>
-        <RoundHistoryBar rounds={roundHistory} />
+  )
+
+  const mainPanel = (
+      <Panel style={{
+        background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden',
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
+      }}>
+        {!isDesk && <RoundHistoryBar rounds={roundHistory} />}
         <style>{`
           @keyframes ocFlash {
             0%, 100% { color: #EF4444; }
@@ -488,8 +500,10 @@ export default function Limbo({ balance, setBalance }) {
           </div>
         </div>
       </Panel>
+  )
 
-      {/* Shell bet bay — one-shot mode: bet → settling (greyed) → bet again. No Auto tab. */}
+  // Shell bet bay — one-shot mode: bet → settling (greyed) → bet again. No Auto tab.
+  const betBay = (
       <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>
         <BetPanel
           bet={bet}
@@ -503,6 +517,57 @@ export default function Limbo({ balance, setBalance }) {
             : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: play, disabled: bet > balance || bet < 1 }}
         />
       </div>
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024), same bones as Total Goals ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Odds Climb</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={feedBets} myBets={[]} online={914} fill />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
+              <RoundHistoryBar rounds={roundHistory} />
+            </div>
+            {/* in-card arrangement unchanged: meter left, Target Odds right, bay under meter */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20, alignItems: 'stretch', height: '100%', boxSizing: 'border-box' }}>
+                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, minHeight: 0 }}>{mainPanel}</div>
+                  {betBay}
+                </div>
+                <div style={{ minWidth: 0 }}>{side}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- stacked layout (<1024): unchanged ----
+  return (
+    <GameLayout title="Odds Climb" emoji="📈" color={COLOR} sidebar={side}>
+      {mainPanel}
+      {betBay}
     </GameLayout>
   )
 }
