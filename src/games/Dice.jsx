@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { COLORS, RADIUS, DICE } from '../components/shell/tokens'
-import { useIsMobile } from '../hooks/useMediaQuery'
+import { COLORS, RADIUS, LAYOUT, DICE } from '../components/shell/tokens'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import WinToast from '../components/shell/WinToast'
+import BetFeed from '../components/shell/BetFeed'
+import { makeFeedBots } from '../components/shell/arenaFx'
+import bgmUrl from '../assets/covers/bgm.mp3'
 
 // 单D2: Total Goals gameplay — 0–100 roll, UNDER/OVER settle, RTP-calibrated
 // payouts. Slider sets the target line (4.00–96.00); the roll is uniform on
@@ -43,6 +46,11 @@ export default function Dice({ balance, setBalance }) {
   const [history, setHistory] = useState([])     // real rolls {v, win}, newest first
   const [toasts, setToasts] = useState([])
   const [numColor, setNumColor] = useState(null) // null | 'win' | 'lose'
+  const [muted, setMuted] = useState(false)
+  const [bgmOn, setBgmOn] = useState(false)
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
+  const audioRef = useRef({ ctx: null, bus: null, muted: false })
+  const bgmRef = useRef({ audio: null })
   const trackRef = useRef(null)
   const dragRef = useRef(false)
   const numRef = useRef(null)
@@ -52,10 +60,123 @@ export default function Dice({ balance, setBalance }) {
   const lossTimerRef = useRef(null)
   const toastIdRef = useRef(0)
 
+  useEffect(() => { audioRef.current.muted = muted }, [muted])
+  useEffect(() => {
+    if (bgmOn) { if (!bgmRef.current.audio) { const a = new Audio(bgmUrl); a.loop = true; a.volume = 0.25; a.play().catch(() => {}); bgmRef.current.audio = a } }
+    else if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgmOn])
   useEffect(() => () => {
+    if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     if (lossTimerRef.current) clearTimeout(lossTimerRef.current)
   }, [])
+
+  // ---------- audio (mechanical recipe, shared compressor bus — Hotline) ----------
+  function ensureAudio() {
+    if (audioRef.current.ctx) return audioRef.current.ctx
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
+    audioRef.current.ctx = ctx; return ctx
+  }
+  function bus() {
+    const ctx = ensureAudio(); if (!ctx) return null
+    if (!audioRef.current.bus) {
+      const comp = ctx.createDynamicsCompressor()
+      comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 6
+      comp.attack.value = 0.002; comp.release.value = 0.12
+      const master = ctx.createGain(); master.gain.value = 0.9
+      comp.connect(master); master.connect(ctx.destination)
+      audioRef.current.bus = comp
+    }
+    return audioRef.current.bus
+  }
+  function clickLayer(ctx, out, t, { freq, vol, dur = 0.025 }) {
+    const len = Math.floor(ctx.sampleRate * dur)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2)
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.2
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.003)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.005)
+    src.connect(bp); bp.connect(g); g.connect(out)
+    src.start(t); src.stop(t + dur)
+  }
+  function woodLayer(ctx, out, t, { freq, vol, dur = 0.045 }) {
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = freq
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.004)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+    o.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.01)
+  }
+  function playTick() {   // mechanical ratchet click, ±10% pitch/volume humanized
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const out = bus(); const t = ctx.currentTime
+    const j = 0.9 + Math.random() * 0.2
+    clickLayer(ctx, out, t, { freq: 3000 * j, vol: 0.09 * j })
+    woodLayer(ctx, out, t, { freq: 200 * j, vol: 0.05 * j })
+  }
+  function playChip() {   // bet/step clack — same recipe, lighter & tighter
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const out = bus(); const t = ctx.currentTime
+    const j = 0.9 + Math.random() * 0.2
+    clickLayer(ctx, out, t, { freq: 2200 * j, vol: 0.07 * j, dur: 0.02 })
+    woodLayer(ctx, out, t, { freq: 260 * j, vol: 0.035 * j, dur: 0.035 })
+  }
+  function playLand() {   // pocket thunk: low noise + bass drop + lock knock
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const out = bus(); const t = ctx.currentTime
+    const len = Math.floor(ctx.sampleRate * 0.09)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len)
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320
+    const ng = ctx.createGain(); ng.gain.value = 0.22
+    src.connect(lp); lp.connect(ng); ng.connect(out); src.start(t); src.stop(t + 0.09)
+    const o = ctx.createOscillator(); o.type = 'sine'
+    o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.08)
+    const og = ctx.createGain()
+    og.gain.setValueAtTime(0.0001, t)
+    og.gain.exponentialRampToValueAtTime(0.22, t + 0.008)
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1)
+    o.connect(og); og.connect(out); o.start(t); o.stop(t + 0.11)
+    clickLayer(ctx, out, t + 0.01, { freq: 700, vol: 0.1, dur: 0.015 })
+  }
+  // Rising three-note chime, each note a detuned pair, with a short delay tail.
+  function playWin() {
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const out = bus(); const t = ctx.currentTime
+    const tail = ctx.createDelay(0.4); tail.delayTime.value = 0.16
+    const fb = ctx.createGain(); fb.gain.value = 0.24
+    const wet = ctx.createGain(); wet.gain.value = 0.35
+    tail.connect(fb); fb.connect(tail); tail.connect(wet); wet.connect(out)
+    ;[520, 690, 920].forEach((f, i) => {
+      const s = t + i * 0.085
+      ;[0.997, 1.004].forEach(dt => {
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f * dt
+        const g = ctx.createGain()
+        g.gain.setValueAtTime(0.0001, s)
+        g.gain.exponentialRampToValueAtTime(0.07, s + 0.02)
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.3)
+        o.connect(g); g.connect(out); g.connect(tail)
+        o.start(s); o.stop(s + 0.32)
+      })
+    })
+  }
+  function playLose() {   // muffled descending thud
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const out = bus(); const t = ctx.currentTime
+    const o = ctx.createOscillator(); const g = ctx.createGain()
+    o.type = 'triangle'; o.frequency.setValueAtTime(300, t); o.frequency.exponentialRampToValueAtTime(110, t + 0.4)
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.13, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.44)
+    o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.46)
+  }
 
   const underChance = target                       // UNDER wins roll < target
   const overChance = round2(100 - target)          // OVER wins roll > target
@@ -83,10 +204,13 @@ export default function Dice({ balance, setBalance }) {
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
   }
 
-  // ~1.2s ease-out roll: ball + big number driven per frame via refs
+  // ~1.2s ease-out roll: ball + big number driven per frame via refs.
+  // Ticks fire on 2-point boundary crossings of the eased value, so they
+  // thin out naturally with the deceleration; a thunk lands at the stop.
   function animateRoll(to, onDone) {
     const from = shownRef.current
     let t0 = null
+    let lastK = Math.floor(from / 2)
     const step = now => {
       if (t0 === null) t0 = now
       const t = Math.min(1, (now - t0) / ROLL_MS)
@@ -95,21 +219,26 @@ export default function Dice({ balance, setBalance }) {
       shownRef.current = v
       if (numRef.current) numRef.current.textContent = v.toFixed(2)
       if (ballRef.current) ballRef.current.style.left = `${v}%`
+      const k = Math.floor(v / 2)
+      if (k !== lastK) { lastK = k; playTick() }
       if (t < 1) rafRef.current = requestAnimationFrame(step)
-      else onDone()
+      else { playLand(); onDone() }
     }
     rafRef.current = requestAnimationFrame(step)
   }
 
   function betOn(side) {
     if (rolling || bet > balance || bet < 1) return
+    const roll = rollPoint()   // roll first — SFX jitter randoms must not sit ahead of it
+    ensureAudio()
+    playChip()
     setBalance(b => round2(b - bet))
     setRolling(true)
     setResult(null)
     setNumColor(null)
     if (lossTimerRef.current) clearTimeout(lossTimerRef.current)
 
-    const roll = rollPoint()
+    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only; after the roll)
     const chance = side === 'under' ? underChance : overChance
     // 边界: 两侧都用严格不等号 —— roll 恰等于 target 时两边都输
     const win = side === 'under' ? roll < target : roll > target
@@ -121,12 +250,18 @@ export default function Dice({ balance, setBalance }) {
         setBalance(b => round2(b + pay))
         pushToast(`开点 ${roll.toFixed(2)}`, pay)
         setNumColor('win')
+        playWin()
       } else {
         setNumColor('lose')
         lossTimerRef.current = setTimeout(() => setNumColor(null), 700)
+        playLose()
       }
       setResult({ roll, win, side, payout: pay })
       setHistory(h => [{ v: roll, win }, ...h].slice(0, 12))
+      // fake feed rows settle for the round: ~45% cash green, the rest grey out
+      setFeedBets(list => list.map(b => Math.random() < 0.45
+        ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+        : { ...b, status: 'crashed' }))
       setRolling(false)
     })
   }
@@ -153,12 +288,37 @@ export default function Dice({ balance, setBalance }) {
     display: 'inline-flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.3,
   })
   const locked = rolling || bet > balance || bet < 1
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
 
-  return (
-    <GameLayout title="Total Goals" emoji="⚽" color={DICE.teal}>
+  // roll-value pill strip — desktop renders it in the 34px skeleton row,
+  // mobile keeps it inside the card (never both)
+  const historyStrip = (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: DICE.band, borderRadius: RADIUS.pill,
+          padding: '4px 6px', overflow: 'hidden', minHeight: 24,
+        }}>
+          {(isMobile ? history.slice(0, 5) : history.slice(0, 10)).map((h, i) => (
+            <span key={history.length - i} style={{
+              padding: '3px 10px', borderRadius: RADIUS.pill,
+              background: h.win ? 'rgba(46,224,140,0.18)' : 'rgba(0,0,0,0.3)',
+              color: h.win ? DICE.teal : 'rgba(255,255,255,0.55)',
+              fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
+            }}>{h.v.toFixed(2)}</span>
+          ))}
+          <span style={{
+            marginLeft: 'auto', padding: '3px 12px', borderRadius: RADIUS.pill,
+            background: DICE.circleBlue, color: COLORS.white,
+            fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
+          }}>⟲ ˅</span>
+        </div>
+  )
+
+  const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 30%, ${DICE.bgCenter}, ${DICE.bgOuter})`,
         borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* ---- top bar ---- */}
         <div style={{
@@ -184,28 +344,22 @@ export default function Dice({ balance, setBalance }) {
           <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
           </span>
+          <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
+            width: 30, height: 30, borderRadius: RADIUS.pill,
+            background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
+            color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+            fontSize: 13, cursor: 'pointer',
+          }}>🎵</button>
+          <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
+            width: 30, height: 30, borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+            border: '1px solid rgba(255,255,255,0.25)',
+            fontSize: 14, cursor: 'pointer',
+          }}>{muted ? '🔇' : '🔊'}</button>
         </div>
 
-        {/* ---- roll history strip: real rolls, win green / loss grey ---- */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          background: DICE.band, borderRadius: RADIUS.pill,
-          padding: '4px 6px', marginBottom: 14, overflow: 'hidden', minHeight: 24,
-        }}>
-          {(isMobile ? history.slice(0, 5) : history.slice(0, 10)).map((h, i) => (
-            <span key={history.length - i} style={{
-              padding: '3px 10px', borderRadius: RADIUS.pill,
-              background: h.win ? 'rgba(46,224,140,0.18)' : 'rgba(0,0,0,0.3)',
-              color: h.win ? DICE.teal : 'rgba(255,255,255,0.55)',
-              fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
-            }}>{h.v.toFixed(2)}</span>
-          ))}
-          <span style={{
-            marginLeft: 'auto', padding: '3px 12px', borderRadius: RADIUS.pill,
-            background: DICE.circleBlue, color: COLORS.white,
-            fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-          }}>⟲ ˅</span>
-        </div>
+        {/* ---- roll history strip (mobile only — desktop row has it) ---- */}
+        {!isDesk && <div style={{ marginBottom: 14 }}>{historyStrip}</div>}
 
         {/* ---- main track panel: big number + double scale bands + ball ---- */}
         <div style={{
@@ -349,7 +503,7 @@ export default function Dice({ balance, setBalance }) {
               }}
             />
           </div>
-          <button type="button" disabled={rolling} onClick={() => setBet(b => Math.max(1, b - 10))} style={{ ...circleBtn, opacity: rolling ? 0.5 : 1, cursor: rolling ? 'not-allowed' : 'pointer' }}>−</button>
+          <button type="button" disabled={rolling} onClick={() => { playChip(); setBet(b => Math.max(1, b - 10)) }} style={{ ...circleBtn, opacity: rolling ? 0.5 : 1, cursor: rolling ? 'not-allowed' : 'pointer' }}>−</button>
           <button type="button" style={{ ...circleBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} title="筹码">
             {/* chip-stack icon drawn in CSS — the ≡ glyph renders as a dash in this font */}
             <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
@@ -358,7 +512,7 @@ export default function Dice({ balance, setBalance }) {
               <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
             </span>
           </button>
-          <button type="button" disabled={rolling} onClick={() => setBet(b => b + 10)} style={{ ...circleBtn, opacity: rolling ? 0.5 : 1, cursor: rolling ? 'not-allowed' : 'pointer' }}>+</button>
+          <button type="button" disabled={rolling} onClick={() => { playChip(); setBet(b => b + 10) }} style={{ ...circleBtn, opacity: rolling ? 0.5 : 1, cursor: rolling ? 'not-allowed' : 'pointer' }}>+</button>
           <button type="button" disabled title="刷新" style={{
             width: 40, height: 40, borderRadius: RADIUS.pill,
             background: DICE.circleBlue, color: COLORS.white,
@@ -375,6 +529,49 @@ export default function Dice({ balance, setBalance }) {
           </button>
         </div>
       </Panel>
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024), same bones as Hotline ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Total Goals</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={feedBets} myBets={[]} online={914} fill />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
+              {historyStrip}
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {gameCard}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- stacked layout (<1024): unchanged ----
+  return (
+    <GameLayout title="Total Goals" emoji="⚽" color={DICE.teal}>
+      {gameCard}
     </GameLayout>
   )
 }
