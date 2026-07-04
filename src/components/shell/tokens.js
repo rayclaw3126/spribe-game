@@ -126,6 +126,27 @@ export const DICE = {
   circleBlue: '#2f6fe0', // round refresh button
 }
 
+// Free Kick — Spribe Plinko reskinned teal→pitch green; sampled from the
+// Plinko reference shot (multiplier row colors + button trio kept).
+export const PLINKO = {
+  bgOuter: '#0c4a24',     // pitch edge
+  bgCenter: '#26a055',    // pitch center glow
+  band: '#0b4d23',        // top/bottom bars
+  line: 'rgba(255,255,255,0.35)',   // center-circle / corner-arc lines
+  pin: '#f2f5f7',         // white pearl pins
+  dash: 'rgba(255,255,255,0.4)',    // funnel dashed borders
+  ball: '#ffffff',        // football base
+  rowGreen: '#56a80e', rowGreenDim: '#3f7c0a',
+  rowYellow: '#f08c00', rowYellowDim: '#b56400',
+  rowRed: '#e8352c', rowRedDim: '#a31f18',
+  btnGreen: '#4a9b16',
+  btnYellow: '#e0570e',
+  btnRed: '#d61932',
+  blue: '#2f6fe0',        // round refresh button
+  gold: '#ffd54f',
+  orange: '#f28c17',
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',
