@@ -7,7 +7,7 @@ import BetPanel from '../components/shell/BetPanel'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import ballUrl from '../assets/covers/ball-3d.png'
-import bgmUrl from '../assets/covers/bgm.mp3'
+import { useBgm } from '../components/shell/bgmManager'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 
 const COLOR = '#16C784'
@@ -49,7 +49,6 @@ export default function Limbo({ balance, setBalance }) {
   const bounceRef = useRef(0)              // loss bounce start timestamp
   const isMobileRef = useRef(false)
   const audioRef = useRef({ ctx: null, muted: false, engine: null })
-  const bgmRef = useRef({ audio: null })
 
   const [bet, setBet] = useState(10)
   const [target, setTarget] = useState(2.0)
@@ -59,7 +58,7 @@ export default function Limbo({ balance, setBalance }) {
   const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round, newest first
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [muted, setMuted] = useState(false)
-  const [bgmOn, setBgmOn] = useState(false)
+  const [bgmOn, toggleBgm] = useBgm()
 
   const t = Math.max(1.01, target || 1.01)
   const winChance = Math.min(99, (HOUSE_EDGE / t) * 100)
@@ -158,23 +157,6 @@ export default function Limbo({ balance, setBalance }) {
     gain.gain.exponentialRampToValueAtTime(0.16, ctx.currentTime + 0.03)
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
     osc.stop(ctx.currentTime + 0.55)
-  }
-
-  // Background music — real looping casino track (HTML Audio), independent of SFX mute.
-  function startBgm() {
-    if (bgmRef.current.audio) return
-    const audio = new Audio(bgmUrl)
-    audio.loop = true
-    audio.volume = 0.25            // quiet — stays under the SFX (ding/crash)
-    audio.play().catch(() => {})   // ignore autoplay rejection (starts on the click gesture)
-    bgmRef.current.audio = audio
-  }
-
-  function stopBgm() {
-    if (bgmRef.current.audio) {
-      bgmRef.current.audio.pause()
-      bgmRef.current.audio = null
-    }
   }
 
   function play() {
@@ -391,7 +373,6 @@ export default function Limbo({ balance, setBalance }) {
     return () => {
       cancelAnimationFrame(frameRef.current)
       stopEngine()
-      stopBgm()
     }
     // The meter loop owns round settlement through refs; restarting it on render would duplicate frames.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -404,14 +385,6 @@ export default function Limbo({ balance, setBalance }) {
     // Audio nodes are managed imperatively through refs to avoid restarting the loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [muted])
-
-  useEffect(() => {
-    // BGM starts on user interaction (BGM button click) — respects autoplay policy.
-    if (bgmOn) startBgm()
-    else stopBgm()
-    // BGM nodes are managed imperatively through refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgmOn])
 
   const isWin = result?.win
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
@@ -483,7 +456,7 @@ export default function Limbo({ balance, setBalance }) {
         {/* BGM toggle — game-card top-right, anchored to the card not the meter */}
         <button
           type="button"
-          onClick={() => setBgmOn(v => !v)}
+          onClick={toggleBgm}
           style={{
             position: 'absolute', top: 10, right: 58, zIndex: 3,
             width: 40,

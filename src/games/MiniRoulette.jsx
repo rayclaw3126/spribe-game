@@ -6,7 +6,7 @@ import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import bgmUrl from '../assets/covers/bgm.mp3'
+import { useBgm } from '../components/shell/bgmManager'
 
 // Team Roulette — full bet/spin/settle round on the Spribe-replica board.
 // Standard 12-number mini-roulette paytable:
@@ -105,7 +105,7 @@ export default function MiniRoulette({ balance, setBalance }) {
   const [note, setNote] = useState('')
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
   const [muted, setMuted] = useState(false)
-  const [bgmOn, setBgmOn] = useState(false)
+  const [bgmOn, toggleBgm] = useBgm()
 
   const balanceRef = useRef(balance)
   const betsRef = useRef(bets)
@@ -114,15 +114,12 @@ export default function MiniRoulette({ balance, setBalance }) {
   const tickTimersRef = useRef([])
   const toastIdRef = useRef(0)
   const audioRef = useRef({ ctx: null, muted: false })
-  const bgmRef = useRef({ audio: null })
   useEffect(() => { balanceRef.current = balance }, [balance])
   useEffect(() => { betsRef.current = bets }, [bets])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => {
     timersRef.current.forEach(clearTimeout)
     tickTimersRef.current.forEach(clearTimeout)
-    stopBgm()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const later = (fn, ms) => { timersRef.current.push(setTimeout(fn, ms)) }
 
@@ -192,28 +189,6 @@ export default function MiniRoulette({ balance, setBalance }) {
     }
     tickTimersRef.current.push(setTimeout(playLand, SPIN_MS - 30))
   }
-
-  // ---------- BGM (real mp3, HTML Audio) — mirrors Breakaway ----------
-  function startBgm() {
-    if (bgmRef.current.audio) return
-    const audio = new Audio(bgmUrl)
-    audio.loop = true
-    audio.volume = 0.25            // quiet — stays under the SFX
-    audio.play().catch(() => {})   // ignore autoplay rejection (starts on the click gesture)
-    bgmRef.current.audio = audio
-  }
-  function stopBgm() {
-    if (bgmRef.current.audio) {
-      bgmRef.current.audio.pause()
-      bgmRef.current.audio = null
-    }
-  }
-  useEffect(() => {
-    // BGM starts on user interaction (BGM button click) — respects autoplay policy.
-    if (bgmOn) startBgm()
-    else stopBgm()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgmOn])
 
   // Single money path (mirrors Aviator's credit()).
   function creditBal(delta) {
@@ -415,7 +390,7 @@ export default function MiniRoulette({ balance, setBalance }) {
           {/* BGM toggle — left of mute, beside the balance */}
           <button
             type="button"
-            onClick={() => setBgmOn(v => !v)}
+            onClick={toggleBgm}
             style={{
               width: 30, height: 30, borderRadius: RADIUS.pill,
               background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',

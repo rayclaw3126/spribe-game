@@ -5,7 +5,7 @@ import { COLORS, RADIUS, LAYOUT, KENO } from '../components/shell/tokens'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import bgmUrl from '../assets/covers/bgm.mp3'
+import { useBgm } from '../components/shell/bgmManager'
 
 // Team Keno — Spribe-aligned rules: 36-ball pool, pick up to 10, 10 balls
 // drawn per round. Visual layer is the 1:1 Spribe replica from K1.
@@ -40,18 +40,11 @@ export default function Keno({ balance, setBalance }) {
   const [roundHistory, setRoundHistory] = useState([])   // won multiplier per round, newest first
   const [message, setMessage] = useState(null)
   const [muted, setMuted] = useState(false)
-  const [bgmOn, setBgmOn] = useState(false)
+  const [bgmOn, toggleBgm] = useBgm()
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const audioRef = useRef({ ctx: null, muted: false })
-  const bgmRef = useRef({ audio: null })
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
-  useEffect(() => {
-    if (bgmOn) { if (!bgmRef.current.audio) { const a = new Audio(bgmUrl); a.loop = true; a.volume = 0.25; a.play().catch(() => {}); bgmRef.current.audio = a } }
-    else if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgmOn])
-  useEffect(() => () => { if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null } }, [])
 
   // ---------- audio (Web Audio synth) ----------
   function ensureAudio() {
@@ -276,7 +269,7 @@ export default function Keno({ balance, setBalance }) {
           <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 13, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
           </span>
-          <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
+          <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
             background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
             color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,

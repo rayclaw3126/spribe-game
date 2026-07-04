@@ -7,7 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import bayBgUrl from '../assets/shared/bay_bg.png'
-import bgmUrl from '../assets/covers/bgm.mp3'
+import { useBgm } from '../components/shell/bgmManager'
 
 // 单T2: Momentum random-walk engine + bet/cashout settlement.
 //
@@ -47,7 +47,7 @@ export default function Momentum({ balance, setBalance }) {
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
   const [toasts, setToasts] = useState([])
   const [muted, setMuted] = useState(false)
-  const [bgmOn, setBgmOn] = useState(false)
+  const [bgmOn, toggleBgm] = useBgm()
   const [roundId, setRoundId] = useState(0)
 
   const phaseRef = useRef('betting')
@@ -60,7 +60,6 @@ export default function Momentum({ balance, setBalance }) {
   const timersRef = useRef([])
   const toastIdRef = useRef(0)
   const audioRef = useRef({ ctx: null, muted: false })
-  const bgmRef = useRef({ audio: null })
 
   useEffect(() => { balanceRef.current = balance }, [balance])
   useEffect(() => { betAmtRef.current = bet }, [bet])
@@ -109,13 +108,6 @@ export default function Momentum({ balance, setBalance }) {
     ;[880, 1320].forEach((f, i) => { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.connect(g); o.start(t + i * 0.05); o.stop(t + 0.28 + i * 0.05) })
     g.gain.exponentialRampToValueAtTime(0.12, t + 0.03); g.gain.exponentialRampToValueAtTime(0.001, t + 0.42)
   }
-  // BGM 七件套
-  function startBgm() { if (bgmRef.current.audio) return; const a = new Audio(bgmUrl); a.loop = true; a.volume = 0.25; a.play().catch(() => {}); bgmRef.current.audio = a }
-  function stopBgm() { if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null } }
-  useEffect(() => { if (bgmOn) startBgm(); else stopBgm()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgmOn])
-
   function pushToast(label, win) {
     const id = ++toastIdRef.current
     setToasts(t => [...t, { id, label, win }])
@@ -223,7 +215,6 @@ export default function Momentum({ balance, setBalance }) {
     return () => {
       timersRef.current.forEach(clearTimeout)
       timersRef.current = []
-      stopBgm()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -288,7 +279,7 @@ export default function Momentum({ balance, setBalance }) {
         <WinToast toasts={toasts} />
 
         {/* audio toggles — card top-right */}
-        <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
+        <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
           position: 'absolute', top: 10, right: 52, zIndex: 3, width: 32, height: 32, borderRadius: '50%',
           background: bgmOn ? 'rgba(53,208,127,0.2)' : 'rgba(0,0,0,0.35)',
           color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.5 : 0.25})`, fontSize: 13, cursor: 'pointer',

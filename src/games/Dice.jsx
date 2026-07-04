@@ -5,7 +5,7 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import WinToast from '../components/shell/WinToast'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import bgmUrl from '../assets/covers/bgm.mp3'
+import { useBgm } from '../components/shell/bgmManager'
 
 // 单D2: Total Goals gameplay — 0–100 roll, UNDER/OVER settle, RTP-calibrated
 // payouts. Slider sets the target line (4.00–96.00); the roll is uniform on
@@ -47,10 +47,9 @@ export default function Dice({ balance, setBalance }) {
   const [toasts, setToasts] = useState([])
   const [numColor, setNumColor] = useState(null) // null | 'win' | 'lose'
   const [muted, setMuted] = useState(false)
-  const [bgmOn, setBgmOn] = useState(false)
+  const [bgmOn, toggleBgm] = useBgm()
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const audioRef = useRef({ ctx: null, bus: null, muted: false })
-  const bgmRef = useRef({ audio: null })
   const trackRef = useRef(null)
   const dragRef = useRef(false)
   const numRef = useRef(null)
@@ -61,13 +60,7 @@ export default function Dice({ balance, setBalance }) {
   const toastIdRef = useRef(0)
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
-  useEffect(() => {
-    if (bgmOn) { if (!bgmRef.current.audio) { const a = new Audio(bgmUrl); a.loop = true; a.volume = 0.25; a.play().catch(() => {}); bgmRef.current.audio = a } }
-    else if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgmOn])
   useEffect(() => () => {
-    if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     if (lossTimerRef.current) clearTimeout(lossTimerRef.current)
   }, [])
@@ -344,7 +337,7 @@ export default function Dice({ balance, setBalance }) {
           <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
           </span>
-          <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
+          <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
             background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
             color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,

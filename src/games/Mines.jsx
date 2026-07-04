@@ -5,7 +5,7 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import bgmUrl from '../assets/covers/bgm.mp3'
+import { useBgm } from '../components/shell/bgmManager'
 
 // 单M2: Dribble gameplay — adjustable defenders, hypergeometric multipliers,
 // RANDOM/Auto, settlement (Spribe Mines model).
@@ -79,10 +79,9 @@ export default function Mines({ balance, setBalance }) {
   const [cashedOut, setCashedOut] = useState(false)
   const [, setShaking] = useState(false)
   const [muted, setMuted] = useState(false)
-  const [bgmOn, setBgmOn] = useState(false)
+  const [bgmOn, toggleBgm] = useBgm()
 
   const audioRef = useRef({ ctx: null, muted: false })
-  const bgmRef = useRef({ audio: null })
   const shakeTimer = useRef(null)
 
   // safe reveals only (after bust/cashout `revealed` also holds the mines)
@@ -138,13 +137,7 @@ export default function Mines({ balance, setBalance }) {
     })
   }
 
-  // ---------- BGM ----------
-  function startBgm() { if (bgmRef.current.audio) return; const a = new Audio(bgmUrl); a.loop = true; a.volume = 0.25; a.play().catch(() => {}); bgmRef.current.audio = a }
-  function stopBgm() { if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null } }
-  useEffect(() => { if (bgmOn) startBgm(); else stopBgm()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgmOn])
-  useEffect(() => () => { stopBgm(); if (shakeTimer.current) clearTimeout(shakeTimer.current) }, [])
+  useEffect(() => () => { if (shakeTimer.current) clearTimeout(shakeTimer.current) }, [])
 
   function triggerShake() {
     setShaking(true)
@@ -313,7 +306,7 @@ export default function Mines({ balance, setBalance }) {
           <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
           </span>
-          <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
+          <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
             background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
             color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,

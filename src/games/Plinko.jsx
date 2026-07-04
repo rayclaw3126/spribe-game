@@ -5,7 +5,7 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import WinToast from '../components/shell/WinToast'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import bgmUrl from '../assets/covers/bgm.mp3'
+import { useBgm } from '../components/shell/bgmManager'
 
 // 单P2: Free Kick gameplay — three risk tiers, binomial physics drop,
 // adjustable pins, RTP-calibrated paytables.
@@ -184,14 +184,13 @@ export default function Plinko({ balance, setBalance }) {
   const [toasts, setToasts] = useState([])
   const [flash, setFlash] = useState(null)         // { tier, k } landing cell glow
   const [muted, setMuted] = useState(false)
-  const [bgmOn, setBgmOn] = useState(false)
+  const [bgmOn, toggleBgm] = useBgm()
   const ballsRef = useRef([])
   const rafRef = useRef(null)
   const ballIdRef = useRef(0)
   const toastIdRef = useRef(0)
   const flashTimerRef = useRef(null)
   const audioRef = useRef({ ctx: null, bus: null, muted: false })
-  const bgmRef = useRef({ audio: null })
 
   const TABLE = {
     green: multsFor(pins, 'green'),
@@ -201,12 +200,7 @@ export default function Plinko({ balance, setBalance }) {
   const flying = balls.length > 0
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
-  useEffect(() => {
-    if (bgmOn) { if (!bgmRef.current.audio) { const a = new Audio(bgmUrl); a.loop = true; a.volume = 0.25; a.play().catch(() => {}); bgmRef.current.audio = a } }
-    else if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
-  }, [bgmOn])
   useEffect(() => () => {
-    if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
   }, [])
@@ -422,7 +416,7 @@ export default function Plinko({ balance, setBalance }) {
           <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
           </span>
-          <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
+          <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
             background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
             color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
