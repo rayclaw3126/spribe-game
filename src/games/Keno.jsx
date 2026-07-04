@@ -35,6 +35,9 @@ const PAYOUTS = {
 export default function Keno({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // centered DEMO pill would collide with the How-to-Play pill, so hide it
+  const deskWide = useMediaQuery('(min-width: 1200px)')
   const [bet, setBet] = useState(10)
   const [selected, setSelected] = useState([])
   const [drawn, setDrawn] = useState([])
@@ -182,13 +185,13 @@ export default function Keno({ balance, setBalance }) {
   // ---------- visual layer (Spribe 1:1) ----------
   const roundBtn = {
     width: 30, height: 30, borderRadius: RADIUS.pill,
-    background: KENO.pill, color: COLORS.white,
+    background: KENO.ctrl, color: COLORS.white,
     border: '1px solid rgba(255,255,255,0.35)',
     fontSize: 15, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
   }
   const wideBtn = enabled => ({
     flex: 1, padding: '9px 0', borderRadius: RADIUS.pill,
-    background: KENO.pill,
+    background: KENO.ctrl,
     border: '1px solid rgba(255,255,255,0.35)',
     color: enabled ? COLORS.white : 'rgba(255,255,255,0.45)',
     fontSize: 13, fontWeight: 800, letterSpacing: 1,
@@ -201,7 +204,7 @@ export default function Keno({ balance, setBalance }) {
     return {
       aspectRatio: '1', borderRadius: RADIUS.pill, padding: 0,
       background: sel
-        ? `radial-gradient(circle at 32% 28%, #ff7aa8, ${KENO.pill} 58%, ${KENO.bgOuter})`
+        ? `radial-gradient(circle at 32% 28%, #ff7aa8, ${KENO.pill} 58%, ${KENO.ballDeep})`
         : `radial-gradient(circle at 32% 28%, #57323e, ${KENO.ball} 62%)`,
       border: hit
         ? `2px solid ${KENO.green}`
@@ -222,13 +225,53 @@ export default function Keno({ balance, setBalance }) {
   }
   const drawnSet = new Set(drawn)
 
+  // 号码球上浮背景（方案A）— 6 颗白系幽灵号码球从卡底缓浮至上带淡出，
+  // 贴左右边避开 36 格阵热区；号码纯装饰静态写死
+  const FLOAT_BALLS = [
+    { n: 7,  s: 30, pos: { left: '3%' },  op: 0.42, dur: '12s', del: '0s',    sway: '10px' },
+    { n: 23, s: 22, pos: { left: '8%' },  op: 0.32, dur: '15s', del: '-6s',   sway: '-12px' },
+    { n: 14, s: 34, pos: { right: '3%' }, op: 0.50, dur: '11s', del: '-3s',   sway: '14px' },
+    { n: 31, s: 24, pos: { right: '8%' }, op: 0.35, dur: '14s', del: '-9s',   sway: '-8px' },
+    { n: 5,  s: 28, pos: { left: '5%' },  op: 0.40, dur: '13s', del: '-10s',  sway: '12px' },
+    { n: 36, s: 26, pos: { right: '6%' }, op: 0.38, dur: '15s', del: '-1.5s', sway: '-14px' },
+  ]
+  const floatBalls = (
+    <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <style>{`
+        @keyframes knFloat {
+          0%   { transform: translate(0, 0); opacity: 0; }
+          12%  { opacity: var(--op); }
+          55%  { transform: translate(var(--sway), -55vh); }
+          85%  { opacity: var(--op); }
+          100% { transform: translate(0, -110vh); opacity: 0; }
+        }
+        .knFloat { animation: knFloat var(--d) linear infinite; animation-delay: var(--dl); }
+        @media (prefers-reduced-motion: reduce) { .knFloat { animation: none; opacity: 0; } }
+      `}</style>
+      {FLOAT_BALLS.map((b, i) => (
+        <span key={i} className="knFloat" style={{
+          position: 'absolute', bottom: -40, ...b.pos,
+          width: b.s, height: b.s, borderRadius: '50%',
+          background: 'radial-gradient(circle at 32% 28%, rgba(255,255,255,0.9), rgba(255,255,255,0.25) 60%, rgba(255,255,255,0.08))',
+          color: 'rgba(255,255,255,0.9)', fontSize: Math.round(b.s * 0.42), fontWeight: 900,
+          fontFamily: "'Space Grotesk', sans-serif",
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          '--op': b.op, '--d': b.dur, '--dl': b.del, '--sway': b.sway,
+          opacity: 0,
+        }}>{b.n}</span>
+      ))}
+    </div>
+  )
+
   const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 42%, ${KENO.bgCenter}, ${KENO.bgOuter})`,
-        borderColor: COLORS.border, padding: isMobile ? 12 : 18,
+        borderColor: COLORS.border, padding: 0,
         overflow: 'hidden', position: 'relative',
+        display: 'flex', flexDirection: 'column',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
+        {floatBalls}
         {/* giant side chevrons (dark X texture) */}
         <div style={{
           position: 'absolute', left: -140, top: '52%', width: 260, height: 260,
@@ -243,7 +286,7 @@ export default function Keno({ balance, setBalance }) {
 
         {/* ---- top bar ---- */}
         <div style={{
-          margin: isMobile ? '-12px -12px 14px' : '-18px -18px 16px',
+          flex: '0 0 auto',
           padding: '8px 14px',
           background: KENO.band,
           display: 'flex', alignItems: 'center', gap: 10,
@@ -251,7 +294,7 @@ export default function Keno({ balance, setBalance }) {
         }}>
           <span style={{
             padding: '5px 16px', borderRadius: RADIUS.pill,
-            background: KENO.pill, border: '1px solid rgba(255,255,255,0.3)',
+            background: KENO.ctrl, border: '1px solid rgba(255,255,255,0.3)',
             color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
           }}>
             TEAM KENO ▾
@@ -269,6 +312,14 @@ export default function Keno({ balance, setBalance }) {
             }}>?</span>
             How to Play?
           </span>
+          {!isMobile && (!isDesk || deskWide) && (
+            <span style={{
+              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+              padding: '4px 18px', borderRadius: RADIUS.pill,
+              border: '1px solid #ffd54f', color: '#ffd54f',
+              fontSize: 11, fontWeight: 900, letterSpacing: 2,
+            }}>DEMO MODE</span>
+          )}
           <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 13, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
           </span>
@@ -289,8 +340,15 @@ export default function Keno({ balance, setBalance }) {
           }}><SpeakerIcon on={!muted} /></button>
         </div>
 
+        {/* ---- middle zone: flexes to fill the card, board vertically centered ---- */}
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
+          display: 'flex', flexDirection: 'column', justifyContent: 'center',
+          padding: isMobile ? '12px 12px' : '14px 18px', boxSizing: 'border-box',
+        }}>
+
         {/* ---- board ---- */}
-        <div style={{ maxWidth: 640, margin: '0 auto', position: 'relative', zIndex: 1 }}>
+        <div style={{ maxWidth: 640, margin: '0 auto', position: 'relative', zIndex: 1, width: '100%' }}>
           <style>{`
             @keyframes kenoDrop {
               from { transform: translateY(-18px) scale(0.6); opacity: 0; }
@@ -363,17 +421,20 @@ export default function Keno({ balance, setBalance }) {
           </div>
         </div>
 
-        {/* ---- bottom bet band ---- */}
+        </div>{/* /middle zone */}
+
+        {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip ---- */}
         <div style={{
-          margin: isMobile ? '14px -12px -12px' : '18px -18px -18px',
+          flex: '0 0 auto',
           padding: '12px 18px',
           background: KENO.band,
+          borderTop: '1px solid rgba(0,0,0,0.25)',
           display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center',
           position: 'relative', zIndex: 1, flexWrap: 'wrap',
         }}>
           <div style={{
             padding: '5px 22px', borderRadius: RADIUS.pill,
-            background: KENO.pill, border: '1px solid rgba(255,255,255,0.3)',
+            background: KENO.ctrl, border: '1px solid rgba(255,255,255,0.3)',
             textAlign: 'center',
           }}>
             <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>

@@ -73,15 +73,18 @@ export const ROULETTE = {
 
 // Team Keno — sampled from the Spribe Keno reference shot
 export const KENO = {
-  bgOuter: '#5a0626',   // 仿 Spribe 洋红（面板边缘暗酒红）
-  bgCenter: '#a50f47',  // 仿 Spribe 洋红（中央亮）
-  band: '#6d0830',      // 顶栏 / 底部条
+  // 背景/chrome 改球场绿（对照 StreakRoll 终态色感），玩法洋红保留：
+  bgOuter: '#0d4a20',   // 球场绿（面板边缘，= MINES.bgOuter）
+  bgCenter: '#28814a',  // 球场绿（中央，= HOTLINE.bgCenter 终态）
+  band: '#0b3d1c',      // 顶栏 / 底部条（= MINES.band，控件底更深档）
+  ctrl: '#11582a',      // chrome 控件底（= HOTLINE.band 终态，外框深绿档）
   strip: 'rgba(0,0,0,0.28)',
-  pill: '#c81450',      // crimson pills / RANDOM
+  pill: '#c81450',      // crimson —— 玩法色：选中球/命中球/标题 accent（不动）
+  ballDeep: '#5a0626',  // 选中球渐变外缘（原洋红 bgOuter 值，保玩法色）
   ball: '#211016',      // number ball base (near-black)
   ballRim: 'rgba(214,26,86,0.55)',
   green: '#35d07f',     // PICK NUMBERS FOR START
-  blue: '#3b4ed8',      // turbo circle button
+  blue: '#2e8f4f',      // turbo circle button — 绿版（= HOTLINE.blue 终态，键名保留）
   bet: '#9aa019',       // BET olive gradient top
   betDark: '#6e7513',   // BET olive gradient bottom
   orange: '#f28c17',
