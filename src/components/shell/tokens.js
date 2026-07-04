@@ -91,6 +91,26 @@ export const KENO = {
   xDark: 'rgba(0,0,0,0.16)',  // giant side chevrons
 }
 
+// Golden Boot — 10 球员冲刺排名彩：金靴金 + 球场绿。绿系直接取 KENO 终态键值；
+// 金系从共享 gold(#ffd54f)/HOTLINE.fire(#ffb300)/orange(#f28c17) 推导，纯新增零删改
+export const GOLDENBOOT = {
+  bgOuter: '#0d4a20',   // = KENO.bgOuter（球场绿边缘）
+  bgCenter: '#28814a',  // = KENO.bgCenter（球场绿中央）
+  band: '#0b3d1c',      // = KENO.band（顶栏/注栏）
+  ctrl: '#11582a',      // = KENO.ctrl（chrome 控件底）
+  strip: 'rgba(0,0,0,0.32)',
+  gold: '#ffd54f',      // 金靴主金（共享 gold）— 赔率字/选中金框
+  fire: '#ffb300',      // 金珠渐变中段（= HOTLINE.fire）
+  goldDeep: '#f28c17',  // 金渐变收底（共享 orange）
+  sel: '#35d07f',       // 确认绿（共享）
+  selTint: 'rgba(53,208,127,0.16)',   // 选中绿罩（共享 selTint）
+  text: '#e8f5ec',
+  dim: 'rgba(255,255,255,0.55)',
+  dragon: '#e2564a',    // DRAGON（共享 crash red）
+  tiger: '#2f6fe0',     // TIGER（共享 blue）
+  orange: '#f28c17',
+}
+
 // Odds Climb — 球场绿 chrome（键值直接取 KENO 终态同款）；力量表/倍率大字/
 // 中奖态等玩法色仍留在 Limbo.jsx 局部（COLOR/FILL_TOP/AMBER + canvas 内色）
 export const LIMBO = {

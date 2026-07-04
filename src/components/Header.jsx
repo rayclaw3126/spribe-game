@@ -14,6 +14,7 @@ const GAME_NAMES = {
   Limbo: 'Odds Climb',
   StreakRoll: 'Streak Roll',
   HalfTime: 'Half Time',
+  GoldenBoot: 'Golden Boot',
 }
 
 export default function Header({ balance, onHome, activeGame }) {

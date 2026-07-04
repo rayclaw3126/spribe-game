@@ -24,6 +24,8 @@ const GAMES = [
   { id: 'MiniRoulette', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette },
   { id: 'Momentum', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum },
   { id: 'HalfTime', name: 'Half Time', desc: 'Call the keno sum — over, under, zones!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverHalfTime },
+  // TODO: 换 Codex 专属封面（暂借 Streak Roll 封面占位）
+  { id: 'GoldenBoot', name: 'Golden Boot', desc: 'Ten strikers sprint — call the podium!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll },
 ]
 
 export default function Lobby({ onSelect, balance }) {
