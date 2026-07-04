@@ -399,7 +399,7 @@ export default function HalfTime({ balance, setBalance }) {
   const [picks, setPicks] = useState(() => new Set())        // 待确认选格
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())   // key → 已下注额
   const [roadTab, setRoadTab] = useState('O/U')
-  const [feedBets] = useState(() => makeFeedBots())   // 展示用假注单
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
 
   // ---- 轮次状态机 ----
   const [gamePhase, setGamePhase] = useState('betting')   // betting | drawing | settled
@@ -491,6 +491,10 @@ export default function HalfTime({ balance, setBalance }) {
     setLastDraw(r)
     setHistory(h => [...h, { sum: r.sum, half: halfOf(r) }].slice(-ROAD_CAP))
     setResult({ hits, winTotal })
+    // 假注单本期落账：~45% 变现绿、其余置灰（展示用，结果已定后的装饰随机）
+    setFeedBets(list => list.map(b => Math.random() < 0.45
+      ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+      : { ...b, status: 'crashed' }))
   }
 
   // 单 interval 驱动整台状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
@@ -514,6 +518,7 @@ export default function HalfTime({ balance, setBalance }) {
         picksRef.current = new Set(); setPicks(new Set())
         setResult(null)
         setPreHits(null)
+        setFeedBets(makeFeedBots())   // 新一期假注单进场（展示用）
         setRoundNo(n => n + 1)
         phaseRef.current = 'betting'; setGamePhase('betting')
         cdRef.current = BETTING_T; setCountdown(BETTING_T)
@@ -609,7 +614,8 @@ export default function HalfTime({ balance, setBalance }) {
   const roundBar = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '10px 12px 0' : '12px 18px 0',
+      // desk 走骨架 34px 历史行位（外层管间距），卡内（<1024）自带边距
+      margin: isDesk ? 0 : isMobile ? '10px 12px 0' : '12px 18px 0',
       padding: '6px 10px', borderRadius: RADIUS.pill,
       background: HALFTIME.strip,
       display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
@@ -737,7 +743,8 @@ export default function HalfTime({ balance, setBalance }) {
         }}><SpeakerIcon on={!muted} /></button>
       </div>
 
-      {roundBar}
+      {/* 轮次条 — desk 在骨架历史行（惯例 34px 行位），卡内只在 <1024 渲染 */}
+      {!isDesk && roundBar}
 
       {/* ---- 开奖舞台：DRAWING 展开表演，SETTLED 保持定格，回 BETTING 收起 ---- */}
       {gamePhase !== 'betting' && pendingRef.current && (
@@ -869,7 +876,11 @@ export default function HalfTime({ balance, setBalance }) {
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />
           </div>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12 }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            {/* 轮次条占骨架历史行位（同 Mines/Momentum 的 34px 行惯例） */}
+            <div style={{ flex: '0 0 auto', minHeight: LAYOUT.historyH }}>
+              {roundBar}
+            </div>
             <div style={{ flex: 1, minHeight: 0 }}>
               <div ref={cardShakeRef} style={{ height: '100%' }}>
                 {gameCard}
