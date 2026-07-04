@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
-import { COLORS, LAYOUT } from '../components/shell/tokens'
+import { COLORS, LAYOUT, LIMBO } from '../components/shell/tokens'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetPanel from '../components/shell/BetPanel'
 import BetFeed from '../components/shell/BetFeed'
@@ -441,17 +441,85 @@ export default function Limbo({ balance, setBalance }) {
     </div>
   )
 
+  // 攀升背景：贴边长短刻度列整层匀速下移（镜头上升感）+ 反向上升光点。
+  // 刻度周期 34/68px 公倍 68px，动画每循环恰好位移一个公周期 → 无缝接续。
+  const TICK_COLS = [
+    { pos: { left: 6 },   w: 16, a: 0.16, o: '0px' },
+    { pos: { left: 28 },  w: 9,  a: 0.10, o: '17px' },
+    { pos: { right: 6 },  w: 16, a: 0.16, o: '0px' },
+    { pos: { right: 28 }, w: 9,  a: 0.10, o: '17px' },
+  ]
+  const RISE_DOTS = [
+    { pos: { left: '4%' },   s: 3, dur: '10s', del: '0s',  op: 0.5 },
+    { pos: { right: '5%' },  s: 2, dur: '13s', del: '-5s', op: 0.4 },
+    { pos: { left: '9%' },   s: 2, dur: '14s', del: '-9s', op: 0.35 },
+    { pos: { right: '10%' }, s: 3, dur: '9s',  del: '-3s', op: 0.45 },
+  ]
+  const climbScene = (
+    <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <style>{`
+        @keyframes ocTicks {
+          from { background-position-y: var(--o); }
+          to   { background-position-y: calc(var(--o) + 68px); }
+        }
+        .ocTicks { animation: ocTicks 8s linear infinite; }
+        @keyframes ocRise {
+          0%   { transform: translateY(0); opacity: 0; }
+          10%  { opacity: var(--op); }
+          88%  { opacity: var(--op); }
+          100% { transform: translateY(-90vh); opacity: 0; }
+        }
+        .ocRise { animation: ocRise var(--d) linear infinite; animation-delay: var(--dl); }
+        @media (prefers-reduced-motion: reduce) { .ocTicks, .ocRise { animation: none; } }
+      `}</style>
+      {TICK_COLS.map((t, i) => (
+        <span key={`t${i}`} className="ocTicks" style={{
+          position: 'absolute', top: 0, bottom: 0, ...t.pos, width: t.w,
+          background: `repeating-linear-gradient(180deg, rgba(255,255,255,${t.a}) 0px, rgba(255,255,255,${t.a}) 2px, transparent 2px, transparent ${t.w > 10 ? 68 : 34}px)`,
+          '--o': t.o,
+        }} />
+      ))}
+      {RISE_DOTS.map((d, i) => (
+        <span key={`d${i}`} className="ocRise" style={{
+          position: 'absolute', bottom: -8, ...d.pos,
+          width: d.s, height: d.s, borderRadius: '50%',
+          background: 'rgba(255,255,255,0.9)',
+          '--op': d.op, '--d': d.dur, '--dl': d.del,
+          opacity: 0,
+        }} />
+      ))}
+    </div>
+  )
+
   const mainPanel = (
       <Panel style={{
-        background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden',
-        // desktop: fill the row and center the meter+number combo both ways
+        background: `radial-gradient(circle at 50% 30%, ${LIMBO.bgCenter}, ${LIMBO.bgOuter})`,
+        borderColor: COLORS.border, padding: 0, overflow: 'hidden',
         position: 'relative',
-        ...(isDesk ? {
-          height: '100%', boxSizing: 'border-box',
-          display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        } : {}),
+        display: 'flex', flexDirection: 'column',
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
-        {!isDesk && <RoundHistoryBar rounds={roundHistory} />}
+        {climbScene}
+        {/* DEMO 条 — arena 系打法（同 Breakaway 顶部金条，无顶栏胶囊碰撞问题） */}
+        {isDesk && (
+          <div style={{
+            height: LAYOUT.demoBarH, flex: '0 0 auto',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: COLORS.amberTint, color: COLORS.amber,
+            fontSize: 11, fontWeight: 900, letterSpacing: 3,
+            position: 'relative', zIndex: 1,
+          }}>
+            DEMO MODE
+          </div>
+        )}
+
+        {/* ---- middle zone: 力量表居中，弹性吸收余量 ---- */}
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
+          display: 'flex', flexDirection: 'column', justifyContent: 'center',
+          padding: isMobile ? 12 : 18, boxSizing: 'border-box',
+        }}>
+        {!isDesk && <div style={{ marginBottom: 12 }}><RoundHistoryBar rounds={roundHistory} /></div>}
         <style>{`
           @keyframes ocFlash {
             0%, 100% { color: #EF4444; }
@@ -464,13 +532,13 @@ export default function Limbo({ balance, setBalance }) {
           type="button"
           onClick={toggleBgm}
           style={{
-            position: 'absolute', top: 10, right: 58, zIndex: 3,
+            position: 'absolute', top: isDesk ? 32 : 10, right: 58, zIndex: 3,
             width: 40,
             height: 40,
             borderRadius: '50%',
-            background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)',
+            background: bgmOn ? 'rgba(22,199,132,0.18)' : LIMBO.band,
             color: bgmOn ? COLOR : '#7d8a99',
-            border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : '#232c39'}`,
+            border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : 'rgba(0,0,0,0.3)'}`,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}
           title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
@@ -483,13 +551,13 @@ export default function Limbo({ balance, setBalance }) {
           type="button"
           onClick={() => setMuted(v => !v)}
           style={{
-            position: 'absolute', top: 10, right: 10, zIndex: 3,
+            position: 'absolute', top: isDesk ? 32 : 10, right: 10, zIndex: 3,
             width: 40,
             height: 40,
             borderRadius: '50%',
-            background: 'rgba(26,34,48,0.85)',
+            background: LIMBO.band,
             color: muted ? '#7d8a99' : COLOR,
-            border: '1px solid #232c39',
+            border: '1px solid rgba(0,0,0,0.3)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}
           title={muted ? '取消静音' : '静音'}
@@ -522,6 +590,7 @@ export default function Limbo({ balance, setBalance }) {
             </p>
           </div>
         </div>
+        </div>{/* /middle zone */}
       </Panel>
   )
 

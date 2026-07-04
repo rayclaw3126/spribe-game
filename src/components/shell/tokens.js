@@ -91,6 +91,15 @@ export const KENO = {
   xDark: 'rgba(0,0,0,0.16)',  // giant side chevrons
 }
 
+// Odds Climb — 球场绿 chrome（键值直接取 KENO 终态同款）；力量表/倍率大字/
+// 中奖态等玩法色仍留在 Limbo.jsx 局部（COLOR/FILL_TOP/AMBER + canvas 内色）
+export const LIMBO = {
+  bgOuter: '#0d4a20',   // = KENO.bgOuter（球场绿边缘）
+  bgCenter: '#28814a',  // = KENO.bgCenter（球场绿中央）
+  band: '#0b3d1c',      // = KENO.band（深档控件底）
+  ctrl: '#11582a',      // = KENO.ctrl（浅档控件底）
+}
+
 // Streak Roll — sampled from the Spribe Hotline reference shot
 export const HOTLINE = {
   // 背景改球场绿 — 取自 MINES.bgOuter/bgCenter (#0d4a20/#2e8f4f)，中央略压暗
