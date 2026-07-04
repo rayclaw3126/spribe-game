@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { COLORS, RADIUS, GOAL } from '../components/shell/tokens'
-import { useIsMobile } from '../hooks/useMediaQuery'
+import { COLORS, RADIUS, LAYOUT, GOAL } from '../components/shell/tokens'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
+import RoundHistoryBar from '../components/shell/RoundHistoryBar'
+import BetFeed from '../components/shell/BetFeed'
+import { makeFeedBots } from '../components/shell/arenaFx'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
 // 单G2: Goal gameplay — Field tiers, column-by-column advance, bomb bust,
@@ -42,7 +45,8 @@ export default function Goal({ balance, setBalance }) {
   const [cum, setCum] = useState(1)               // display copy of running product
   const [revealing, setRevealing] = useState(false)
   const [autoOn, setAutoOn] = useState(false)
-  const [, setRoundHistory] = useState([])        // final mult per round (rendered in G3)
+  const [roundHistory, setRoundHistory] = useState([])   // final mult per round, newest first
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
 
@@ -140,12 +144,17 @@ export default function Goal({ balance, setBalance }) {
     const payout = round2(bet * mult)
     if (payout > 0) setBalance(b => round2(b + payout))
     setRoundHistory(h => [round2(mult), ...h].slice(0, 20))
+    // fake feed rows settle for the round: ~45% cash green, the rest grey out
+    setFeedBets(list => list.map(b => Math.random() < 0.45
+      ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+      : { ...b, status: 'crashed' }))
     phaseRef.current = 'done'; setPhase('done')
   }
 
   function start() {
     if (phaseRef.current === 'playing' || bet > balance || bet < 1) return
     ensureAudio()
+    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
     setBalance(b => round2(b - bet))
     picksRef.current = []; setPicks([])
     cumRef.current = 1; setCum(1)
@@ -237,13 +246,14 @@ export default function Goal({ balance, setBalance }) {
   })
   const nextMult = round2(cum * stepMult(tier))
   const cashable = round2(bet * cum)
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
 
-  return (
-    <GameLayout title="Goal" emoji="🥅" color={GOAL.win}>
+  const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 22%, ${GOAL.bgCenter}, ${GOAL.bgOuter})`,
         borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
         position: 'relative',
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* left giant football line art */}
         <svg width="300" height="300" viewBox="0 0 100 100" style={{ position: 'absolute', left: -120, top: '38%', pointerEvents: 'none' }}>
@@ -490,6 +500,49 @@ export default function Goal({ balance, setBalance }) {
           )}
         </div>
       </Panel>
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024), same bones as Rating Hi-Lo ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Goal</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={feedBets} myBets={[]} online={914} fill />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
+              <RoundHistoryBar rounds={roundHistory} />
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {gameCard}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- stacked layout (<1024): unchanged ----
+  return (
+    <GameLayout title="Goal" emoji="🥅" color={GOAL.win}>
+      {gameCard}
     </GameLayout>
   )
 }
