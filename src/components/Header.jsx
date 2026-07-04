@@ -9,11 +9,8 @@ const GAME_NAMES = {
   HiLo: 'Rating Hi-Lo',
   Mines: 'Dribble',
   Keno: 'Team Keno',
-  Balloon: 'Long Shot',
   Limbo: 'Odds Climb',
-  PenaltyWheel: 'Penalty Wheel',
   StreakRoll: 'Streak Roll',
-  Tower: 'Striker Tower',
 }
 
 export default function Header({ balance, onHome, activeGame }) {

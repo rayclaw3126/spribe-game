@@ -2,14 +2,11 @@ import coverBreakaway from '../assets/covers/cover-breakaway.png'
 import coverDribble from '../assets/covers/cover-dribble.png'
 import coverFreeKick from '../assets/covers/cover-free-kick.png'
 import coverGoal from '../assets/covers/cover-goal.png'
-import coverLongShot from '../assets/covers/cover-long-shot.png'
 import coverRatingHiLo from '../assets/covers/cover-rating-hi-lo.png'
 import coverTeamKeno from '../assets/covers/cover-team-keno.png'
 import coverTotalGoals from '../assets/covers/cover-total-goals.png'
 import coverOddsClimb from '../assets/covers/cover-odds-climb.png'
-import coverPenaltyWheel from '../assets/covers/cover-penalty-wheel.png'
 import coverStreakRoll from '../assets/covers/cover-streak-roll.png'
-import coverStrikerTower from '../assets/covers/cover-striker-tower.png'
 import coverTeamRoulette from '../assets/covers/cover_miniroulette.png'
 import coverMomentum from '../assets/covers/cover_momentum.png'
 
@@ -21,11 +18,8 @@ const GAMES = [
   { id: 'HiLo',     emoji: '📊',  name: 'Rating Hi-Lo',    desc: 'Higher or lower rating?',    color: '#DC2626', bg: 'linear-gradient(135deg, #FEE2E2, #FECACA)', cover: coverRatingHiLo },
   { id: 'Mines',    emoji: '👟',  name: 'Dribble',    desc: 'Beat defenders, avoid tackles.', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverDribble },
   { id: 'Keno',     emoji: '⚽',  name: 'Team Keno', desc: 'Pick the winning teams!',        color: '#DB2777', bg: 'linear-gradient(135deg, #FCE7F3, #FBCFE8)', cover: coverTeamKeno },
-  { id: 'Balloon',  emoji: '🥅',  name: 'Long Shot',  desc: "Shoot far, don't fly out!",     color: '#EA580C', bg: 'linear-gradient(135deg, #FFEDD5, #FED7AA)', cover: coverLongShot },
   { id: 'Limbo',    emoji: '📈',  name: 'Odds Climb', desc: 'Set target odds, kick off to climb!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverOddsClimb },
-  { id: 'PenaltyWheel', emoji: '⚽', name: 'Penalty Wheel', desc: 'Spin the wheel, land a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverPenaltyWheel },
   { id: 'StreakRoll', emoji: '🎯', name: 'Streak Roll', desc: 'Roll the strip, stop on a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll },
-  { id: 'Tower', emoji: '🏆', name: 'Striker Tower', desc: 'Climb the tower, dodge defenders!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStrikerTower },
   { id: 'MiniRoulette', emoji: '⚽', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette },
   { id: 'Momentum', emoji: '📊', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum },
 ]
