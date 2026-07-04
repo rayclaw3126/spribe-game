@@ -1,14 +1,22 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel, ActionButton } from '../components/GameLayout'
+import GameLayout, { Panel } from '../components/GameLayout'
+import { COLORS, RADIUS, HILO } from '../components/shell/tokens'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import bgmUrl from '../assets/covers/bgm.mp3'
-import RoundHistoryBar from '../components/shell/RoundHistoryBar'
-import BetPanel from '../components/shell/BetPanel'
 
-const COLOR = '#16C784'
+// 单HL1: Spribe Hi Lo 1:1 visual replica, pitch-green skin + player rating
+// cards. PURE UI — controls are static/disabled; the existing game logic and
+// audio functions below are kept untouched for HL2 to re-wire.
+
 const POSITIONS = ['GK', 'CB', 'LB', 'RB', 'CM', 'CDM', 'CAM', 'LW', 'RW', 'ST']
 const TEAM_COLORS = ['#DC2626', '#2563EB', '#16A34A', '#CA8A04', '#EA580C', '#0891B2']
 const STREAK_MULTS = [1, 1.5, 2.5, 4, 6.5, 10, 16, 25]
+
+// static fake history — mini jersey cards with ↑/↓ badges (HL2 换真数据)
+const FAKE_HISTORY = [
+  { n: 7, up: true }, { n: 11, up: false }, { n: 12, up: true },
+  { n: 3, up: false }, { n: 9, up: true }, { n: 13, up: true },
+]
 
 function randomCard() {
   const rank = Math.floor(Math.random() * 13)   // 0..12
@@ -20,46 +28,48 @@ function randomCard() {
   }
 }
 
-// FIFA-style player rating card. Gold for ≥80, dark otherwise.
-function PlayerCard({ card, w, h, faceDown }) {
-  if (faceDown || !card) {
-    return (
-      <div style={{
-        width: w, height: h, borderRadius: 14,
-        background: 'linear-gradient(160deg,#1b2431,#0d1420)',
-        border: '2px solid #2b3546',
-        boxShadow: '0 8px 22px rgba(0,0,0,0.45)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <span style={{ fontSize: w * 0.4, fontWeight: 900, color: '#3a4657' }}>?</span>
-      </div>
-    )
-  }
-  const gold = card.rating >= 80
-  const ink = gold ? '#3a2c00' : '#e8edf2'
-  const sub = gold ? '#6b5416' : '#8a97a6'
+// flat block-style football jersey: body + sleeves + collar, deep green,
+// big squad number (1–13) on the chest
+const JERSEY_PATH = 'M35 6 L20 14 L6 30 L16 42 L26 34 L26 84 L74 84 L74 34 L84 42 L94 30 L80 14 L65 6 C 55 16, 45 16, 35 6 Z'
+function Jersey({ num, w, outline = false }) {
+  return (
+    <svg width={w} height={w * 0.9} viewBox="0 0 100 90" style={{ display: 'block' }}>
+      <path d={JERSEY_PATH}
+        fill={outline ? 'none' : '#14803c'}
+        stroke={outline ? HILO.outline : 'rgba(0,0,0,0.3)'}
+        strokeWidth={outline ? 3 : 2} strokeLinejoin="round" />
+      {num != null && (
+        <text x="50" y="62" textAnchor="middle" fontSize="34" fontWeight="900"
+          fill={outline ? HILO.outline : '#ffffff'}
+          fontFamily="'Space Grotesk', sans-serif">{num}</text>
+      )}
+    </svg>
+  )
+}
+// white card with the jersey + chest number
+function JerseyCard({ num, w, h }) {
   return (
     <div style={{
-      width: w, height: h, borderRadius: 14, position: 'relative', overflow: 'hidden',
-      background: gold ? 'linear-gradient(160deg,#f7e08a,#d9b24a 55%,#b3862c)' : 'linear-gradient(160deg,#26303f,#141c28)',
-      border: `2px solid ${gold ? '#f0d271' : '#2b3546'}`,
-      boxShadow: gold ? '0 8px 26px rgba(217,178,74,0.35)' : '0 8px 22px rgba(0,0,0,0.45)',
+      width: w, height: h, borderRadius: 10,
+      background: '#ffffff', border: '1px solid rgba(0,0,0,0.25)',
+      boxShadow: '0 8px 22px rgba(0,0,0,0.35)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
-      {/* rating + position (top-left) */}
-      <div style={{ position: 'absolute', top: 10, left: 12, lineHeight: 1 }}>
-        <div style={{ fontSize: w * 0.29, fontWeight: 900, color: ink, fontFamily: "'Space Grotesk', sans-serif" }}>{card.rating}</div>
-        <div style={{ fontSize: w * 0.12, fontWeight: 800, color: sub, letterSpacing: 1, marginTop: 2 }}>{card.pos}</div>
-      </div>
-      {/* team color chip (top-right) */}
-      <div style={{ position: 'absolute', top: 12, right: 12, width: w * 0.12, height: w * 0.12, borderRadius: '50%', background: card.teamColor, border: '2px solid rgba(255,255,255,0.5)' }} />
-      {/* jersey silhouette (center-lower) */}
-      <div style={{ position: 'absolute', bottom: h * 0.14, left: 0, right: 0, textAlign: 'center' }}>
-        <span style={{ fontSize: w * 0.5, filter: `drop-shadow(0 2px 6px rgba(0,0,0,0.3))`, opacity: 0.92 }}>👕</span>
-      </div>
-      {/* footer */}
-      <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0, textAlign: 'center', fontSize: w * 0.09, fontWeight: 700, color: sub, letterSpacing: 1 }}>
-        RATING
-      </div>
+      <Jersey num={num} w={w * 0.74} />
+    </div>
+  )
+}
+
+// dark football-pattern card back
+function CardBack({ w, h }) {
+  return (
+    <div style={{
+      width: w, height: h, borderRadius: 10, boxSizing: 'border-box',
+      background: `repeating-linear-gradient(45deg, ${HILO.back} 0px, ${HILO.back} 8px, ${HILO.backLine} 8px, ${HILO.backLine} 10px)`,
+      border: '4px solid #ffffff', boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <span style={{ fontSize: w * 0.3, opacity: 0.55 }}>⚽</span>
     </div>
   )
 }
@@ -69,14 +79,14 @@ export default function HiLo({ balance, setBalance }) {
   const [bet, setBet] = useState(10)
   const [phase, setPhase] = useState('idle')   // idle | playing | done
   const [currentCard, setCurrentCard] = useState(null)
-  const [nextCard, setNextCard] = useState(null)
-  const [revealNext, setRevealNext] = useState(false)
+  const [, setNextCard] = useState(null)
+  const [, setRevealNext] = useState(false)
   const [flipping, setFlipping] = useState(false)
   const [streak, setStreak] = useState(0)
   const [currentMult, setCurrentMult] = useState(1)
-  const [history, setHistory] = useState([])
-  const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round (0 = bust), newest first
-  const [message, setMessage] = useState(null)
+  const [, setHistory] = useState([])
+  const [, setRoundHistory] = useState([])   // final multiplier per round (0 = bust), newest first
+  const [, setMessage] = useState(null)
   const [cashedOut, setCashedOut] = useState(false)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
@@ -140,7 +150,7 @@ export default function HiLo({ balance, setBalance }) {
   }, [bgmOn])
   useEffect(() => () => { stopBgm(); timersRef.current.forEach(clearTimeout) }, [])
 
-  // ---------- game ----------
+  // ---------- game (kept for HL2 — not wired to the static UI) ----------
   function startGame() {
     if (bet > balance || bet < 1) return
     ensureAudio()
@@ -179,7 +189,6 @@ export default function HiLo({ balance, setBalance }) {
           setPhase('done'); setFlipping(false)
         } else {
           setMessage({ text: `Correct! ${next.rating} — keep going!`, win: true })
-          // advance: revealed card becomes the current one
           setCurrentCard(next); setNextCard(null); setRevealNext(false); setFlipping(false)
         }
       }
@@ -197,153 +206,233 @@ export default function HiLo({ balance, setBalance }) {
     playCash()
   }
 
-  // Shell BetButton — multi-step mode: bet / live cashout while playing / back to bet.
-  const shellBtn = phase === 'playing'
-    ? { state: 'cashout', label: `兑现 $${(bet * currentMult).toFixed(2)}`, onClick: cashOut, disabled: flipping || streak === 0 || cashedOut }
-    : { state: 'bet', label: `下注 $${Number(bet).toFixed(2)}`, onClick: startGame, disabled: bet > balance || bet < 1 }
-
-  const CW = isMobile ? 120 : 150
-  const CH = isMobile ? 168 : 210
-  const fires = Math.min(streak, 5)
+  // ---------- visual layer (Spribe Hi Lo 1:1, pitch green) ----------
+  const navPill = {
+    padding: '5px 16px', borderRadius: RADIUS.pill,
+    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
+    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
+  }
+  const circleBtn = {
+    width: 30, height: 30, borderRadius: RADIUS.pill,
+    background: 'rgba(0,0,0,0.35)', color: COLORS.white,
+    border: '1px solid rgba(255,255,255,0.35)',
+    fontSize: 15, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
+  }
+  const CW = isMobile ? 96 : 118
+  const CH = isMobile ? 126 : 155
+  const choicePill = bg => ({
+    minWidth: isMobile ? 130 : 156, padding: '9px 0', borderRadius: RADIUS.pill,
+    background: bg, color: COLORS.white,
+    border: '1px solid rgba(255,255,255,0.45)',
+    fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
+    cursor: 'not-allowed', opacity: 0.92,
+  })
 
   return (
-    <GameLayout title="Rating Hi-Lo" emoji="📊" color={COLOR}
-      sidebar={
-        <Panel>
-          {phase === 'playing' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <ActionButton onClick={() => guess('higher')} color='#16C784' disabled={flipping}>⬆️ Higher</ActionButton>
-              <ActionButton onClick={() => guess('lower')} color='#EF4444' disabled={flipping}>⬇️ Lower</ActionButton>
-            </div>
-          ) : (
-            <p style={{ color: 'var(--text3)', fontSize: 13, textAlign: 'center', margin: '4px 0' }}>
-              下注后猜下一位球员评分更高或更低
-            </p>
-          )}
-
-          {message && (
-            <div style={{
-              marginTop: 14, padding: '12px 16px', borderRadius: 12,
-              background: message.win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-              color: message.win ? '#6EE7B7' : '#FCA5A5',
-              fontWeight: 600, fontSize: 13, animation: 'winPop 0.4s ease',
-            }}>{message.win ? '✅' : '❌'} {message.text}</div>
-          )}
-
-          {/* Streak mults */}
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8, fontWeight: 600 }}>Streak Rewards</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {STREAK_MULTS.slice(1).map((m, i) => (
-                <div key={i} style={{
-                  display: 'flex', justifyContent: 'space-between', padding: '5px 10px', borderRadius: 8,
-                  background: streak === i + 1 ? COLOR + '20' : 'var(--bg2)',
-                  border: `1.5px solid ${streak === i + 1 ? COLOR : 'var(--border)'}`,
-                  fontSize: 12, fontWeight: 600, color: streak === i + 1 ? COLOR : 'var(--text2)', transition: 'all 0.2s',
-                }}>
-                  <span>{i + 1} correct in a row</span><span>{m}×</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Panel>
-      }
-    >
-      <Panel style={{ position: 'relative' }}>
-        {/* Round history — final multiplier per round */}
-        <RoundHistoryBar rounds={roundHistory} />
-        {/* audio toggles */}
-        <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-          position: 'absolute', top: 14, right: 60, width: 40, height: 40, borderRadius: '50%', zIndex: 3,
-          background: bgmOn ? 'rgba(22,199,132,0.18)' : 'var(--bg2)', color: bgmOn ? COLOR : 'var(--text3)',
-          border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : 'var(--border)'}`, fontSize: 16, cursor: 'pointer',
-        }}>🎵</button>
-        <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-          position: 'absolute', top: 14, right: 14, width: 40, height: 40, borderRadius: '50%', zIndex: 3,
-          background: 'var(--bg2)', color: muted ? 'var(--text3)' : COLOR, border: '1px solid var(--border)', fontSize: 18, cursor: 'pointer',
-        }}>{muted ? '🔇' : '🔊'}</button>
-
-        {/* Streak + multiplier */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingRight: 96 }}>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 2 }}>Streak</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: COLOR, display: 'flex', alignItems: 'center', gap: 4 }}>
-              {streak}
-              <span style={{ fontSize: 22 + streak * 2, transition: 'font-size 0.2s' }}>
-                {streak > 0 ? '🔥'.repeat(fires) : ''}
-              </span>
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 2 }}>Multiplier</div>
-            <div style={{ fontSize: 28, fontWeight: 900, color: '#FCD34D', fontFamily: "'Space Grotesk', sans-serif" }}>{currentMult}×</div>
-          </div>
+    <GameLayout title="Rating Hi-Lo" emoji="📊" color={HILO.green}>
+      <Panel style={{
+        background: `radial-gradient(circle at 50% 34%, ${HILO.bgCenter}, ${HILO.bgOuter})`,
+        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        position: 'relative',
+      }}>
+        {/* giant corner rating-card line art (ref A/K positions) */}
+        <div style={{
+          position: 'absolute', left: -50, top: '32%', width: 170, height: 240,
+          border: `3px solid ${HILO.outline}`, borderRadius: 18,
+          transform: 'rotate(-14deg)', pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Jersey num={13} w={120} outline />
+        </div>
+        <div style={{
+          position: 'absolute', right: -50, bottom: '10%', width: 170, height: 240,
+          border: `3px solid ${HILO.outline}`, borderRadius: 18,
+          transform: 'rotate(14deg)', pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Jersey num={1} w={120} outline />
         </div>
 
-        {/* Cards duel */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 14 : 30, minHeight: CH + 20, marginBottom: 22 }}>
-          <div style={{ textAlign: 'center' }}>
-            <PlayerCard card={currentCard} w={CW} h={CH} faceDown={!currentCard} />
-            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text3)', fontWeight: 700 }}>当前球员</div>
-          </div>
-
-          <div style={{ fontSize: 34, color: 'var(--text3)' }}>→</div>
-
-          {/* Flip card */}
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ perspective: 800, width: CW, height: CH }}>
-              <div style={{
-                width: CW, height: CH, position: 'relative', transformStyle: 'preserve-3d',
-                transition: 'transform 0.55s cubic-bezier(0.2,0.7,0.3,1)',
-                transform: `rotateY(${revealNext ? 180 : 0}deg)`,
-              }}>
-                <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
-                  <PlayerCard faceDown w={CW} h={CH} />
-                </div>
-                <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
-                  <PlayerCard card={nextCard} w={CW} h={CH} faceDown={!nextCard} />
-                </div>
-              </div>
-            </div>
-            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text3)', fontWeight: 700 }}>下一个？</div>
-          </div>
+        {/* ---- top bar ---- */}
+        <div style={{
+          margin: isMobile ? '-12px -12px 12px' : '-18px -18px 14px',
+          padding: '8px 14px',
+          background: HILO.band,
+          display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
+        }}>
+          <span style={navPill}>RATING HI-LO ▾</span>
+          <span style={{
+            padding: '5px 14px', borderRadius: RADIUS.pill,
+            background: HILO.orange, color: COLORS.white,
+            fontSize: 12, fontWeight: 900,
+          }}>? How to Play?</span>
+          {!isMobile && (
+            <span style={{
+              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+              padding: '4px 18px', borderRadius: RADIUS.pill,
+              border: `1px solid ${HILO.gold}`, color: HILO.gold,
+              fontSize: 11, fontWeight: 900, letterSpacing: 2,
+            }}>DEMO MODE</span>
+          )}
+          <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
+          </span>
+          <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
+            width: 30, height: 30, borderRadius: RADIUS.pill,
+            background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
+            color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+            fontSize: 13, cursor: 'pointer',
+            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
+          }}>🎵</button>
+          <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
+            width: 30, height: 30, borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+            border: '1px solid rgba(255,255,255,0.25)',
+            fontSize: 14, cursor: 'pointer',
+            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
+          }}>{muted ? '🔇' : '🔊'}</button>
         </div>
 
-        {/* History row */}
-        {history.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-            {history.map((h, i) => (
+        {/* ---- upper region: history strip + card-count badge ---- */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', marginBottom: isMobile ? 16 : 22, position: 'relative', zIndex: 1 }}>
+          <div style={{
+            flex: 1, minWidth: 0, background: HILO.band, borderRadius: 8,
+            padding: '6px 8px', display: 'flex', gap: 6, alignItems: 'center', overflow: 'hidden',
+          }}>
+            {(isMobile ? FAKE_HISTORY.slice(0, 4) : FAKE_HISTORY).map((h, i) => (
               <div key={i} style={{
-                width: 44, height: 58, borderRadius: 8, background: 'var(--surface)',
-                border: `2px solid ${h.correct ? '#6EE7B7' : '#FCA5A5'}`,
-                display: 'flex', flexDirection: 'column', alignItems: 'center', overflow: 'hidden',
+                position: 'relative', width: 34, height: 46, borderRadius: 5, flex: '0 0 auto',
+                background: '#ffffff', border: '1px solid rgba(0,0,0,0.3)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <div style={{ width: '100%', height: 8, background: h.card.teamColor }} />
-                <span style={{ flex: 1, display: 'flex', alignItems: 'center', fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>{h.card.rating}</span>
+                <Jersey num={h.n} w={26} />
+                <span style={{
+                  position: 'absolute', top: -5, left: -5, width: 15, height: 15, borderRadius: '50%',
+                  background: h.up ? HILO.badgeUp : HILO.badgeDown, color: COLORS.white,
+                  fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: '1px solid rgba(255,255,255,0.6)',
+                }}>{h.up ? '↑' : '↓'}</span>
               </div>
             ))}
           </div>
-        )}
+          <div style={{
+            flex: '0 0 auto', background: HILO.band, borderRadius: 8,
+            padding: '6px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+          }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
+              <span style={{ width: 11, height: 15, borderRadius: 2, background: '#ffffff', border: '1px solid rgba(0,0,0,0.4)', display: 'inline-block' }} />
+              6
+            </span>
+            <button type="button" disabled onClick={cashOut} style={{
+              padding: '2px 10px', borderRadius: 4,
+              background: HILO.green, color: '#083a1b', border: 'none',
+              fontSize: 12, fontWeight: 900, cursor: 'not-allowed',
+            }}>27.64x</button>
+          </div>
+        </div>
 
-        {phase === 'idle' && (
-          <p style={{ textAlign: 'center', color: 'var(--text3)', fontSize: 14, marginTop: 16 }}>
-            Deal the players and guess whose rating is higher or lower!
-          </p>
-        )}
+        {/* ---- center: hi/lo minis + face card + deck + skip ---- */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: isMobile ? 12 : 22, marginBottom: isMobile ? 16 : 22, position: 'relative', zIndex: 1,
+        }}>
+          {/* mini hi/lo indicators — up = higher rating, down = lower rating */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+            <button type="button" disabled onClick={() => guess('higher')} style={{
+              width: 30, height: 42, borderRadius: 5, background: '#ffffff',
+              border: '1px solid rgba(0,0,0,0.3)', cursor: 'not-allowed', padding: '2px 0 0',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
+            }}>
+              <Jersey num={13} w={20} />
+              <span style={{ color: HILO.badgeUp, fontSize: 11, fontWeight: 900, lineHeight: 1 }}>↑</span>
+            </button>
+            <span style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: 900 }}>∨</span>
+            <button type="button" disabled onClick={() => guess('lower')} style={{
+              width: 30, height: 42, borderRadius: 5, background: '#ffffff',
+              border: '1px solid rgba(0,0,0,0.3)', cursor: 'not-allowed', padding: '2px 0 0',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
+            }}>
+              <Jersey num={1} w={20} />
+              <span style={{ color: HILO.badgeDown, fontSize: 11, fontWeight: 900, lineHeight: 1 }}>↓</span>
+            </button>
+          </div>
+
+          {/* face-up jersey number card */}
+          <JerseyCard num={9} w={CW} h={CH} />
+
+          {/* face-down deck: 3 offset backs + skip button below */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+            <div style={{ position: 'relative', width: CW + 10, height: CH + 8 }}>
+              <div style={{ position: 'absolute', left: 10, top: 8 }}><CardBack w={CW} h={CH} /></div>
+              <div style={{ position: 'absolute', left: 5, top: 4 }}><CardBack w={CW} h={CH} /></div>
+              <div style={{ position: 'absolute', left: 0, top: 0 }}><CardBack w={CW} h={CH} /></div>
+            </div>
+            <button type="button" disabled title="换一张" style={{
+              width: 36, height: 36, borderRadius: RADIUS.pill,
+              background: 'rgba(0,0,0,0.35)', color: COLORS.white,
+              border: '1px solid rgba(255,255,255,0.35)',
+              fontSize: 15, fontWeight: 900, cursor: 'not-allowed',
+            }}>⟲</button>
+          </div>
+        </div>
+
+        {/* ---- choice pills + static payout labels ---- */}
+        <div style={{
+          display: 'flex', justifyContent: 'center', gap: isMobile ? 12 : 26,
+          marginBottom: 4, position: 'relative', zIndex: 1, flexWrap: 'wrap',
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <button type="button" disabled style={choicePill(HILO.low)}>⌄ LOW OR SAME</button>
+            <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>44.92x</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <button type="button" disabled style={choicePill(HILO.high)}>⌃ HIGH OR SAME</button>
+            <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>59.90x</div>
+          </div>
+        </div>
+
+        {/* ---- bottom bet band ---- */}
+        <div style={{
+          margin: isMobile ? '12px -12px -12px' : '14px -18px -18px',
+          padding: '12px 14px',
+          background: HILO.band,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
+        }}>
+          <div style={{
+            padding: '5px 18px', borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+            textAlign: 'center', lineHeight: 1.2,
+          }}>
+            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <input
+              value={bet}
+              onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              style={{
+                width: 56, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
+                color: COLORS.white, fontSize: 15, fontWeight: 900,
+              }}
+            />
+          </div>
+          <button type="button" onClick={() => setBet(b => Math.max(1, b - 10))} style={circleBtn}>−</button>
+          <button type="button" style={{ ...circleBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} title="筹码">
+            {/* chip-stack icon drawn in CSS — the ≡ glyph renders as a dash in this font */}
+            <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+            </span>
+          </button>
+          <button type="button" onClick={() => setBet(b => b + 10)} style={circleBtn}>+</button>
+          <button type="button" disabled onClick={startGame} style={{
+            minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
+            background: HILO.bet, color: COLORS.white,
+            border: '1px solid rgba(255,255,255,0.35)',
+            fontSize: 14, fontWeight: 900, letterSpacing: 1,
+            cursor: 'not-allowed', opacity: 0.92,
+          }}>▷ BET</button>
+        </div>
       </Panel>
-
-      {/* Shell bet bay — multi-step mode, no Auto tab */}
-      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>
-        <BetPanel
-          bet={bet}
-          setBet={setBet}
-          max={balance}
-          inputDisabled={phase === 'playing'}
-          chipDisabled={phase === 'playing'}
-          showAuto={false}
-          button={shellBtn}
-        />
-      </div>
     </GameLayout>
   )
 }

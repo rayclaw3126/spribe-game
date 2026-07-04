@@ -147,6 +147,25 @@ export const PLINKO = {
   orange: '#f28c17',
 }
 
+// Rating Hi-Lo — Spribe Hi Lo reskinned amber→pitch green; sampled from the
+// Hi Lo reference shot (blue LOW / amber HIGH / green mult semantics kept).
+export const HILO = {
+  bgOuter: '#0d4f26',      // pitch edge
+  bgCenter: '#2f9e58',     // pitch center glow
+  band: 'rgba(0,0,0,0.28)',    // translucent strips (top rows, bottom bar)
+  low: '#2f6fe0',          // LOW OR SAME pill (blue)
+  high: '#cf7a10',         // HIGH OR SAME pill (amber)
+  green: '#35d07f',        // multiplier boxes
+  bet: '#4a9b16',          // big BET button
+  back: '#132a4d',         // deck card back navy
+  backLine: '#1d3c6e',     // card back pattern lines
+  badgeUp: '#e0821a',      // history ↑ badge
+  badgeDown: '#2f6fe0',    // history ↓ badge
+  outline: 'rgba(0,0,0,0.16)',  // giant corner card line art
+  gold: '#ffd54f',
+  orange: '#f28c17',
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',
