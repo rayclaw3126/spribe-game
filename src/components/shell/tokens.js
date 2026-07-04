@@ -167,6 +167,25 @@ export const HILO = {
   orange: '#f28c17',
 }
 
+// Goal — sampled from the Spribe Goal reference shot (bright pitch green,
+// light cell grid, orange Next pill).
+export const GOAL = {
+  bgOuter: '#1c3a06',      // dark olive edges
+  bgCenter: '#4a7a1a',     // bright center glow
+  band: '#1d4408',         // top/bottom bars
+  strip: 'rgba(0,0,0,0.25)',   // second-row strip / RANDOM row capsule
+  cellTop: '#d8e9c4',      // cell gradient top
+  cellBot: '#aecb8e',      // cell gradient bottom
+  cellWhiteTop: '#ffffff', // active-column cell
+  cellWhiteBot: '#e9f0da',
+  line: 'rgba(0,0,0,0.2)', // giant football / half-pitch line art
+  win: '#35d07f',          // +X.XX USD pill
+  orange: '#f28c17',       // How to Play / Next pill
+  gold: '#ffd54f',
+  blue: '#2f6fe0',         // round refresh button
+  bet: '#4a9b16',          // big BET button
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',

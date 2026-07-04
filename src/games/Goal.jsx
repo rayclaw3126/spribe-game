@@ -1,40 +1,42 @@
 import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import RoundHistoryBar from '../components/shell/RoundHistoryBar'
-import BetPanel from '../components/shell/BetPanel'
+import { COLORS, RADIUS, GOAL } from '../components/shell/tokens'
 import { useIsMobile } from '../hooks/useMediaQuery'
-import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
-const COLOR = '#16C784'
+// 单G1: Spribe Goal 1:1 visual replica. PURE UI — controls are static or
+// disabled; the existing dribble game logic and audio functions below are
+// kept untouched (wired to disabled controls) for the gameplay order.
+
 const MULTS = [1.0, 1.5, 2.2, 3.5, 6.0, 10.0]   // [level] → multiplier
 const MAX = 5                                     // beat 5 defenders = full score
 const ANIM = 700                                  // ms per dribble
+const rand = (min, max) => min + Math.random() * (max - min)
 
-function money(n) { return Number(n).toFixed(2) }
-function rand(min, max) { return min + Math.random() * (max - min) }
+// static grid dressing — mirrors the reference shot exactly:
+// white active column, one footprint dot, one ball, two bombs
+const GRID_COLS = 7
+const GRID_ROWS = 4
+const WHITE_COL = 2
+const REVEALS = { '1-0': 'dot', '1-1': 'ball', '2-0': 'bomb', '2-1': 'bomb' }
 
 export default function Goal({ balance, setBalance }) {
   const isMobile = useIsMobile()
 
   const [bet, setBet] = useState(10)
   const [phase, setPhase] = useState('idle')      // idle | running | done
-  const [level, setLevel] = useState(0)           // defenders beaten
+  const [, setLevel] = useState(0)                // defenders beaten
   const [awaiting, setAwaiting] = useState(false)  // waiting for L/R choice
-  const [message, setMessage] = useState(null)     // { text, tone }
-  const [finalResult, setFinalResult] = useState(null)
-  const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round (0 = tackled), newest first
+  const [, setMessage] = useState(null)
+  const [, setFinalResult] = useState(null)
+  const [, setRoundHistory] = useState([])
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
 
-  const canvasRef = useRef(null)
-  const ballImgRef = useRef(null)
-  const drawRef = useRef(null)
   const animRef = useRef(null)        // { active, start, picked, defSide, pass }
   const flashRef = useRef({ a: 0, c: '34,197,94' })
   const shakeRef = useRef(0)
   const particlesRef = useRef([])
-  const angleRef = useRef(0)
   const audioRef = useRef({ ctx: null, muted: false })
   const bgmRef = useRef({ audio: null })
 
@@ -122,7 +124,7 @@ export default function Goal({ balance, setBalance }) {
 
   function later(fn, ms) { const id = setTimeout(fn, ms); timersRef.current.push(id); return id }
 
-  // ---------- flow ----------
+  // ---------- flow (kept for the gameplay order — wired to disabled controls) ----------
   function start() {
     if (phaseRef.current === 'running') return
     if (bet > balance || bet < 1) return
@@ -197,219 +199,224 @@ export default function Goal({ balance, setBalance }) {
     }
   }
 
-  // ---------- canvas ----------
-  function draw(now) {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    const rect = canvas.getBoundingClientRect()
-    const dpr = window.devicePixelRatio || 1
-    const width = Math.max(300, Math.floor(rect.width * dpr))
-    const height = Math.max(220, Math.floor(rect.height * dpr))
-    if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height }
-    const W = canvas.width, H = canvas.height
-    ctx.clearRect(0, 0, W, H)
-
-    // Pitch
-    const g = ctx.createLinearGradient(0, 0, 0, H)
-    g.addColorStop(0, '#0b3b28'); g.addColorStop(1, '#16643f')
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
-    for (let i = 0; i < 7; i++) {
-      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.05)'
-      const y = (H / 7) * i
-      ctx.fillRect(0, y, W, H / 7)
-    }
-
-    const sh = shakeRef.current
-    const wob = Math.sin(now / 22) * sh * 7 * dpr
-
-    const anim = animRef.current
-    const pickedX = a => (a === 'left' ? 0.30 : 0.70) * W
-    const p = anim ? Math.min((now - anim.start) / ANIM, 1) : 0
-
-    // Defender position
-    let defX, defY = H * 0.30
-    if (anim) {
-      const dp = Math.min(p * 1.5, 1)
-      defX = W * 0.5 + (pickedX(anim.defSide) - W * 0.5) * dp
-    } else {
-      defX = W * 0.5
-    }
-    // red range ring
-    ctx.beginPath(); ctx.arc(defX + wob, defY, 34 * dpr, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(239,68,68,0.16)'; ctx.fill()
-    ctx.strokeStyle = 'rgba(239,68,68,0.6)'; ctx.lineWidth = 2 * dpr; ctx.stroke()
-    // defender emoji
-    ctx.font = `${34 * dpr}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.fillText('🛡️', defX + wob, defY)
-
-    // Ball
-    let bx, by
-    if (anim) {
-      // tackled ball stalls at the defender; pass ball rushes past to the side & up
-      const bp = anim.pass ? p : Math.min(p / 0.72, 1)
-      const tx = pickedX(anim.picked)
-      const ty = anim.pass ? H * 0.14 : H * 0.30
-      bx = W * 0.5 + (tx - W * 0.5) * bp
-      by = H * 0.82 + (ty - H * 0.82) * bp
-    } else {
-      bx = W * 0.5; by = H * 0.82
-    }
-    angleRef.current += anim && anim.active ? 0.35 : 0.02
-    const img = ballImgRef.current
-    const r = (isMobile ? 22 : 28) * dpr
-    if (img?.complete && img.naturalWidth) {
-      ctx.save(); ctx.translate(bx + wob, by); ctx.rotate(angleRef.current)
-      ctx.drawImage(img, -r, -r, r * 2, r * 2); ctx.restore()
-    } else {
-      ctx.beginPath(); ctx.arc(bx + wob, by, r, 0, Math.PI * 2); ctx.fillStyle = '#f4f8ff'; ctx.fill()
-    }
-
-    // particles
-    shakeRef.current *= 0.9
-    particlesRef.current = particlesRef.current
-      .map(pt => ({ ...pt, fx: pt.fx + pt.vx / W, fy: pt.fy + pt.vy / H, vy: pt.vy + 0.12, life: pt.life - 0.03 }))
-      .filter(pt => pt.life > 0)
-    particlesRef.current.forEach(pt => { ctx.globalAlpha = Math.max(pt.life, 0); ctx.fillStyle = pt.color; ctx.fillRect(pt.fx * W, pt.fy * H, 3 * dpr, 3 * dpr) })
-    ctx.globalAlpha = 1
-
-    // flash overlay
-    if (flashRef.current.a > 0.02) {
-      ctx.fillStyle = `rgba(${flashRef.current.c},${flashRef.current.a})`
-      ctx.fillRect(0, 0, W, H)
-      flashRef.current.a *= 0.85
-    }
+  // ---------- visual layer (Spribe Goal 1:1) ----------
+  const navPill = {
+    padding: '5px 16px', borderRadius: RADIUS.pill,
+    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
+    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
   }
-  drawRef.current = draw
-
-  useEffect(() => {
-    const img = new Image(); img.src = ballUrl; ballImgRef.current = img
-    let frameId = 0, alive = true
-    const loop = now => { if (!alive) return; drawRef.current(now); frameId = requestAnimationFrame(loop) }
-    frameId = requestAnimationFrame(loop)
-    return () => { alive = false; cancelAnimationFrame(frameId) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const running = phase === 'running'
-  const bigMult = MULTS[level]
-  const bigColor = level <= 1 ? COLOR : level <= 3 ? '#e0b100' : '#f5a623'
-  const topTag = phase === 'idle' ? '准备突破' : running ? `已过 ${level} 人` : finalResult?.win > 0 ? '突破得手' : '被抢断'
+  const circleBtn = {
+    width: 30, height: 30, borderRadius: RADIUS.pill,
+    background: GOAL.band, color: COLORS.white,
+    border: '1px solid rgba(255,255,255,0.35)',
+    fontSize: 15, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
+  }
+  const cellFace = white => ({
+    borderRadius: 6,
+    background: white
+      ? `linear-gradient(180deg, ${GOAL.cellWhiteTop}, ${GOAL.cellWhiteBot})`
+      : `linear-gradient(180deg, ${GOAL.cellTop}, ${GOAL.cellBot})`,
+    border: '1px solid rgba(0,0,0,0.18)',
+    aspectRatio: '82 / 70',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  })
 
   return (
-    <GameLayout title="Goal" emoji="⚽" color={COLOR}
-      sidebar={
-        <Panel>
-          {finalResult && (
-            <div style={{
-              marginTop: 14, padding: '12px 16px', borderRadius: 12,
-              background: finalResult.win > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-              color: finalResult.win > 0 ? '#6EE7B7' : '#FCA5A5',
-              fontWeight: 600, fontSize: 14, animation: 'winPop 0.4s ease',
-            }}>
-              {finalResult.win > 0 ? '🎉' : '💔'} 过 {finalResult.level} 人 —{' '}
-              {finalResult.win > 0 ? `赢 $${money(finalResult.win)}!` : '被抢断，未中奖'}
-            </div>
+    <GameLayout title="Goal" emoji="🥅" color={GOAL.win}>
+      <Panel style={{
+        background: `radial-gradient(circle at 50% 22%, ${GOAL.bgCenter}, ${GOAL.bgOuter})`,
+        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        position: 'relative',
+      }}>
+        {/* left giant football line art */}
+        <svg width="300" height="300" viewBox="0 0 100 100" style={{ position: 'absolute', left: -120, top: '38%', pointerEvents: 'none' }}>
+          <circle cx="50" cy="50" r="48" fill="none" stroke={GOAL.line} strokeWidth="2" />
+          <polygon points="50,32 66,44 60,63 40,63 34,44" fill="none" stroke={GOAL.line} strokeWidth="2" />
+          <g stroke={GOAL.line} strokeWidth="2" fill="none">
+            <line x1="50" y1="32" x2="50" y2="4" />
+            <line x1="66" y1="44" x2="90" y2="34" />
+            <line x1="60" y1="63" x2="74" y2="86" />
+            <line x1="40" y1="63" x2="26" y2="86" />
+            <line x1="34" y1="44" x2="10" y2="34" />
+          </g>
+        </svg>
+        {/* right half-pitch line art */}
+        <svg width="260" height="380" viewBox="0 0 130 190" style={{ position: 'absolute', right: -90, top: '18%', pointerEvents: 'none' }}>
+          <rect x="30" y="5" width="130" height="180" fill="none" stroke={GOAL.line} strokeWidth="2" />
+          <rect x="30" y="45" width="46" height="100" fill="none" stroke={GOAL.line} strokeWidth="2" />
+          <rect x="30" y="75" width="18" height="40" fill="none" stroke={GOAL.line} strokeWidth="2" />
+          <path d="M76 75 A 22 22 0 0 1 76 115" fill="none" stroke={GOAL.line} strokeWidth="2" />
+        </svg>
+
+        {/* ---- top bar ---- */}
+        <div style={{
+          margin: isMobile ? '-12px -12px 12px' : '-18px -18px 14px',
+          padding: '8px 14px',
+          background: GOAL.band,
+          display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 1,
+        }}>
+          <span style={navPill}>GOAL ▾</span>
+          <span style={{
+            padding: '5px 14px', borderRadius: RADIUS.pill,
+            background: GOAL.orange, color: COLORS.white,
+            fontSize: 12, fontWeight: 900,
+          }}>? How to Play?</span>
+          {!isMobile && (
+            <span style={{
+              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+              padding: '4px 18px', borderRadius: RADIUS.pill,
+              border: `1px solid ${GOAL.gold}`, color: GOAL.gold,
+              fontSize: 11, fontWeight: 900, letterSpacing: 2,
+            }}>DEMO MODE</span>
           )}
-
-          {/* Multiplier ladder */}
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8, fontWeight: 600 }}>过人赔率</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {[5, 4, 3, 2, 1].map(n => {
-                const active = running && level === n
-                const done = level >= n
-                return (
-                  <div key={n} style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8,
-                    background: active ? COLOR + '20' : done ? 'rgba(16,185,129,0.12)' : 'var(--bg2)',
-                    border: `1.5px solid ${active ? COLOR : done ? 'rgba(16,185,129,0.4)' : 'var(--border)'}`,
-                    fontSize: 13, fontWeight: 600, color: active ? COLOR : done ? '#6EE7B7' : 'var(--text3)',
-                  }}>
-                    <span>{done ? '✓' : ' '}</span>
-                    <span>过 {n} 人{n === 5 ? '（满分）' : ''}</span>
-                    <span style={{ marginLeft: 'auto' }}>{MULTS[n]}×</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </Panel>
-      }
-    >
-      <Panel style={{ background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden' }}>
-        <RoundHistoryBar rounds={roundHistory} />
-        <div style={{ position: 'relative' }}>
-          <canvas ref={canvasRef} style={{
-            display: 'block', width: '100%', height: isMobile ? 300 : 360,
-            borderRadius: 16, background: '#0b3b28', border: '1px solid #172333',
-          }} />
-
-          {/* audio toggles */}
+          <button type="button" disabled onClick={cashOut} style={{
+            marginLeft: 'auto', padding: '3px 12px', borderRadius: RADIUS.pill,
+            background: GOAL.win, color: '#083a1b', border: 'none',
+            fontSize: 11, fontWeight: 900, cursor: 'not-allowed',
+          }}>+3.44 USD</button>
+          <span style={{ color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
+          </span>
           <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-            position: 'absolute', top: 10, right: 60, width: 40, height: 40, borderRadius: '50%', zIndex: 2,
-            background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)', color: bgmOn ? COLOR : '#7d8a99',
-            border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : '#232c39'}`, fontSize: 16, cursor: 'pointer',
+            width: 30, height: 30, borderRadius: RADIUS.pill,
+            background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
+            color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+            fontSize: 13, cursor: 'pointer',
+            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
           }}>🎵</button>
           <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-            position: 'absolute', top: 10, right: 12, width: 40, height: 40, borderRadius: '50%', zIndex: 2,
-            background: 'rgba(26,34,48,0.85)', color: muted ? '#7d8a99' : COLOR, border: '1px solid #232c39', fontSize: 18, cursor: 'pointer',
+            width: 30, height: 30, borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+            border: '1px solid rgba(255,255,255,0.25)',
+            fontSize: 14, cursor: 'pointer',
+            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
           }}>{muted ? '🔇' : '🔊'}</button>
-
-          {/* big multiplier + tag (top center) */}
-          <div style={{ position: 'absolute', top: 14, left: 0, right: 0, textAlign: 'center', pointerEvents: 'none' }}>
-            <div style={{ color: '#cfe9dc', fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>{topTag}</div>
-            <div style={{ color: bigColor, fontSize: isMobile ? 32 : 40, fontWeight: 900, fontFamily: "'Space Grotesk', sans-serif", textShadow: '0 2px 14px rgba(0,0,0,0.6)' }}>
-              {bigMult.toFixed(bigMult % 1 ? 1 : 0)}×
-            </div>
-          </div>
-
-          {/* message (center) */}
-          {message && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-              <div style={{
-                fontSize: isMobile ? 34 : 44, fontWeight: 900, fontFamily: "'Space Grotesk', sans-serif",
-                color: message.tone === 'bad' ? '#FCA5A5' : message.tone === 'gold' ? '#FCD34D' : '#6EE7B7',
-                textShadow: '0 2px 18px rgba(0,0,0,0.7)', animation: 'winPop 0.35s ease',
-              }}>{message.text}</div>
-            </div>
-          )}
         </div>
 
-        {/* Left / Right dribble buttons */}
-        {running && awaiting ? (
-          <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
-            <button onClick={() => choose('left')} style={dribbleBtn}>◀ 左路突破</button>
-            <button onClick={() => choose('right')} style={dribbleBtn}>右路突破 ▶</button>
-          </div>
-        ) : (
-          <p style={{ color: 'var(--text3)', fontSize: 14, textAlign: 'center', marginTop: 14 }}>
-            {phase === 'idle' ? '下注后开始 · 选左/右绕过防守，过人越多倍数越高，可随时兑现'
-              : running ? '突破中…'
-                : finalResult?.win > 0 ? `本轮结束 · 过 ${finalResult.level} 人` : '被抢断了 · 再来一次'}
-          </p>
-        )}
-      </Panel>
+        {/* ---- second row: Field selector + Next multiplier ---- */}
+        <div style={{
+          width: isMobile ? '100%' : 640, maxWidth: '100%', margin: '0 auto 10px',
+          background: GOAL.strip, borderRadius: RADIUS.pill,
+          padding: '4px 6px', display: 'flex', alignItems: 'center', gap: 8,
+          position: 'relative', zIndex: 1, boxSizing: 'border-box',
+        }}>
+          <span style={{
+            padding: '3px 18px', borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.25)',
+            color: COLORS.white, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
+          }}>Field: ▪▪ ▾</span>
+          <span style={{
+            marginLeft: 'auto', padding: '3px 14px', borderRadius: RADIUS.pill,
+            background: GOAL.orange, color: COLORS.white,
+            fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
+          }}>Next: 1.29x</span>
+        </div>
 
-      {/* Shell bet bay — multi-step mode: bet / live cashout while running / back to bet */}
-      <div style={{ maxWidth: 480, margin: '14px auto 0' }}>
-        <BetPanel
-          bet={bet}
-          setBet={setBet}
-          max={balance}
-          inputDisabled={running}
-          chipDisabled={running}
-          showAuto={false}
-          button={running
-            ? { state: 'cashout', label: `兑现 $${money(bet * MULTS[level])}`, onClick: cashOut, disabled: level < 1 || !awaiting }
-            : { state: 'bet', label: `下注 $${money(bet)}`, onClick: start, disabled: bet > balance || bet < 1 }}
-        />
-      </div>
+        {/* ---- main 7×4 grid (static showcase — matches the reference) ---- */}
+        <div style={{
+          width: isMobile ? '100%' : 640, maxWidth: '100%', margin: '0 auto 10px',
+          display: 'grid', gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`, gap: 6,
+          position: 'relative', zIndex: 1,
+        }}>
+          {Array.from({ length: GRID_ROWS }).map((_, r) => (
+            Array.from({ length: GRID_COLS }).map((_, c) => {
+              const reveal = REVEALS[`${r}-${c}`]
+              return (
+                <div key={`${r}-${c}`} style={cellFace(c === WHITE_COL)}>
+                  {reveal === 'dot' && (
+                    <span style={{ width: 14, height: 14, borderRadius: '50%', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
+                  )}
+                  {reveal === 'ball' && <span style={{ fontSize: isMobile ? 22 : 30, lineHeight: 1 }}>⚽</span>}
+                  {reveal === 'bomb' && <span style={{ fontSize: isMobile ? 20 : 27, lineHeight: 1 }}>💣</span>}
+                </div>
+              )
+            })
+          ))}
+        </div>
+
+        {/* ---- RANDOM / refresh / Auto Game row ---- */}
+        <div style={{
+          width: isMobile ? '100%' : 640, maxWidth: '100%', margin: '0 auto 14px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          position: 'relative', zIndex: 1,
+        }}>
+          <button type="button" disabled onClick={() => choose('left')} style={{
+            flex: 1, maxWidth: 260, padding: '7px 0', borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.55)',
+            color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 1,
+            cursor: 'not-allowed',
+          }}>RANDOM</button>
+          <button type="button" disabled onClick={() => choose('right')} style={{
+            width: 32, height: 32, borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.4)',
+            color: COLORS.white, fontSize: 14, fontWeight: 900, cursor: 'not-allowed',
+          }}>⟳</button>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '5px 14px 5px 6px', borderRadius: RADIUS.pill,
+            background: GOAL.strip,
+          }}>
+            <span style={{
+              width: 34, height: 18, borderRadius: RADIUS.pill,
+              background: 'rgba(255,255,255,0.25)', position: 'relative', display: 'inline-block',
+            }}>
+              <span style={{
+                position: 'absolute', left: 2, top: 2, width: 14, height: 14,
+                borderRadius: '50%', background: '#9aa7b0',
+              }} />
+            </span>
+            <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 800 }}>Auto Game</span>
+          </span>
+        </div>
+
+        {/* ---- bottom bet band ---- */}
+        <div style={{
+          margin: isMobile ? '0 -12px -12px' : '0 -18px -18px',
+          padding: '12px 14px',
+          background: GOAL.band,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
+        }}>
+          <div style={{
+            padding: '5px 18px', borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+            textAlign: 'center', lineHeight: 1.2,
+          }}>
+            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <input
+              value={bet}
+              onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              style={{
+                width: 56, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
+                color: COLORS.white, fontSize: 15, fontWeight: 900,
+              }}
+            />
+          </div>
+          <button type="button" onClick={() => setBet(b => Math.max(1, b - 10))} style={circleBtn}>−</button>
+          <button type="button" style={{ ...circleBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} title="筹码">
+            {/* chip-stack icon drawn in CSS — the ≡ glyph renders as a dash in this font */}
+            <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+            </span>
+          </button>
+          <button type="button" onClick={() => setBet(b => b + 10)} style={circleBtn}>+</button>
+          <button type="button" disabled title="刷新" style={{
+            width: 40, height: 40, borderRadius: RADIUS.pill,
+            background: GOAL.blue, color: COLORS.white,
+            border: '1px solid rgba(255,255,255,0.4)',
+            fontSize: 17, fontWeight: 900, cursor: 'not-allowed',
+          }}>⟳</button>
+          <button type="button" disabled onClick={start} style={{
+            minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
+            background: GOAL.bet, color: COLORS.white,
+            border: '1px solid rgba(255,255,255,0.35)',
+            fontSize: 14, fontWeight: 900, letterSpacing: 1,
+            cursor: 'not-allowed', opacity: 0.92,
+          }}>▷ BET</button>
+        </div>
+      </Panel>
     </GameLayout>
   )
-}
-
-const dribbleBtn = {
-  flex: 1, padding: '14px', borderRadius: 12, border: 'none',
-  background: '#16C784', color: '#06251a', fontSize: 16, fontWeight: 900, cursor: 'pointer',
 }
