@@ -90,10 +90,13 @@ export const KENO = {
 
 // Streak Roll — sampled from the Spribe Hotline reference shot
 export const HOTLINE = {
-  bgOuter: '#25367f',    // 仿 Spribe 宝蓝（面板边缘）
-  bgCenter: '#3a4fa5',   // 仿 Spribe 宝蓝（中央）
-  band: '#4157b0',       // card-strip band
-  bar: '#1d2b5e',        // top/bottom bars, pills, track
+  // 背景改球场绿 — 取自 MINES.bgOuter/bgCenter (#0d4a20/#2e8f4f)，中央略压暗
+  // 以衬宝蓝滚条带；仅 StreakRoll 引用这两键（改前已 grep 全量确认）
+  bgOuter: '#0d4a20',    // 球场绿（面板边缘，= MINES.bgOuter）
+  bgCenter: '#28814a',   // 球场绿（中央，MINES.bgCenter #2e8f4f 压暗一档）
+  // 界面绿两档 — 外框深绿 / 控件底更深，对照 Mines 顶栏注栏同款色感：
+  band: '#11582a',       // card-strip band（MINES.bgOuter #0d4a20 提亮一档）
+  bar: '#0b3d1c',        // top/bottom bars, pills, track（= MINES.band）
   cardRed: '#f9576d',      // 仿 Spribe 艳粉红（重取样）
   cardRedDeep: '#e63652',
   cardRedDot: '#fb8a99',   // 红卡内浅粉大圆
@@ -102,7 +105,7 @@ export const HOTLINE = {
   fire: '#ffb300',
   fireDeep: '#f28c17',
   gold: '#ffd54f',       // selection frame / DEMO pill
-  blue: '#2f6fe0',       // round action buttons
+  blue: '#2e8f4f',       // round action buttons — 绿版（= MINES.bgCenter，键名保留兼容）
   black: '#0d0d10',      // BLACK bet button
   orange: '#f28c17',
 }

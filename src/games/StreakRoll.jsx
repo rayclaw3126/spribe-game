@@ -10,6 +10,9 @@ import { useBgm } from '../components/shell/bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 import flameUrl from '../assets/shared/flame_tier_sm.png'
 import ballUrl from '../assets/covers/ball-3d.png'
+import silKeeperUrl from '../assets/shared/silhouette_keeper.png'
+import silStrikerUrl from '../assets/shared/silhouette_striker.png'
+import silTackleUrl from '../assets/shared/silhouette_tackle.png'
 
 const CELL_W = 64          // portrait cards, ref-proportioned (≈64×84)
 const CARD_H = 84
@@ -355,21 +358,37 @@ export default function StreakRoll({ balance, setBalance }) {
       : { background: HOTLINE.cardNavy, border: '2px solid rgba(0,0,0,0.3)' }
 
   // 速度线背景 — 6 条流光横线不同速单向穿过，避开滚条热区（中带 35–70% 留空）。
-  // 颜色就地取材：HOTLINE.blue #2f6fe0 → rgba(47,111,224,α) + 现有白系 rgba。
+  // 绿底改版：蓝系在绿底上发脏，全部换现有白系 rgba（α 维持 0.25–0.45）。
   const SPEED_LINES = [
-    { top: '11%', w: 180, h: 2, c: 'rgba(47,111,224,0.45)', dur: '3.2s', del: '0s' },
+    { top: '11%', w: 180, h: 2, c: 'rgba(255,255,255,0.45)', dur: '3.2s', del: '0s' },
     { top: '18%', w: 90,  h: 1, c: 'rgba(255,255,255,0.30)', dur: '4.4s', del: '-1.6s' },
-    { top: '26%', w: 220, h: 2, c: 'rgba(47,111,224,0.35)', dur: '2.8s', del: '-0.9s' },
+    { top: '26%', w: 220, h: 2, c: 'rgba(255,255,255,0.35)', dur: '2.8s', del: '-0.9s' },
     { top: '74%', w: 120, h: 1, c: 'rgba(255,255,255,0.25)', dur: '5s',   del: '-2.8s' },
-    { top: '82%', w: 200, h: 2, c: 'rgba(47,111,224,0.40)', dur: '3.6s', del: '-2.1s' },
+    { top: '82%', w: 200, h: 2, c: 'rgba(255,255,255,0.40)', dur: '3.6s', del: '-2.1s' },
     { top: '90%', w: 70,  h: 1, c: 'rgba(255,255,255,0.30)', dur: '4.8s', del: '-0.4s' },
+  ]
+  // 看台剪影暗层 — shared 剪影 ×3 近大远小交错两组，压暗融进宝蓝底；
+  // 贴速度线下带之下、注栏之上（bottom 按注栏高度让位），不碰滚条热区
+  const SILHOUETTES = [
+    { src: silKeeperUrl,  h: 88, left: '2%'  },
+    { src: silStrikerUrl, h: 62, left: '15%' },
+    { src: silTackleUrl,  h: 74, left: '28%' },
+    { src: silStrikerUrl, h: 52, left: '43%' },
+    { src: silKeeperUrl,  h: 70, left: '56%' },
+    { src: silTackleUrl,  h: 56, left: '70%' },
+    { src: silStrikerUrl, h: 84, left: '84%' },
   ]
   const speedLines = (
     <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
       <style>{`
         @keyframes srSpeedLine { from { transform: translateX(0); } to { transform: translateX(115vw); } }
         .srSpeed { animation: srSpeedLine var(--d) linear infinite; animation-delay: var(--dl); }
-        @media (prefers-reduced-motion: reduce) { .srSpeed { animation: none; } }
+        @keyframes srLiveDot { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+        .srLiveDot { animation: srLiveDot 2s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .srSpeed { animation: none; }
+          .srLiveDot { animation: none; opacity: 1; }
+        }
       `}</style>
       {SPEED_LINES.map((l, i) => (
         <span key={i} className="srSpeed" style={{
@@ -377,6 +396,16 @@ export default function StreakRoll({ balance, setBalance }) {
           width: l.w, height: l.h, borderRadius: 2,
           background: `linear-gradient(90deg, transparent, ${l.c}, transparent)`,
           '--d': l.dur, '--dl': l.del,
+        }} />
+      ))}
+      {SILHOUETTES.map((s, i) => (
+        <img key={i} src={s.src} alt="" draggable={false} style={{
+          position: 'absolute', left: s.left,
+          // 注栏之上让位：注栏折行越窄越高（移动 ~190 / 窄桌面 ~140 / 宽桌面单行）
+          bottom: isMobile ? 200 : deskWide ? 84 : 150,
+          height: s.h * (isMobile ? 0.7 : 1), width: 'auto',
+          opacity: 0.1, filter: 'brightness(0.35)',
+          pointerEvents: 'none',
         }} />
       ))}
     </div>
@@ -466,13 +495,34 @@ export default function StreakRoll({ balance, setBalance }) {
           }}>⟲˅</button>
         </div>
 
-        {/* ---- card strip band ---- */}
+        {/* ---- card strip band — 转播跑马灯化：LIVE 角标 + 频道条描边 ---- */}
         <div style={{
           background: HOTLINE.band, borderRadius: 14,
           padding: '10px 0 10px', margin: '0 auto', maxWidth: 860, width: '100%',
           boxSizing: 'border-box',
           position: 'relative',
+          // 左右微内发光（白系，绿底改版），量级克制
+          boxShadow: 'inset 10px 0 20px -12px rgba(255,255,255,0.22), inset -10px 0 20px -12px rgba(255,255,255,0.22)',
         }}>
+          {/* 顶部频道条亮线（白系） */}
+          <div style={{
+            position: 'absolute', top: 0, left: 14, right: 14, height: 2, borderRadius: 2,
+            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent)',
+            pointerEvents: 'none',
+          }} />
+          {/* LIVE 角标 — 红点 2s 呼吸（reduced-motion 常亮） */}
+          <span style={{
+            position: 'absolute', top: -10, left: 14, zIndex: 3,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '3px 10px', borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(249,87,109,0.6)',
+          }}>
+            <span className="srLiveDot" style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: HOTLINE.cardRed, boxShadow: '0 0 6px rgba(249,87,109,0.8)',
+            }} />
+            <span style={{ color: COLORS.white, fontSize: 9.5, fontWeight: 900, letterSpacing: 1.5 }}>LIVE</span>
+          </span>
           <WinToast toasts={toasts} />
           <div style={tri(false)} />
           <div ref={viewRef} style={{
