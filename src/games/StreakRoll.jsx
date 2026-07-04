@@ -312,6 +312,9 @@ export default function StreakRoll({ balance, setBalance }) {
   }
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // centered DEMO pill would collide with the How-to-Play pill, so hide it
+  const deskWide = useMediaQuery('(min-width: 1200px)')
   const won = result && result.win
   const fireWin = result && result.win && result.landed === 'F'
   const mode = highRisk ? 'high' : 'normal'
@@ -351,18 +354,50 @@ export default function StreakRoll({ balance, setBalance }) {
       ? { background: `linear-gradient(160deg, ${HOTLINE.cardRed}, ${HOTLINE.cardRedDeep})`, border: '2px solid rgba(255,255,255,0.25)' }
       : { background: HOTLINE.cardNavy, border: '2px solid rgba(0,0,0,0.3)' }
 
+  // 速度线背景 — 6 条流光横线不同速单向穿过，避开滚条热区（中带 35–70% 留空）。
+  // 颜色就地取材：HOTLINE.blue #2f6fe0 → rgba(47,111,224,α) + 现有白系 rgba。
+  const SPEED_LINES = [
+    { top: '11%', w: 180, h: 2, c: 'rgba(47,111,224,0.45)', dur: '3.2s', del: '0s' },
+    { top: '18%', w: 90,  h: 1, c: 'rgba(255,255,255,0.30)', dur: '4.4s', del: '-1.6s' },
+    { top: '26%', w: 220, h: 2, c: 'rgba(47,111,224,0.35)', dur: '2.8s', del: '-0.9s' },
+    { top: '74%', w: 120, h: 1, c: 'rgba(255,255,255,0.25)', dur: '5s',   del: '-2.8s' },
+    { top: '82%', w: 200, h: 2, c: 'rgba(47,111,224,0.40)', dur: '3.6s', del: '-2.1s' },
+    { top: '90%', w: 70,  h: 1, c: 'rgba(255,255,255,0.30)', dur: '4.8s', del: '-0.4s' },
+  ]
+  const speedLines = (
+    <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <style>{`
+        @keyframes srSpeedLine { from { transform: translateX(0); } to { transform: translateX(115vw); } }
+        .srSpeed { animation: srSpeedLine var(--d) linear infinite; animation-delay: var(--dl); }
+        @media (prefers-reduced-motion: reduce) { .srSpeed { animation: none; } }
+      `}</style>
+      {SPEED_LINES.map((l, i) => (
+        <span key={i} className="srSpeed" style={{
+          position: 'absolute', left: -240, top: l.top,
+          width: l.w, height: l.h, borderRadius: 2,
+          background: `linear-gradient(90deg, transparent, ${l.c}, transparent)`,
+          '--d': l.dur, '--dl': l.del,
+        }} />
+      ))}
+    </div>
+  )
+
   const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 30%, ${HOTLINE.bgCenter}, ${HOTLINE.bgOuter})`,
-        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        borderColor: COLORS.border, padding: 0, overflow: 'hidden',
+        position: 'relative',
+        display: 'flex', flexDirection: 'column',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
+        {speedLines}
+
         {/* ---- top bar ---- */}
         <div style={{
-          margin: isMobile ? '-12px -12px 14px' : '-18px -18px 16px',
+          flex: '0 0 auto',
           padding: '8px 14px',
           background: HOTLINE.bar,
-          display: 'flex', alignItems: 'center', gap: 10, position: 'relative',
+          display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
         }}>
           <span style={navPill}>STREAK ROLL ▾</span>
           <span style={{
@@ -378,7 +413,7 @@ export default function StreakRoll({ balance, setBalance }) {
             }}>?</span>
             How to Play?
           </span>
-          {!isMobile && (
+          {!isMobile && (!isDesk || deskWide) && (
             <span style={{
               position: 'absolute', left: '50%', transform: 'translateX(-50%)',
               padding: '4px 18px', borderRadius: RADIUS.pill,
@@ -411,8 +446,16 @@ export default function StreakRoll({ balance, setBalance }) {
           @keyframes srGlow { from { transform: translate(-50%,-50%) scale(0.4); opacity:0.85 } to { transform: translate(-50%,-50%) scale(2.3); opacity:0 } }
         `}</style>
 
+        {/* ---- middle zone: flexes to fill the card, keeps the roll strip as
+             the vertical visual center; leftover space is absorbed here ---- */}
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
+          display: 'flex', flexDirection: 'column', justifyContent: 'center',
+          padding: isMobile ? '14px 12px' : '16px 18px', boxSizing: 'border-box',
+        }}>
+
         {/* ---- thin progress row: bead left, small button right ---- */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: 720, margin: '0 auto 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: 720, margin: '0 auto 18px', width: '100%' }}>
           <span style={{ width: 10, height: 10, borderRadius: RADIUS.pill, background: 'rgba(255,255,255,0.8)', flex: '0 0 auto' }} />
           <div style={{ flex: 1, height: 6, borderRadius: RADIUS.pill, background: HOTLINE.bar }} />
           <button type="button" disabled style={{
@@ -426,7 +469,8 @@ export default function StreakRoll({ balance, setBalance }) {
         {/* ---- card strip band ---- */}
         <div style={{
           background: HOTLINE.band, borderRadius: 14,
-          padding: '10px 0 10px', margin: '0 auto', maxWidth: 860,
+          padding: '10px 0 10px', margin: '0 auto', maxWidth: 860, width: '100%',
+          boxSizing: 'border-box',
           position: 'relative',
         }}>
           <WinToast toasts={toasts} />
@@ -472,7 +516,9 @@ export default function StreakRoll({ balance, setBalance }) {
                         }}>
                           <img src={ballUrl} alt="" draggable={false} style={{
                             width: Math.round(dotSize * 0.55), height: Math.round(dotSize * 0.55),
-                            opacity: c === 'R' ? 1 : 0.45, pointerEvents: 'none', display: 'block',
+                            opacity: c === 'R' ? 1 : 0.9,
+                            filter: c === 'R' ? 'none' : 'brightness(1.45) drop-shadow(0 0 4px rgba(255,255,255,0.6))',
+                            pointerEvents: 'none', display: 'block',
                           }} />
                         </span>
                       )}
@@ -541,12 +587,16 @@ export default function StreakRoll({ balance, setBalance }) {
           </button>
         </div>
 
-        {/* ---- bottom bet band ---- */}
+        </div>{/* /middle zone */}
+
+        {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip ---- */}
         <div style={{
-          margin: isMobile ? '14px -12px -12px' : '18px -18px -18px',
+          flex: '0 0 auto',
           padding: '12px 18px',
           background: HOTLINE.bar,
+          borderTop: '1px solid rgba(0,0,0,0.25)',
           display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap',
+          position: 'relative', zIndex: 1,
         }}>
           <div style={{
             padding: '5px 22px', borderRadius: RADIUS.pill,
