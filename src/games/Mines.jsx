@@ -4,11 +4,16 @@ import { COLORS, RADIUS, MINES } from '../components/shell/tokens'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
-// 单M1: Spribe Mines 1:1 visual replica, pitch-green skin + football icons.
-// PURE UI — controls static/disabled; the existing game logic and audio
-// functions below are kept untouched for the gameplay order.
-
+// 单M2: Dribble gameplay — adjustable defenders, hypergeometric multipliers,
+// RANDOM/Auto, settlement (Spribe Mines model).
+//
+// 倍数公式（超几何逐步累乘）: 已翻 i 格后再翻一格安全的概率
+//   P_i = (safe − i) / (25 − i)，safe = 25 − 铲球数。
+//   步倍数 = RTP / P_i（RTP = 0.97），累乘 = Π RTP/P_i = 0.97^k / Π P_i。
+//   内部全精度，显示与结算才 round2。
 const GRID = 25  // 5x5
+const RTP = 0.97
+const round2 = x => Math.round(x * 100) / 100
 
 function placeMines(count) {
   const positions = new Set()
@@ -19,22 +24,15 @@ function placeMines(count) {
 }
 
 function calcMultiplier(gems, mines) {
-  if (gems === 0) return 1
+  if (gems <= 0) return 1
   const safe = GRID - mines
-  let mult = 1
-  for (let i = 0; i < gems; i++) {
-    mult *= (safe - i) / (GRID - i)
-  }
-  return parseFloat((0.97 / mult).toFixed(2))
+  let m = 1
+  for (let i = 0; i < gems; i++) m *= RTP * (GRID - i) / (safe - i)
+  return m   // full precision
 }
 
-const MINE_COUNTS = [1, 3, 5, 10, 15, 20, 24]
-
-// showcase dressing — gold footballs at the reference's star positions,
-// plus one exploded tackle and two dark unexploded tackles
-const SHOW_GOLD = new Set([5, 7, 11, 13, 15])
-const SHOW_BOOM = 3
-const SHOW_TACKLE = new Set([18, 21])
+const MINE_COUNTS = Array.from({ length: 24 }, (_, i) => i + 1)   // Defenders 1–24
+const pickRandomFrom = arr => arr[Math.floor(Math.random() * arr.length)]
 
 // white block-face football (opened-safe cell icon)
 function Football({ size = 22, tone = '#ffffff', ink = '#3a2c00' }) {
@@ -66,13 +64,14 @@ function Tackle({ size = 22, tone = '#ffffff' }) {
 export default function Mines({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
-  const [mineCount] = useState(3)
+  const [mineCount, setMineCount] = useState(3)
+  const [defOpen, setDefOpen] = useState(false)
   const [phase, setPhase] = useState('idle')  // idle | playing | done
   const [mineSet, setMineSet] = useState(null)
   const [revealed, setRevealed] = useState([])
-  const [, setExploded] = useState(null)
-  const [, setMessage] = useState(null)
-  const [, setRoundHistory] = useState([])
+  const [exploded, setExploded] = useState(null)
+  const [autoOn, setAutoOn] = useState(false)
+  const [, setRoundHistory] = useState([])    // final mult per round (rendered in M3)
   const [cashedOut, setCashedOut] = useState(false)
   const [, setShaking] = useState(false)
   const [muted, setMuted] = useState(false)
@@ -82,8 +81,10 @@ export default function Mines({ balance, setBalance }) {
   const bgmRef = useRef({ audio: null })
   const shakeTimer = useRef(null)
 
-  const gems = revealed.length
+  // safe reveals only (after bust/cashout `revealed` also holds the mines)
+  const gems = revealed.filter(i => !mineSet?.has(i)).length
   const currentMult = calcMultiplier(gems, mineCount)
+  const nextMult = calcMultiplier(gems + 1, mineCount)
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
 
@@ -147,15 +148,22 @@ export default function Mines({ balance, setBalance }) {
     shakeTimer.current = setTimeout(() => setShaking(false), 420)
   }
 
-  // ---------- game (kept for the gameplay order — wired to disabled controls) ----------
+  // ---------- game ----------
+  // single money path: every round ends here exactly once
+  function settleMoney(mult) {
+    const payout = round2(bet * mult)
+    if (payout > 0) setBalance(b => round2(b + payout))
+    setRoundHistory(h => [round2(mult), ...h].slice(0, 20))
+    setPhase('done')
+  }
+
   function startGame() {
-    if (bet > balance) return
+    if (phase === 'playing' || bet > balance || bet < 1) return
     ensureAudio()
-    setBalance(b => b - bet)
+    setBalance(b => round2(b - bet))
     setMineSet(placeMines(mineCount))
     setRevealed([])
     setExploded(null)
-    setMessage(null)
     setCashedOut(false)
     setPhase('playing')
   }
@@ -164,10 +172,9 @@ export default function Mines({ balance, setBalance }) {
     if (phase !== 'playing' || revealed.includes(idx) || cashedOut) return
     if (mineSet.has(idx)) {
       setExploded(idx)
-      setMessage({ text: `💥 Tackled! You lost $${bet.toFixed(2)}`, win: false })
-      setRoundHistory(h => [0, ...h].slice(0, 20))
-      setPhase('done')
-      setRevealed([...revealed, idx])
+      // 揭全盘: show every defender
+      setRevealed(prev => [...new Set([...prev, idx, ...mineSet])])
+      settleMoney(0)
       playTackle()
       triggerShake()
     } else {
@@ -175,34 +182,40 @@ export default function Mines({ balance, setBalance }) {
       setRevealed(newRevealed)
       const newGems = newRevealed.length
       const safe = GRID - mineCount
-      if (newGems >= safe) {
-        const payout = parseFloat((bet * calcMultiplier(newGems, mineCount)).toFixed(2))
-        setBalance(b => parseFloat((b + payout).toFixed(2)))
-        setMessage({ text: `All gems found! ${calcMultiplier(newGems, mineCount)}× — $${payout.toFixed(2)}! 🏆`, win: true })
-        setRoundHistory(h => [calcMultiplier(newGems, mineCount), ...h].slice(0, 20))
-        setPhase('done')
+      if (newGems >= safe) {   // 翻满全部安全格自动结算
+        settleMoney(calcMultiplier(newGems, mineCount))
+        setRevealed(prev => [...new Set([...prev, ...mineSet])])
         playWin()
       } else {
-        setMessage({ text: `💎 Gem! +${calcMultiplier(newGems, mineCount)}× so far`, win: true })
         playGem()
       }
     }
   }
 
-  function cashOut() {
-    if (phase !== 'playing' || gems === 0 || cashedOut) return
-    const payout = parseFloat((bet * currentMult).toFixed(2))
-    setBalance(b => parseFloat((b + payout).toFixed(2)))
+  function cashOut() {   // 任意步可兑 = 注金 × 累乘
+    if (phase !== 'playing' || cashedOut) return
     setCashedOut(true)
-    setMessage({ text: `Cashed out ${currentMult}× — Won $${payout.toFixed(2)}!`, win: true })
-    setRoundHistory(h => [currentMult, ...h].slice(0, 20))
-    setPhase('done')
-    setRevealed(prev => {
-      const mines = [...mineSet]
-      return [...new Set([...prev, ...mines])]
-    })
+    settleMoney(currentMult)
+    setRevealed(prev => [...new Set([...prev, ...mineSet])])
     playCash()
   }
+
+  function randomPick() {   // 随机点一个未翻格
+    if (phase !== 'playing' || cashedOut) return
+    const candidates = Array.from({ length: GRID }, (_, i) => i).filter(i => !revealed.includes(i))
+    if (candidates.length) revealCell(pickRandomFrom(candidates))
+  }
+
+  // Auto Game: one random step every 600ms until bust / clear / toggled off
+  useEffect(() => {
+    if (!autoOn || phase !== 'playing') return
+    const id = setTimeout(() => {
+      const candidates = Array.from({ length: GRID }, (_, i) => i).filter(i => !revealed.includes(i))
+      if (candidates.length) revealCell(pickRandomFrom(candidates))
+    }, 600)
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOn, phase, revealed])
 
   // ---------- visual layer (Spribe Mines 1:1, pitch green) ----------
   const navPill = {
@@ -306,42 +319,72 @@ export default function Mines({ balance, setBalance }) {
         </div>
 
         {/* ---- second row: Defenders selector + Next + progress strip ---- */}
-        <div style={{ width: isMobile ? '100%' : 420, maxWidth: '100%', margin: '0 auto 10px', position: 'relative', zIndex: 1 }}>
+        <div style={{ width: isMobile ? '100%' : 420, maxWidth: '100%', margin: '0 auto 10px', position: 'relative', zIndex: 3 }}>
           <div style={{
             background: MINES.strip, borderRadius: RADIUS.pill,
             padding: '4px 6px', display: 'flex', alignItems: 'center', gap: 8, boxSizing: 'border-box',
           }}>
-            <span style={{
-              padding: '3px 18px', borderRadius: RADIUS.pill,
-              background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.25)',
-              color: COLORS.white, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
-            }}>Defenders: {mineCount} ▾</span>
+            <span style={{ position: 'relative', flex: '0 0 auto' }}>
+              <button type="button"
+                onClick={() => { if (phase !== 'playing') setDefOpen(v => !v) }}
+                style={{
+                  padding: '3px 18px', borderRadius: RADIUS.pill,
+                  background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.25)',
+                  color: COLORS.white, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
+                  cursor: phase === 'playing' ? 'not-allowed' : 'pointer',
+                  opacity: phase === 'playing' ? 0.6 : 1,
+                }}>Defenders: {mineCount} ▾</button>
+              {defOpen && (
+                <span style={{
+                  position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 6,
+                  display: 'flex', flexWrap: 'wrap', gap: 4, padding: 6, width: 208,
+                  background: MINES.band, border: '1px solid rgba(255,255,255,0.25)',
+                  borderRadius: 10, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+                }}>
+                  {MINE_COUNTS.map(n => (
+                    <button key={n} type="button"
+                      onClick={() => { setMineCount(n); setDefOpen(false) }}
+                      style={{
+                        width: 28, height: 24, borderRadius: 5,
+                        background: n === mineCount ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.35)',
+                        border: '1px solid rgba(255,255,255,0.25)',
+                        color: COLORS.white, fontSize: 10, fontWeight: 800, cursor: 'pointer',
+                      }}>{n}</button>
+                  ))}
+                </span>
+              )}
+            </span>
             <span style={{
               marginLeft: 'auto', padding: '3px 14px', borderRadius: RADIUS.pill,
               background: MINES.next, color: '#3a2c00',
               fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-            }}>Next: 26.55x</span>
+            }}>Next: {round2(nextMult).toFixed(2)}x</span>
           </div>
           <div style={{ height: 4, borderRadius: 2, background: MINES.progressTrack, marginTop: 4, overflow: 'hidden' }}>
-            <div style={{ width: '25%', height: '100%', background: MINES.progress }} />
+            <div style={{ width: `${(gems / (GRID - mineCount)) * 100}%`, height: '100%', background: MINES.progress, transition: 'width 0.2s' }} />
           </div>
         </div>
 
-        {/* ---- main 5×5 grid (static showcase — reference star positions) ---- */}
+        {/* ---- main 5×5 grid ---- */}
         <div style={{
           width: isMobile ? '100%' : 420, maxWidth: '100%', margin: '0 auto 10px',
           display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8,
           position: 'relative', zIndex: 1,
         }}>
           {Array.from({ length: GRID }).map((_, i) => {
-            const kind = SHOW_GOLD.has(i) ? 'gold' : i === SHOW_BOOM ? 'boom' : SHOW_TACKLE.has(i) ? 'tackle' : 'hidden'
+            const isRev = revealed.includes(i)
+            const isMine = mineSet?.has(i)
+            const kind = isRev ? (isMine ? (i === exploded ? 'boom' : 'tackle') : 'gold') : 'hidden'
+            const clickable = phase === 'playing' && !isRev && !cashedOut
             return (
-              <div key={i} style={cellStyle(kind)}>
+              <button key={i} type="button" disabled={!clickable}
+                onClick={() => clickable && revealCell(i)}
+                style={{ ...cellStyle(kind), cursor: clickable ? 'pointer' : 'default' }}>
                 {kind === 'gold' && <Football size={isMobile ? 22 : 30} />}
                 {kind === 'boom' && <Tackle size={isMobile ? 22 : 30} tone="#ffffff" />}
                 {kind === 'tackle' && <Tackle size={isMobile ? 20 : 26} tone="rgba(255,255,255,0.45)" />}
                 {kind === 'hidden' && <span style={{ width: 12, height: 12, borderRadius: '50%', background: MINES.dot }} />}
-              </div>
+              </button>
             )
           })}
         </div>
@@ -352,33 +395,37 @@ export default function Mines({ balance, setBalance }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
           position: 'relative', zIndex: 1,
         }}>
-          <button type="button" disabled onClick={() => revealCell(0)} style={{
+          <button type="button" disabled={phase !== 'playing'} onClick={randomPick} style={{
             flex: 1, maxWidth: 200, padding: '7px 0', borderRadius: RADIUS.pill,
             background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.55)',
             color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 1,
-            cursor: 'not-allowed',
+            cursor: phase === 'playing' ? 'pointer' : 'not-allowed',
+            opacity: phase === 'playing' ? 1 : 0.6,
           }}>RANDOM</button>
-          <button type="button" disabled onClick={() => revealCell(1)} style={{
+          <button type="button" disabled={phase !== 'playing'} onClick={randomPick} style={{
             width: 32, height: 32, borderRadius: RADIUS.pill,
             background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.4)',
-            color: COLORS.white, fontSize: 14, fontWeight: 900, cursor: 'not-allowed',
+            color: COLORS.white, fontSize: 14, fontWeight: 900,
+            cursor: phase === 'playing' ? 'pointer' : 'not-allowed',
+            opacity: phase === 'playing' ? 1 : 0.6,
           }}>⟳</button>
-          <span style={{
+          <button type="button" onClick={() => setAutoOn(v => !v)} style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
             padding: '5px 14px 5px 6px', borderRadius: RADIUS.pill,
-            background: MINES.strip,
+            background: MINES.strip, border: 'none', cursor: 'pointer',
           }}>
             <span style={{
               width: 34, height: 18, borderRadius: RADIUS.pill,
-              background: 'rgba(255,255,255,0.25)', position: 'relative', display: 'inline-block',
+              background: autoOn ? MINES.progress : 'rgba(255,255,255,0.25)',
+              position: 'relative', display: 'inline-block', transition: 'background 0.15s',
             }}>
               <span style={{
-                position: 'absolute', left: 2, top: 2, width: 14, height: 14,
-                borderRadius: '50%', background: '#9aa7b0',
+                position: 'absolute', top: 2, left: autoOn ? 18 : 2, width: 14, height: 14,
+                borderRadius: '50%', background: autoOn ? '#083a1b' : '#9aa7b0', transition: 'left 0.15s',
               }} />
             </span>
-            <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 800 }}>Auto Game</span>
-          </span>
+            <span style={{ color: autoOn ? COLORS.white : 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 800 }}>Auto Game</span>
+          </button>
         </div>
 
         {/* ---- bottom bet band ---- */}
@@ -397,6 +444,7 @@ export default function Mines({ balance, setBalance }) {
             <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
             <input
               value={bet}
+              disabled={phase === 'playing'}
               onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{
                 width: 56, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
@@ -404,7 +452,7 @@ export default function Mines({ balance, setBalance }) {
               }}
             />
           </div>
-          <button type="button" onClick={() => setBet(b => Math.max(1, b - 10))} style={circleBtn}>−</button>
+          <button type="button" disabled={phase === 'playing'} onClick={() => setBet(b => Math.max(1, b - 10))} style={{ ...circleBtn, opacity: phase === 'playing' ? 0.5 : 1, cursor: phase === 'playing' ? 'not-allowed' : 'pointer' }}>−</button>
           <button type="button" style={{ ...circleBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} title="筹码">
             {/* chip-stack icon drawn in CSS — the ≡ glyph renders as a dash in this font */}
             <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
@@ -413,24 +461,35 @@ export default function Mines({ balance, setBalance }) {
               <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
             </span>
           </button>
-          <button type="button" onClick={() => setBet(b => b + 10)} style={circleBtn}>+</button>
-          <button type="button" disabled onClick={startGame} title="刷新" style={{
+          <button type="button" disabled={phase === 'playing'} onClick={() => setBet(b => b + 10)} style={{ ...circleBtn, opacity: phase === 'playing' ? 0.5 : 1, cursor: phase === 'playing' ? 'not-allowed' : 'pointer' }}>+</button>
+          <button type="button" disabled title="刷新" style={{
             width: 40, height: 40, borderRadius: RADIUS.pill,
             background: MINES.blue, color: COLORS.white,
             border: '1px solid rgba(255,255,255,0.4)',
             fontSize: 17, fontWeight: 900, cursor: 'not-allowed',
           }}>⟳</button>
-          <button type="button" disabled onClick={cashOut} style={{
-            minWidth: isMobile ? 170 : 230, padding: '7px 0', borderRadius: RADIUS.pill,
-            background: MINES.cash, color: '#3a2c00',
-            border: '1px solid rgba(255,255,255,0.4)',
-            fontSize: 13, fontWeight: 900, letterSpacing: 0.5, lineHeight: 1.3,
-            cursor: 'not-allowed', opacity: 0.92,
-            display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
-          }}>
-            <span>CASH OUT</span>
-            <span style={{ fontSize: 12, opacity: 0.9 }}>3.91 USD</span>
-          </button>
+          {phase === 'playing' ? (
+            <button type="button" onClick={cashOut} style={{
+              minWidth: isMobile ? 170 : 230, padding: '7px 0', borderRadius: RADIUS.pill,
+              background: MINES.cash, color: '#3a2c00',
+              border: '1px solid rgba(255,255,255,0.4)',
+              fontSize: 13, fontWeight: 900, letterSpacing: 0.5, lineHeight: 1.3,
+              cursor: 'pointer',
+              display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
+            }}>
+              <span>CASH OUT</span>
+              <span style={{ fontSize: 12, opacity: 0.9 }}>{round2(bet * currentMult).toFixed(2)} USD</span>
+            </button>
+          ) : (
+            <button type="button" onClick={startGame} disabled={bet > balance || bet < 1} style={{
+              minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
+              background: '#4a9b16', color: COLORS.white,
+              border: '1px solid rgba(255,255,255,0.35)',
+              fontSize: 14, fontWeight: 900, letterSpacing: 1,
+              cursor: bet > balance || bet < 1 ? 'not-allowed' : 'pointer',
+              opacity: bet > balance || bet < 1 ? 0.55 : 1,
+            }}>▷ BET</button>
+          )}
         </div>
       </Panel>
     </GameLayout>
