@@ -8,6 +8,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import ballUrl from '../assets/covers/ball-3d.png'
 import bgmUrl from '../assets/covers/bgm.mp3'
+import bayBgUrl from '../assets/shared/bay_bg.png'
 
 const COLOR = '#16C784'
 const FILL_TOP = '#5DCAA5'
@@ -423,10 +424,53 @@ export default function Limbo({ balance, setBalance }) {
         />
   )
 
+  // desktop bottom-bar params: the Target Odds card flattened into one column
+  // (input + presets / four stats / result strip) sitting left of the bay
+  const deskParams = (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'nowrap' }}>
+        <span style={{ color: '#8a97a6', fontSize: 12, fontWeight: 600, flex: '0 0 auto' }}>Target Odds</span>
+        <input type="number" min="1.01" step="0.01" value={target} disabled={rolling}
+          onChange={e => setTarget(Math.max(1.01, Number(e.target.value)))}
+          style={{ ...darkInput, width: 86, padding: '7px 10px', flex: '0 0 auto' }}
+        />
+        {[1.5, 2, 5, 10].map(v => (
+          <button key={v} onClick={() => setTarget(v)} disabled={rolling}
+            style={{ ...darkChip, flex: '0 0 auto', padding: '6px 10px', borderColor: t === v ? 'rgba(22,199,132,0.5)' : '#243142', color: t === v ? COLOR : '#8a97a6' }}>{v}×</button>
+        ))}
+      </div>
+      <div style={{
+        background: 'rgba(26,34,48,0.9)', border: '1px solid #232c39', borderRadius: 10,
+        padding: '8px 10px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8,
+      }}>
+        <StatBox label="Win Chance" value={`${winChance.toFixed(1)}%`} color={COLOR} />
+        <StatBox label="Multiplier" value={`${t.toFixed(2)}×`} color='#10B981' />
+        <StatBox label="Payout" value={`$${payout.toFixed(2)}`} color={AMBER} />
+        <StatBox label="Profit" value={`$${(payout - bet).toFixed(2)}`} color={COLOR} />
+      </div>
+      {result && (
+        <div style={{
+          padding: '7px 12px', borderRadius: 10,
+          background: result.win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+          border: `1px solid ${result.win ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
+          color: result.win ? '#6EE7B7' : '#FCA5A5',
+          fontWeight: 600, fontSize: 12,
+        }}>
+          {result.win ? '🎉' : '💔'} Final {result.mult.toFixed(2)}× — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Below target'}
+        </div>
+      )}
+    </div>
+  )
+
   const mainPanel = (
       <Panel style={{
         background: '#0a1119', borderColor: '#232c39', padding: isMobile ? 12 : 18, overflow: 'hidden',
-        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
+        // desktop: fill the row and center the meter+number combo both ways
+        position: 'relative',
+        ...(isDesk ? {
+          height: '100%', boxSizing: 'border-box',
+          display: 'flex', flexDirection: 'column', justifyContent: 'center',
+        } : {}),
       }}>
         {!isDesk && <RoundHistoryBar rounds={roundHistory} />}
         <style>{`
@@ -436,46 +480,48 @@ export default function Limbo({ balance, setBalance }) {
             50% { color: #EF4444; }
           }
         `}</style>
-        <div style={{ position: 'relative' }}>
+        {/* BGM toggle — game-card top-right, anchored to the card not the meter */}
+        <button
+          type="button"
+          onClick={() => setBgmOn(v => !v)}
+          style={{
+            position: 'absolute', top: 10, right: 58, zIndex: 3,
+            width: 40,
+            height: 40,
+            borderRadius: '50%',
+            background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)',
+            color: bgmOn ? COLOR : '#7d8a99',
+            border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : '#232c39'}`,
+            fontSize: 16,
+            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
+          }}
+          title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
+        >
+          🎵
+        </button>
+
+        {/* Mute — game-card top-right */}
+        <button
+          type="button"
+          onClick={() => setMuted(v => !v)}
+          style={{
+            position: 'absolute', top: 10, right: 10, zIndex: 3,
+            width: 40,
+            height: 40,
+            borderRadius: '50%',
+            background: 'rgba(26,34,48,0.85)',
+            color: muted ? '#7d8a99' : COLOR,
+            border: '1px solid #232c39',
+            fontSize: 18,
+            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
+          }}
+          title={muted ? '取消静音' : '静音'}
+        >
+          {muted ? '🔇' : '🔊'}
+        </button>
+
+        <div style={{ position: 'relative', ...(isDesk ? { width: '100%', maxWidth: 720, margin: '0 auto' } : {}) }}>
           <canvas ref={canvasRef} style={{ width: '100%', height: isMobile ? 300 : 420, display: 'block', borderRadius: 12 }} />
-
-          {/* BGM toggle — canvas top-right (left of mute) */}
-          <button
-            type="button"
-            onClick={() => setBgmOn(v => !v)}
-            style={{
-              position: 'absolute', top: 10, right: 58,
-              width: 40,
-              height: 40,
-              borderRadius: '50%',
-              background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)',
-              color: bgmOn ? COLOR : '#7d8a99',
-              border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : '#232c39'}`,
-              fontSize: 16,
-            }}
-            title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
-          >
-            🎵
-          </button>
-
-          {/* Mute — canvas top-right */}
-          <button
-            type="button"
-            onClick={() => setMuted(v => !v)}
-            style={{
-              position: 'absolute', top: 10, right: 10,
-              width: 40,
-              height: 40,
-              borderRadius: '50%',
-              background: 'rgba(26,34,48,0.85)',
-              color: muted ? '#7d8a99' : COLOR,
-              border: '1px solid #232c39',
-              fontSize: 18,
-            }}
-            title={muted ? '取消静音' : '静音'}
-          >
-            {muted ? '🔇' : '🔊'}
-          </button>
 
           <div style={{
             position: 'absolute', top: 0, bottom: 0, right: isMobile ? '2%' : '8%',
@@ -503,9 +549,9 @@ export default function Limbo({ balance, setBalance }) {
   )
 
   // Shell bet bay — one-shot mode: bet → settling (greyed) → bet again. No Auto tab.
-  const betBay = (
-      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>
+  const bayPanel = (
         <BetPanel
+          bare={isDesk}
           bet={bet}
           setBet={setBet}
           max={balance}
@@ -516,7 +562,6 @@ export default function Limbo({ balance, setBalance }) {
             ? { state: 'waiting', label: '结算中…', disabled: true }
             : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: play, disabled: bet > balance || bet < 1 }}
         />
-      </div>
   )
 
   // ---- Spribe-parity desktop skeleton (≥1024), same bones as Total Goals ----
@@ -547,14 +592,19 @@ export default function Limbo({ balance, setBalance }) {
             <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
               <RoundHistoryBar rounds={roundHistory} />
             </div>
-            {/* in-card arrangement unchanged: meter left, Target Odds right, bay under meter */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20, alignItems: 'stretch', height: '100%', boxSizing: 'border-box' }}>
-                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ flex: 1, minHeight: 0 }}>{mainPanel}</div>
-                  {betBay}
-                </div>
-                <div style={{ minWidth: 0 }}>{side}</div>
+            {/* game card full-width, meter+number combo stays centered */}
+            <div style={{ flex: 1, minHeight: 0 }}>{mainPanel}</div>
+            {/* full-bleed bottom bay strip — params left, bay right, ~900 centered */}
+            <div style={{
+              flex: '0 0 auto', minHeight: LAYOUT.bottomH,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 -12px -12px',
+              background: `linear-gradient(rgba(10,17,25,0.78), rgba(10,17,25,0.78)), url(${bayBgUrl}) center / cover no-repeat`,
+              borderTop: `1px solid ${COLORS.border}`,
+            }}>
+              <div style={{ width: 900, maxWidth: '100%', display: 'flex', alignItems: 'center', gap: 20, padding: '12px 16px', boxSizing: 'border-box' }}>
+                {deskParams}
+                <div style={{ width: LAYOUT.bayW, maxWidth: '52%', flex: '0 0 auto' }}>{bayPanel}</div>
               </div>
             </div>
           </div>
@@ -567,7 +617,7 @@ export default function Limbo({ balance, setBalance }) {
   return (
     <GameLayout title="Odds Climb" emoji="📈" color={COLOR} sidebar={side}>
       {mainPanel}
-      {betBay}
+      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bayPanel}</div>
     </GameLayout>
   )
 }
@@ -582,9 +632,13 @@ const darkChip = {
   background: '#1a2230', color: '#8a97a6', border: '1.5px solid #243142',
 }
 
-function SideControls({ bet, target, setTarget, rolling, result, t, winChance, payout }) {
+function SideControls({ bet, target, setTarget, rolling, result, t, winChance, payout, fill }) {
   return (
-    <Panel style={{ background: '#101923', borderColor: '#243142', padding: 18 }}>
+    <Panel style={{
+      background: '#101923', borderColor: '#243142', padding: 18,
+      // desktop: stretch to the game card's height, controls stacked on top
+      ...(fill ? { height: '100%', boxSizing: 'border-box' } : {}),
+    }}>
       <div style={{ marginBottom: 16 }}>
         <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Target Odds</label>
         <input type="number" min="1.01" step="0.01" value={target}
