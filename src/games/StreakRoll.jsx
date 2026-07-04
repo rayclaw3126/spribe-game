@@ -8,6 +8,8 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import flameUrl from '../assets/shared/flame_tier_sm.png'
+import ballUrl from '../assets/covers/ball-3d.png'
 
 const CELL_W = 64          // portrait cards, ref-proportioned (≈64×84)
 const CARD_H = 84
@@ -42,7 +44,7 @@ const STRIPS = {
   normal: Array.from({ length: COPIES }, () => PATTERN_NORMAL).flat(),
   high: Array.from({ length: COPIES }, () => PATTERN_HIGH).flat(),
 }
-const COLOR_LABEL = { R: 'RED', B: 'BLACK', F: '🔥' }
+const COLOR_LABEL = { R: 'RED', B: 'BLACK', F: 'FIRE' }
 
 // ---- rAF spin physics: one continuous critically-damped motion ----
 // x(t) = T − (D + C2·t)·e^(−ωt) with initial kick v0 = KICK·ω·D. KICK > 1
@@ -458,16 +460,20 @@ export default function StreakRoll({ balance, setBalance }) {
                     fontSize: c === 'F' ? 28 : 8, lineHeight: 1,
                   }}>
                     {c === 'F'
-                      ? '🔥'
+                      ? <img src={flameUrl} alt="" draggable={false} style={{
+                          height: 28, width: 'auto', pointerEvents: 'none', display: 'block',
+                        }} />
                       : (
                         <span style={{
                           width: dotSize, height: dotSize, borderRadius: RADIUS.pill,
                           background: c === 'R' ? HOTLINE.cardRedDot : HOTLINE.cardNavyDot,
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: Math.round(dotSize * 0.55),
                           opacity: c === 'R' ? 1 : 0.9,
                         }}>
-                          <span style={{ opacity: c === 'R' ? 1 : 0.45 }}>⚽</span>
+                          <img src={ballUrl} alt="" draggable={false} style={{
+                            width: Math.round(dotSize * 0.55), height: Math.round(dotSize * 0.55),
+                            opacity: c === 'R' ? 1 : 0.45, pointerEvents: 'none', display: 'block',
+                          }} />
                         </span>
                       )}
                   </div>
@@ -583,7 +589,9 @@ export default function StreakRoll({ balance, setBalance }) {
                   <span>RED</span><span>X{mults.R}</span>
                 </button>
                 <button type="button" disabled={locked} onClick={() => betOn('F')} style={withLock(betBigBtn(`radial-gradient(circle at 50% 30%, ${HOTLINE.gold}, ${HOTLINE.fireDeep})`, COLORS.white))}>
-                  <span>🔥</span><span>X{mults.F}</span>
+                  <img src={flameUrl} alt="" draggable={false} style={{
+                    height: 16, width: 'auto', pointerEvents: 'none', display: 'block', margin: '0 auto',
+                  }} /><span>X{mults.F}</span>
                 </button>
                 <button type="button" disabled={locked} onClick={() => betOn('B')} style={withLock(betBigBtn(HOTLINE.black, COLORS.white))}>
                   <span>BLACK</span><span>X{mults.B}</span>

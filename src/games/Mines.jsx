@@ -7,6 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 
 // 单M2: Dribble gameplay — adjustable defenders, hypergeometric multipliers,
 // RANDOM/Auto, settlement (Spribe Mines model).
@@ -51,20 +52,6 @@ function Football({ size = 22, tone = '#ffffff', ink = '#3a2c00' }) {
     </svg>
   )
 }
-// slide-tackle icon: sliding boot silhouette + motion lines
-function Tackle({ size = 22, tone = '#ffffff' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: 'block' }}>
-      <path d="M3 17 L13 12.5 L20 14.5 L21 17.5 L16 19 L3 19.5 Z" fill={tone} />
-      <path d="M16.5 12.5 L19.5 9 L21.5 10.5 L19 13.5 Z" fill={tone} opacity="0.85" />
-      <g stroke={tone} strokeWidth="1.3" opacity="0.6">
-        <line x1="2" y1="12" x2="8" y2="10" />
-        <line x1="3" y1="14.5" x2="9" y2="12.5" />
-      </g>
-    </svg>
-  )
-}
-
 export default function Mines({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
@@ -387,8 +374,12 @@ export default function Mines({ balance, setBalance }) {
                 onClick={() => clickable && revealCell(i)}
                 style={{ ...cellStyle(kind), cursor: clickable ? 'pointer' : 'default' }}>
                 {kind === 'gold' && <Football size={isMobile ? 22 : 30} />}
-                {kind === 'boom' && <Tackle size={isMobile ? 22 : 30} tone="#ffffff" />}
-                {kind === 'tackle' && <Tackle size={isMobile ? 20 : 26} tone="rgba(255,255,255,0.45)" />}
+                {kind === 'boom' && <img src={tackleBurstUrl} alt="" draggable={false} style={{
+                  height: isMobile ? 22 : 30, width: 'auto', pointerEvents: 'none', display: 'block',
+                }} />}
+                {kind === 'tackle' && <img src={tackleBurstUrl} alt="" draggable={false} style={{
+                  height: isMobile ? 20 : 26, width: 'auto', opacity: 0.5, pointerEvents: 'none', display: 'block',
+                }} />}
                 {kind === 'hidden' && <span style={{ width: 12, height: 12, borderRadius: '50%', background: MINES.dot }} />}
               </button>
             )

@@ -7,7 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots, createArenaFx, drawArenaFx } from '../components/shell/arenaFx'
 import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 import ballUrl from '../assets/covers/ball-3d.png'
-import cardRedUrl from '../assets/shared/card_red.png'
+import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 import { useBgm } from '../components/shell/bgmManager'
 
 // 单G2: Goal gameplay — Field tiers, column-by-column advance, bomb bust,
@@ -429,12 +429,12 @@ export default function Goal({ balance, setBalance }) {
                     : <span style={{ width: 14, height: 14, borderRadius: '50%', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
                 }
               } else if (isBustCol) {
-                // red card = tackled; the picked cell shows it full-strength,
-                // other bomb cells dimmed. 批2 升级为铲球特效图
-                if (bustInfo.picked === r) content = <img src={cardRedUrl} alt="" draggable={false} style={{
+                // tackle burst = tackled; the picked cell shows it full-strength,
+                // other bomb cells dimmed
+                if (bustInfo.picked === r) content = <img src={tackleBurstUrl} alt="" draggable={false} style={{
                   height: isMobile ? 24 : 32, width: 'auto', pointerEvents: 'none', display: 'block',
                 }} />
-                else if (bustInfo.bombs.includes(r)) content = <img src={cardRedUrl} alt="" draggable={false} style={{
+                else if (bustInfo.bombs.includes(r)) content = <img src={tackleBurstUrl} alt="" draggable={false} style={{
                   height: isMobile ? 20 : 26, width: 'auto', opacity: 0.55, pointerEvents: 'none', display: 'block',
                 }} />
               }

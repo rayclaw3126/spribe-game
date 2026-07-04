@@ -7,7 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import bayBgUrl from '../assets/shared/bay_bg.png'
-import cardRedUrl from '../assets/shared/card_red.png'
+import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 import { useBgm } from '../components/shell/bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 
@@ -362,7 +362,7 @@ export default function Momentum({ balance, setBalance }) {
                     ? `linear-gradient(180deg, ${MOMENTUM.barTop}, ${MOMENTUM.green})`
                     : `linear-gradient(180deg, #ff8a75, ${MOMENTUM.red})`,
                 boxShadow: isBustBar ? `0 0 16px ${MOMENTUM.red}` : up ? '0 0 12px rgba(53,208,127,0.35)' : '0 0 10px rgba(224,75,58,0.3)',
-              }}>{isBustBar && <img src={cardRedUrl} alt="" draggable={false} style={{
+              }}>{isBustBar && <img src={tackleBurstUrl} alt="" draggable={false} style={{
                 position: 'absolute', top: -24, left: '50%', transform: 'translateX(-50%)',
                 height: 18, width: 'auto', pointerEvents: 'none', display: 'block',
               }} />}</span>
