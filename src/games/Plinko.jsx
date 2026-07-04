@@ -191,6 +191,11 @@ export default function Plinko({ balance, setBalance }) {
   const toastIdRef = useRef(0)
   const flashTimerRef = useRef(null)
   const audioRef = useRef({ ctx: null, bus: null, muted: false })
+  // responsive board: measured fit-scale for the fixed 480-wide board unit
+  const boardAreaRef = useRef(null)
+  const boardUnitRef = useRef(null)
+  const [boardScale, setBoardScale] = useState(1)
+  const [boardUnitH, setBoardUnitH] = useState(410)   // measured unscaled unit height
 
   const TABLE = {
     green: multsFor(pins, 'green'),
@@ -314,6 +319,36 @@ export default function Plinko({ balance, setBalance }) {
     return (start + (row.count === 1 ? 0 : (i / (row.count - 1)) * spread)) * 100
   }
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // centered DEMO pill would collide with the How-to-Play pill, so hide it
+  const deskWide = useMediaQuery('(min-width: 1200px)')
+
+  // Fit-scale the fixed-coordinate board unit (board + multiplier table) to
+  // the flexible middle zone. Board internals/physics stay untouched — only
+  // the outer transform changes. Desk clamps by height too; stacked mode
+  // scales by width only (the page scrolls vertically).
+  useEffect(() => {
+    const area = boardAreaRef.current
+    const unit = boardUnitRef.current
+    if (!area || !unit) return
+    const BOARD_W = 480
+    const fit = () => {
+      const cs = getComputedStyle(area)
+      const availW = area.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+      const availH = area.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+      const unitH = unit.offsetHeight || 1
+      const s = isDesk
+        ? Math.min(availW / BOARD_W, availH / unitH, 1.6)
+        : Math.min(availW / BOARD_W, 1.6)
+      setBoardUnitH(unitH)
+      setBoardScale(Math.max(0.2, Math.round(s * 1000) / 1000))
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(area)
+    ro.observe(unit)
+    return () => ro.disconnect()
+  }, [isDesk, pins])
 
   // Pins selector + tier-colored result pills + refresh — desktop renders it
   // in the 34px skeleton row, mobile keeps it inside the card (never both)
@@ -368,33 +403,71 @@ export default function Plinko({ balance, setBalance }) {
         </div>
   )
 
+  // Pitch backdrop — copied from Dice.jsx's scene block, shades re-derived
+  // from the PLINKO felt greens (bgOuter #0c4a24 / bgCenter #26a055).
+  // TODO: 第三个游戏要用时抽成 shell 共享件（目前 Dice/Plinko 各持一份）。
+  const TURF_DARK = '#093c1d'
+  const TURF_LIGHT = '#127037'
+  const pitchScene = (
+    <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <style>{`
+        @keyframes pkTurfDrift { from { background-position-x: 0px; } to { background-position-x: 180px; } }
+        @keyframes pkGlowBreath { 0% { opacity: 0.10; } 50% { opacity: 0.22; } 100% { opacity: 0.10; } }
+        .pkTurf { animation: pkTurfDrift 14s linear infinite; }
+        .pkGlow { animation: pkGlowBreath 6s linear infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .pkTurf, .pkGlow { animation: none; }
+        }
+      `}</style>
+      {/* perspective turf — alternating stripe shades, slow sideways drift */}
+      <div className="pkTurf" style={{
+        position: 'absolute', left: '-25%', right: '-25%', bottom: '-4%', height: '62%',
+        background: `repeating-linear-gradient(90deg, ${TURF_DARK} 0px, ${TURF_DARK} 90px, ${TURF_LIGHT} 90px, ${TURF_LIGHT} 180px)`,
+        transform: 'perspective(520px) rotateX(58deg)',
+        transformOrigin: '50% 100%',
+        opacity: 0.55,
+      }} />
+      {/* white center-circle arc — hugs the card bottom, centered */}
+      <div style={{
+        position: 'absolute', left: '50%', bottom: 0, transform: 'translate(-50%, 55%)',
+        width: 'min(46%, 420px)', aspectRatio: '1 / 1', borderRadius: '50%',
+        border: '2px solid rgba(255,255,255,0.28)',
+      }} />
+      {/* distant goal-frame silhouette + goal line, upper area */}
+      <div style={{
+        position: 'absolute', top: '10%', left: '50%', transform: 'translateX(-50%)',
+        width: 190, height: 56,
+        border: '2px solid rgba(255,255,255,0.24)', borderBottom: 'none',
+        borderRadius: '3px 3px 0 0',
+        background: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.10) 0px, rgba(255,255,255,0.10) 1px, transparent 1px, transparent 14px)',
+      }} />
+      <div style={{
+        position: 'absolute', top: 'calc(10% + 56px)', left: '50%', transform: 'translateX(-50%)',
+        width: 300, height: 2, background: 'rgba(255,255,255,0.20)',
+      }} />
+      {/* stadium light spill — breathes between 0.10 and 0.22 */}
+      <div className="pkGlow" style={{
+        position: 'absolute', top: '-18%', left: '50%', transform: 'translateX(-50%)',
+        width: '80%', height: '55%',
+        background: 'radial-gradient(ellipse at 50% 0%, #ffffff 0%, transparent 65%)',
+        opacity: 0.14,
+      }} />
+    </div>
+  )
+
   const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 42%, ${PLINKO.bgCenter}, ${PLINKO.bgOuter})`,
-        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        borderColor: COLORS.border, padding: 0, overflow: 'hidden',
         position: 'relative',
+        display: 'flex', flexDirection: 'column',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
-        {/* pitch markings — two big side circles + corner arc, like the ref */}
-        <div style={{
-          position: 'absolute', left: -130, top: '46%', width: 260, height: 260,
-          border: `2px solid ${PLINKO.line}`, borderRadius: '50%',
-          transform: 'translateY(-50%)', pointerEvents: 'none',
-        }} />
-        <div style={{
-          position: 'absolute', right: -130, top: '46%', width: 260, height: 260,
-          border: `2px solid ${PLINKO.line}`, borderRadius: '50%',
-          transform: 'translateY(-50%)', pointerEvents: 'none',
-        }} />
-        <div style={{
-          position: 'absolute', left: -60, bottom: -60, width: 120, height: 120,
-          border: `2px solid ${PLINKO.line}`, borderRadius: '50%',
-          pointerEvents: 'none',
-        }} />
+        {pitchScene}
 
         {/* ---- top bar ---- */}
         <div style={{
-          margin: isMobile ? '-12px -12px 12px' : '-18px -18px 14px',
+          flex: '0 0 auto',
           padding: '8px 14px',
           background: PLINKO.band,
           display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
@@ -405,7 +478,7 @@ export default function Plinko({ balance, setBalance }) {
             background: PLINKO.orange, color: COLORS.white,
             fontSize: 12, fontWeight: 900,
           }}>? How to Play?</span>
-          {!isMobile && (
+          {!isMobile && (!isDesk || deskWide) && (
             <span style={{
               position: 'absolute', left: '50%', transform: 'translateX(-50%)',
               padding: '4px 18px', borderRadius: RADIUS.pill,
@@ -433,13 +506,33 @@ export default function Plinko({ balance, setBalance }) {
         </div>
 
         {/* ---- second row (mobile only — desktop 34px row has it) ---- */}
-        {!isDesk && <div style={{ marginBottom: 12 }}>{historyStrip}</div>}
+        {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 2 }}>{historyStrip}</div>}
+
+        {/* ---- middle zone: measured fit area for the fixed-coordinate board
+             unit. The unit (board + multiplier table) keeps its intrinsic
+             480px layout and is transform-scaled as one piece, so ball
+             animation, pins and payout cells can never drift apart ---- */}
+        <div ref={boardAreaRef} style={{
+          flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: isMobile ? '12px 12px' : '14px 18px', boxSizing: 'border-box',
+        }}>
+        {/* scaled footprint — reserves the true on-screen size in the layout */}
+        <div style={{
+          width: 480 * boardScale,
+          height: boardUnitH * boardScale,
+          flex: '0 0 auto', position: 'relative', maxWidth: '100%',
+        }}>
+        <div ref={boardUnitRef} style={{
+          position: 'absolute', top: 0, left: '50%', width: 480,
+          transform: `translateX(-50%) scale(${boardScale})`, transformOrigin: 'top center',
+        }}>
 
         {/* ---- pin board: triangle of pearls + dashed funnel + flying balls ---- */}
         <div style={{
           position: 'relative', zIndex: 1,
-          width: isMobile ? '100%' : 480, maxWidth: '100%',
-          height: isMobile ? 300 : 330, margin: '0 auto 2px',
+          width: '100%',
+          height: 330, margin: '0 auto 2px',
         }}>
           <svg width="100%" height="100%" viewBox="0 0 480 330" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0 }}>
             <line x1="204" y1="-6" x2="6" y2="238" stroke={PLINKO.dash} strokeWidth="1.5" strokeDasharray="4 5" />
@@ -475,10 +568,11 @@ export default function Plinko({ balance, setBalance }) {
           <WinToast toasts={toasts} />
         </div>
 
-        {/* ---- three-row multiplier table (computed, RTP 0.95) ---- */}
+        {/* ---- three-row multiplier table (computed, RTP 0.95) — scales as
+             part of the board unit ---- */}
         <div style={{
           position: 'relative', zIndex: 1,
-          width: isMobile ? '100%' : 480, maxWidth: '100%', margin: '0 auto 14px',
+          width: '100%', margin: '8px 0 0',
           display: 'flex', flexDirection: 'column', gap: 3,
         }}>
           {['green', 'yellow', 'red'].map(tier => (
@@ -489,9 +583,11 @@ export default function Plinko({ balance, setBalance }) {
                 return (
                   <span key={ci} style={{
                     flex: 1, minWidth: 0, textAlign: 'center',
-                    padding: isMobile ? '3px 0' : '4px 0', borderRadius: 3,
+                    padding: '4px 0', borderRadius: 3,
                     background: center ? ROW_DIM[tier] : ROW_BG[tier],
-                    color: COLORS.white, fontSize: isMobile ? 8 : 9.5, fontWeight: 800,
+                    // mobile compensates for the ~0.75 unit scale-down so the
+                    // effective size stays at least the old 8px
+                    color: COLORS.white, fontSize: isMobile ? 11 : 9.5, fontWeight: 800,
                     overflow: 'hidden',
                     boxShadow: hot ? `0 0 10px 2px ${PLINKO.gold}` : 'none',
                     filter: hot ? 'brightness(1.5)' : 'none',
@@ -503,11 +599,16 @@ export default function Plinko({ balance, setBalance }) {
           ))}
         </div>
 
-        {/* ---- bottom bet band ---- */}
+        </div>{/* /board unit */}
+        </div>{/* /scaled footprint */}
+        </div>{/* /middle zone */}
+
+        {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip ---- */}
         <div style={{
-          margin: isMobile ? '0 -12px -12px' : '0 -18px -18px',
+          flex: '0 0 auto',
           padding: '12px 14px',
           background: PLINKO.band,
+          borderTop: '1px solid rgba(0,0,0,0.25)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
         }}>
