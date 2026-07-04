@@ -4,7 +4,7 @@ import { COLORS, RADIUS, LAYOUT, GOAL } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
-import { makeFeedBots } from '../components/shell/arenaFx'
+import { makeFeedBots, createArenaFx, drawArenaFx } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
 
 // 单G2: Goal gameplay — Field tiers, column-by-column advance, bomb bust,
@@ -58,8 +58,37 @@ export default function Goal({ balance, setBalance }) {
   const autoRef = useRef(false)
   const audioRef = useRef({ ctx: null, muted: false })
   const timersRef = useRef([])
+  const fxCanvasRef = useRef(null)   // arenaFx backdrop — pure decoration
+  const fxRef = useRef(null)
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
+
+  // arenaFx backdrop — same engine as Breakaway, mounted read-only in idle
+  // mode (no params added to arenaFx.js). One rAF loop, canvas sized to the
+  // card; prefers-reduced-motion renders a single static frame instead.
+  useEffect(() => {
+    const canvas = fxCanvasRef.current
+    if (!canvas) return
+    if (fxRef.current === null) fxRef.current = createArenaFx()
+    const drawFrame = () => {
+      const rect = canvas.getBoundingClientRect()
+      const dpr = window.devicePixelRatio || 1
+      const W = Math.max(1, Math.floor(rect.width * dpr))
+      const H = Math.max(1, Math.floor(rect.height * dpr))
+      if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H }
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, W, H)
+      drawArenaFx(ctx, fxRef.current, { W, H, dpr, now: performance.now(), mode: 'idle', mult: 1 })
+    }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      drawFrame()   // static backdrop, engine stays off
+      return
+    }
+    let raf
+    const loop = () => { drawFrame(); raf = requestAnimationFrame(loop) }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [])
   function later(fn, ms) { const id = setTimeout(fn, ms); timersRef.current.push(id); return id }
 
   // ---------- audio ----------
@@ -235,14 +264,29 @@ export default function Goal({ balance, setBalance }) {
   const nextMult = round2(cum * stepMult(tier))
   const cashable = round2(bet * cum)
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // centered DEMO pill would collide with the How-to-Play pill, so hide it
+  const deskWide = useMediaQuery('(min-width: 1200px)')
+
+  // Darkened arena floor — derived in place from the GOAL felt greens
+  // (bgCenter #4a7a1a / bgOuter #1c3a06) so the arenaFx star field reads.
+  const BG_CENTER_DIM = '#2e4d10'
+  const BG_OUTER_DIM = '#101f04'
 
   const gameCard = (
       <Panel style={{
-        background: `radial-gradient(circle at 50% 22%, ${GOAL.bgCenter}, ${GOAL.bgOuter})`,
-        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        background: `radial-gradient(circle at 50% 22%, ${BG_CENTER_DIM}, ${BG_OUTER_DIM})`,
+        borderColor: COLORS.border, padding: 0, overflow: 'hidden',
         position: 'relative',
+        display: 'flex', flexDirection: 'column',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
+        {/* arenaFx star-drift backdrop — decoration only, below all content */}
+        <canvas ref={fxCanvasRef} aria-hidden style={{
+          position: 'absolute', inset: 0, width: '100%', height: '100%',
+          zIndex: 0, pointerEvents: 'none',
+        }} />
+
         {/* left giant football line art */}
         <svg width="300" height="300" viewBox="0 0 100 100" style={{ position: 'absolute', left: -120, top: '38%', pointerEvents: 'none' }}>
           <circle cx="50" cy="50" r="48" fill="none" stroke={GOAL.line} strokeWidth="2" />
@@ -265,7 +309,7 @@ export default function Goal({ balance, setBalance }) {
 
         {/* ---- top bar ---- */}
         <div style={{
-          margin: isMobile ? '-12px -12px 12px' : '-18px -18px 14px',
+          flex: '0 0 auto',
           padding: '8px 14px',
           background: GOAL.band,
           display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
@@ -276,7 +320,7 @@ export default function Goal({ balance, setBalance }) {
             background: GOAL.orange, color: COLORS.white,
             fontSize: 12, fontWeight: 900,
           }}>? How to Play?</span>
-          {!isMobile && (
+          {!isMobile && (!isDesk || deskWide) && (
             <span style={{
               position: 'absolute', left: '50%', transform: 'translateX(-50%)',
               padding: '4px 18px', borderRadius: RADIUS.pill,
@@ -307,6 +351,14 @@ export default function Goal({ balance, setBalance }) {
             fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
           }}>{muted ? '🔇' : '🔊'}</button>
         </div>
+
+        {/* ---- middle zone: flexes to fill the card, keeps the grid group as
+             the vertical visual center; leftover space is absorbed here ---- */}
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
+          display: 'flex', flexDirection: 'column', justifyContent: 'center',
+          padding: isMobile ? '12px 12px' : '14px 18px', boxSizing: 'border-box',
+        }}>
 
         {/* ---- second row: Field selector + Next multiplier ---- */}
         <div style={{
@@ -386,7 +438,7 @@ export default function Goal({ balance, setBalance }) {
 
         {/* ---- RANDOM / refresh / Auto Game row ---- */}
         <div style={{
-          width: isMobile ? '100%' : 640, maxWidth: '100%', margin: '0 auto 14px',
+          width: isMobile ? '100%' : 640, maxWidth: '100%', margin: '0 auto',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
           position: 'relative', zIndex: 1,
         }}>
@@ -423,11 +475,14 @@ export default function Goal({ balance, setBalance }) {
           </button>
         </div>
 
-        {/* ---- bottom bet band ---- */}
+        </div>{/* /middle zone */}
+
+        {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip ---- */}
         <div style={{
-          margin: isMobile ? '0 -12px -12px' : '0 -18px -18px',
+          flex: '0 0 auto',
           padding: '12px 14px',
           background: GOAL.band,
+          borderTop: '1px solid rgba(0,0,0,0.25)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
         }}>
