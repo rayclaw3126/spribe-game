@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import { COLORS, RADIUS, PLINKO } from '../components/shell/tokens'
-import { useIsMobile } from '../hooks/useMediaQuery'
+import { COLORS, RADIUS, LAYOUT, PLINKO } from '../components/shell/tokens'
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import WinToast from '../components/shell/WinToast'
+import BetFeed from '../components/shell/BetFeed'
+import { makeFeedBots } from '../components/shell/arenaFx'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
 // 单P2: Free Kick gameplay — three risk tiers, binomial physics drop,
@@ -178,6 +180,7 @@ export default function Plinko({ balance, setBalance }) {
   const [pinsOpen, setPinsOpen] = useState(false)
   const [balls, setBalls] = useState([])           // flying balls (render list)
   const [history, setHistory] = useState([])       // real results {v, c}, newest first
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [toasts, setToasts] = useState([])
   const [flash, setFlash] = useState(null)         // { tier, k } landing cell glow
   const [muted, setMuted] = useState(false)
@@ -225,6 +228,10 @@ export default function Plinko({ balance, setBalance }) {
     if (ball.mult >= 1) pushToast(`${ball.mult}×`, payout)
     if (ball.mult >= 10) sfxChime(audioRef.current)
     setHistory(h => [{ v: String(ball.mult), c: ball.tier }, ...h].slice(0, 12))
+    // fake feed rows settle for the round: ~45% cash green, the rest grey out
+    setFeedBets(list => list.map(b => Math.random() < 0.45
+      ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+      : { ...b, status: 'crashed' }))
     setFlash({ tier: ball.tier, k: ball.k })
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
     flashTimerRef.current = setTimeout(() => setFlash(null), 600)
@@ -269,6 +276,7 @@ export default function Plinko({ balance, setBalance }) {
   function kick(tier) {
     if (bet > balance || bet < 1) return
     const path = randomPath(pins)   // path first — SFX jitter randoms must not sit ahead
+    setFeedBets(makeFeedBots())     // fresh fake round rides along (display only; after the roll)
     ensureAudio(audioRef.current)
     sfxChip(audioRef.current)
     setBalance(b => round2(b - bet))
@@ -311,13 +319,67 @@ export default function Plinko({ balance, setBalance }) {
     const start = 0.5 - spread / 2
     return (start + (row.count === 1 ? 0 : (i / (row.count - 1)) * spread)) * 100
   }
+  const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
 
-  return (
-    <GameLayout title="Free Kick" emoji="⚽" color={PLINKO.btnGreen}>
+  // Pins selector + tier-colored result pills + refresh — desktop renders it
+  // in the 34px skeleton row, mobile keeps it inside the card (never both)
+  const historyStrip = (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: PLINKO.band, borderRadius: RADIUS.pill,
+          padding: '4px 6px', overflow: 'visible', minHeight: 24,
+          position: 'relative', zIndex: 2,
+        }}>
+          <span style={{ position: 'relative', flex: '0 0 auto' }}>
+            <button type="button"
+              onClick={() => { if (!flying) setPinsOpen(v => !v) }}
+              style={{
+                padding: '3px 22px', borderRadius: RADIUS.pill,
+                background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.25)',
+                color: COLORS.white, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
+                cursor: flying ? 'not-allowed' : 'pointer', opacity: flying ? 0.6 : 1,
+              }}>Pins: {pins} ˅</button>
+            {pinsOpen && (
+              <span style={{
+                position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 5,
+                display: 'flex', gap: 4, padding: 6,
+                background: PLINKO.band, border: '1px solid rgba(255,255,255,0.25)',
+                borderRadius: 10, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+              }}>
+                {Array.from({ length: PINS_MAX - PINS_MIN + 1 }, (_, i) => PINS_MIN + i).map(n => (
+                  <button key={n} type="button"
+                    onClick={() => { setPins(n); setPinsOpen(false) }}
+                    style={{
+                      width: 30, height: 26, borderRadius: 6,
+                      background: n === pins ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.35)',
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      color: COLORS.white, fontSize: 11, fontWeight: 800, cursor: 'pointer',
+                    }}>{n}</button>
+                ))}
+              </span>
+            )}
+          </span>
+          {(isMobile ? history.slice(0, 5) : history.slice(0, 10)).map((h, i) => (
+            <span key={history.length - i} style={{
+              padding: '3px 9px', borderRadius: RADIUS.pill,
+              background: ROW_BG[h.c], color: COLORS.white,
+              fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
+            }}>{h.v}</span>
+          ))}
+          <span style={{
+            marginLeft: 'auto', padding: '3px 12px', borderRadius: RADIUS.pill,
+            background: PLINKO.blue, color: COLORS.white,
+            fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
+          }}>⟲ ˅</span>
+        </div>
+  )
+
+  const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 42%, ${PLINKO.bgCenter}, ${PLINKO.bgOuter})`,
         borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
         position: 'relative',
+        ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* pitch markings — two big side circles + corner arc, like the ref */}
         <div style={{
@@ -376,55 +438,8 @@ export default function Plinko({ balance, setBalance }) {
           }}>{muted ? '🔇' : '🔊'}</button>
         </div>
 
-        {/* ---- second row: Pins selector + result history + refresh ---- */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          background: PLINKO.band, borderRadius: RADIUS.pill,
-          padding: '4px 6px', marginBottom: 12, overflow: 'visible', minHeight: 24,
-          position: 'relative', zIndex: 2,
-        }}>
-          <span style={{ position: 'relative', flex: '0 0 auto' }}>
-            <button type="button"
-              onClick={() => { if (!flying) setPinsOpen(v => !v) }}
-              style={{
-                padding: '3px 22px', borderRadius: RADIUS.pill,
-                background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.25)',
-                color: COLORS.white, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
-                cursor: flying ? 'not-allowed' : 'pointer', opacity: flying ? 0.6 : 1,
-              }}>Pins: {pins} ˅</button>
-            {pinsOpen && (
-              <span style={{
-                position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 5,
-                display: 'flex', gap: 4, padding: 6,
-                background: PLINKO.band, border: '1px solid rgba(255,255,255,0.25)',
-                borderRadius: 10, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
-              }}>
-                {Array.from({ length: PINS_MAX - PINS_MIN + 1 }, (_, i) => PINS_MIN + i).map(n => (
-                  <button key={n} type="button"
-                    onClick={() => { setPins(n); setPinsOpen(false) }}
-                    style={{
-                      width: 30, height: 26, borderRadius: 6,
-                      background: n === pins ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.35)',
-                      border: '1px solid rgba(255,255,255,0.25)',
-                      color: COLORS.white, fontSize: 11, fontWeight: 800, cursor: 'pointer',
-                    }}>{n}</button>
-                ))}
-              </span>
-            )}
-          </span>
-          {(isMobile ? history.slice(0, 5) : history.slice(0, 10)).map((h, i) => (
-            <span key={history.length - i} style={{
-              padding: '3px 9px', borderRadius: RADIUS.pill,
-              background: ROW_BG[h.c], color: COLORS.white,
-              fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
-            }}>{h.v}</span>
-          ))}
-          <span style={{
-            marginLeft: 'auto', padding: '3px 12px', borderRadius: RADIUS.pill,
-            background: PLINKO.blue, color: COLORS.white,
-            fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-          }}>⟲ ˅</span>
-        </div>
+        {/* ---- second row (mobile only — desktop 34px row has it) ---- */}
+        {!isDesk && <div style={{ marginBottom: 12 }}>{historyStrip}</div>}
 
         {/* ---- pin board: triangle of pearls + dashed funnel + flying balls ---- */}
         <div style={{
@@ -538,6 +553,50 @@ export default function Plinko({ balance, setBalance }) {
           <button type="button" disabled={locked} onClick={() => kick('red')} style={bigBtn(PLINKO.btnRed)}>RED</button>
         </div>
       </Panel>
+  )
+
+  // ---- Spribe-parity desktop skeleton (≥1024), same bones as Total Goals ----
+  if (isDesk) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
+        background: COLORS.bg,
+      }}>
+        <div style={{
+          height: LAYOUT.headerH, flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: COLORS.panel,
+          borderBottom: `1px solid ${COLORS.border}`,
+        }}>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Free Kick</strong>
+          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
+            <BetFeed bets={feedBets} myBets={[]} online={914} fill />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
+            {/* overflow stays visible so the Pins dropdown can escape the 34px row */}
+            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'visible', position: 'relative', zIndex: 4 }}>
+              {historyStrip}
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {gameCard}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- stacked layout (<1024): unchanged ----
+  return (
+    <GameLayout title="Free Kick" emoji="⚽" color={PLINKO.btnGreen}>
+      {gameCard}
     </GameLayout>
   )
 }
