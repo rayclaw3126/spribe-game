@@ -94,8 +94,9 @@ export const HOTLINE = {
   bgCenter: '#3a4fa5',   // 仿 Spribe 宝蓝（中央）
   band: '#4157b0',       // card-strip band
   bar: '#1d2b5e',        // top/bottom bars, pills, track
-  cardRed: '#f05561',
-  cardRedDeep: '#d23a48',
+  cardRed: '#f9576d',      // 仿 Spribe 艳粉红（重取样）
+  cardRedDeep: '#e63652',
+  cardRedDot: '#fb8a99',   // 红卡内浅粉大圆
   cardNavy: '#1d2c47',
   cardNavyDot: '#16233a',
   fire: '#ffb300',

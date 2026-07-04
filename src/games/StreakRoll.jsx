@@ -2,28 +2,50 @@ import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, HOTLINE } from '../components/shell/tokens'
 import { useIsMobile } from '../hooks/useMediaQuery'
+import WinToast from '../components/shell/WinToast'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
-const VALS = [0, 1.5, 0, 2, 0, 1.5, 0, 3, 0, 1.5, 0, 2]
-const CELL_W = 72
+const CELL_W = 64          // portrait cards, ref-proportioned (≈64×84)
+const CARD_H = 84
 const GAP = 8
 const STEP = CELL_W + GAP
-const SPIN_MS = 4000
 
-// 复制成长条：够长且能无缝停在中段
-const STRIP = Array.from({ length: 60 }, (_, i) => VALS[i % VALS.length])
-
-// cubic-bezier(0.15,0.55,0.25,1) — matches the CSS transition so ticks stay in sync
-function makeBezier(x1, y1, x2, y2) {
-  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx
-  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by
-  const sx = t => ((ax * t + bx) * t + cx) * t
-  const sy = t => ((ay * t + by) * t + cy) * t
-  const dx = t => (3 * ax * t + 2 * bx) * t + cx
-  return x => { let t = x; for (let i = 0; i < 6; i++) { const e = sx(t) - x; const d = dx(t); if (Math.abs(e) < 1e-4 || d === 0) break; t -= e / d } return sy(t) }
+// ---- card distributions & payouts (parameterized, not hand-picked) ----
+// A landing index is drawn uniformly over the pattern, so P(color) is exactly
+// count/len. Payout per color = RTP / P(color), rounded to 2dp → RTP ≈ 95%.
+//   normal: 32 cells = 16 black · 15 red · 1 fire  → B 1.90× R 2.03× F 30.40×
+//   high:   32 cells = 16 black · 12 red · 4 fire  → B 1.90× R 2.53× F 7.60×
+const RTP = 0.95
+const PATTERN_NORMAL = [
+  ...Array.from({ length: 30 }, (_, i) => (i % 2 ? 'R' : 'B')),  // B/R ×15
+  'B', 'F',
+]
+const PATTERN_HIGH = [
+  ...Array.from({ length: 24 }, (_, i) => (i % 2 ? 'R' : 'B')),  // B/R ×12
+  'B', 'F', 'B', 'F', 'B', 'F', 'B', 'F',
+]
+const round2 = x => Math.round(x * 100) / 100
+function multsFor(pattern) {
+  const n = pattern.length
+  const count = c => pattern.filter(x => x === c).length
+  return { R: round2(RTP * n / count('R')), B: round2(RTP * n / count('B')), F: round2(RTP * n / count('F')) }
 }
-const EASE = makeBezier(0.15, 0.55, 0.25, 1)
-function timeForProgress(y) { let lo = 0, hi = 1; for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (EASE(m) < y) lo = m; else hi = m } return (lo + hi) / 2 }
+const MULTS = { normal: multsFor(PATTERN_NORMAL), high: multsFor(PATTERN_HIGH) }
+// 复制成长条：6 份副本 — 每局从副本2一带向前多绕 2 圈落位（视觉行程 2–4 圈），
+// 落地后在同一 pattern 相位上无痕回卷到副本2，行程永远向前（tick 调度依赖正 delta）。
+const COPIES = 6
+const STRIPS = {
+  normal: Array.from({ length: COPIES }, () => PATTERN_NORMAL).flat(),
+  high: Array.from({ length: COPIES }, () => PATTERN_HIGH).flat(),
+}
+const COLOR_LABEL = { R: 'RED', B: 'BLACK', F: '🔥' }
+
+// ---- rAF spin physics: one continuous critically-damped motion ----
+// x(t) = T − (D + C2·t)·e^(−ωt) with initial kick v0 = KICK·ω·D. KICK > 1
+// makes the tail cross the target slightly and spring back — the settle
+// wobble comes from the same equation, no stitched transitions.
+const SPRING_W = 1.55       // rad/s — ≈4.2s of glide + settle
+const SPRING_KICK = 1.15
 
 export default function StreakRoll({ balance, setBalance }) {
   const [bet, setBet] = useState(10)
@@ -32,16 +54,36 @@ export default function StreakRoll({ balance, setBalance }) {
   const [result, setResult] = useState(null)
   const [, setRoundHistory] = useState([])   // landed multiplier per round (display bookkeeping)
   const [winCell, setWinCell] = useState(null)
+  const [highRisk, setHighRisk] = useState(false)
+  const cellRef = useRef(PATTERN_NORMAL.length)      // cell currently under the frame
+  const rollingRef = useRef(false)
+  const stripRef = useRef(null)                      // rAF writes transform directly
+  const rafRef = useRef(null)
+  const [toasts, setToasts] = useState([])
+  const [lossFlash, setLossFlash] = useState(false)
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
+  const toastIdRef = useRef(0)
+  const lossTimerRef = useRef(null)
 
   const viewRef = useRef(null)
-  const timerRef = useRef(null)
-  const tickTimers = useRef([])
   const audioRef = useRef({ ctx: null, muted: false })
   const bgmRef = useRef({ audio: null })
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
+
+  // ONE centering formula for everything: initial frame, every landing, resize.
+  // offset(cell) = cell·STEP + CELL_W/2 − viewW/2  (cell midpoint under frame)
+  function centerOffset(cell) {
+    const viewW = viewRef.current ? viewRef.current.offsetWidth : 400
+    return cell * STEP + CELL_W / 2 - viewW / 2
+  }
+  useEffect(() => {
+    setOffset(centerOffset(cellRef.current))
+    const onResize = () => { if (!rollingRef.current) setOffset(centerOffset(cellRef.current)) }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   useEffect(() => {
     if (bgmOn) { if (!bgmRef.current.audio) { const a = new Audio(bgmUrl); a.loop = true; a.volume = 0.25; a.play().catch(() => {}); bgmRef.current.audio = a } }
     else if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
@@ -49,7 +91,8 @@ export default function StreakRoll({ balance, setBalance }) {
   }, [bgmOn])
   useEffect(() => () => {
     if (bgmRef.current.audio) { bgmRef.current.audio.pause(); bgmRef.current.audio = null }
-    tickTimers.current.forEach(clearTimeout); if (timerRef.current) clearTimeout(timerRef.current)
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    if (lossTimerRef.current) clearTimeout(lossTimerRef.current)
   }, [])
 
   // ---------- audio ----------
@@ -60,93 +103,214 @@ export default function StreakRoll({ balance, setBalance }) {
     const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
     audioRef.current.ctx = ctx; return ctx
   }
-  function playTick() {
-    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
-    const t = ctx.currentTime; const o = ctx.createOscillator(); const g = ctx.createGain()
-    o.type = 'square'; o.frequency.value = 880 + Math.random() * 260
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.04, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03)
-    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.035)
+  // Shared bus: everything runs through a compressor + 0.9 master so dense
+  // tick bursts can't clip (peak stays < 1.0 at the destination).
+  function bus() {
+    const ctx = ensureAudio(); if (!ctx) return null
+    if (!audioRef.current.bus) {
+      const comp = ctx.createDynamicsCompressor()
+      comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 6
+      comp.attack.value = 0.002; comp.release.value = 0.12
+      const master = ctx.createGain(); master.gain.value = 0.9
+      comp.connect(master); master.connect(ctx.destination)
+      audioRef.current.bus = comp
+    }
+    return audioRef.current.bus
   }
-  function playLand() {
-    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
-    const t = ctx.currentTime; const o = ctx.createOscillator(); const g = ctx.createGain()
-    o.type = 'sine'; o.frequency.setValueAtTime(240, t); o.frequency.exponentialRampToValueAtTime(90, t + 0.14)
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18)
-    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.2)
+  // 2–4ms noise impulse through a 2–4kHz bandpass = mechanical click body.
+  function clickLayer(ctx, out, t, { freq, vol, dur = 0.025 }) {
+    const len = Math.floor(ctx.sampleRate * dur)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2)
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.2
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.003)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.005)
+    src.connect(bp); bp.connect(g); g.connect(out)
+    src.start(t); src.stop(t + dur)
   }
+  function woodLayer(ctx, out, t, { freq, vol, dur = 0.045 }) {
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = freq
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.004)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+    o.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.01)
+  }
+  function playTick() {   // mechanical ratchet click, ±10% pitch/volume humanized
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const out = bus(); const t = ctx.currentTime
+    const j = 0.9 + Math.random() * 0.2
+    clickLayer(ctx, out, t, { freq: 3000 * j, vol: 0.09 * j })
+    woodLayer(ctx, out, t, { freq: 200 * j, vol: 0.05 * j })
+  }
+  function playChip() {   // bet/step clack — same recipe, lighter & tighter
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const out = bus(); const t = ctx.currentTime
+    const j = 0.9 + Math.random() * 0.2
+    clickLayer(ctx, out, t, { freq: 2200 * j, vol: 0.07 * j, dur: 0.02 })
+    woodLayer(ctx, out, t, { freq: 260 * j, vol: 0.035 * j, dur: 0.035 })
+  }
+  function playLand() {   // pocket thunk: low noise + bass drop + lock knock
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const out = bus(); const t = ctx.currentTime
+    // low noise body
+    const len = Math.floor(ctx.sampleRate * 0.09)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len)
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320
+    const ng = ctx.createGain(); ng.gain.value = 0.22
+    src.connect(lp); lp.connect(ng); ng.connect(out); src.start(t); src.stop(t + 0.09)
+    // bass drop
+    const o = ctx.createOscillator(); o.type = 'sine'
+    o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.08)
+    const og = ctx.createGain()
+    og.gain.setValueAtTime(0.0001, t)
+    og.gain.exponentialRampToValueAtTime(0.22, t + 0.008)
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1)
+    o.connect(og); og.connect(out); o.start(t); o.stop(t + 0.11)
+    // lock-in knock
+    clickLayer(ctx, out, t + 0.01, { freq: 700, vol: 0.1, dur: 0.015 })
+  }
+  // Rising three-note chime, each note a detuned pair, with a short delay tail.
   function playWin() {
     const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
-    const t = ctx.currentTime
-    ;[720, 960, 1280].forEach((f, i) => {
-      const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f
-      const s = t + i * 0.08
-      g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.12, s + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.26)
-      o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.28)
+    const out = bus(); const t = ctx.currentTime
+    const tail = ctx.createDelay(0.4); tail.delayTime.value = 0.16
+    const fb = ctx.createGain(); fb.gain.value = 0.24
+    const wet = ctx.createGain(); wet.gain.value = 0.35
+    tail.connect(fb); fb.connect(tail); tail.connect(wet); wet.connect(out)
+    ;[520, 690, 920].forEach((f, i) => {
+      const s = t + i * 0.085
+      ;[0.997, 1.004].forEach(dt => {
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f * dt
+        const g = ctx.createGain()
+        g.gain.setValueAtTime(0.0001, s)
+        g.gain.exponentialRampToValueAtTime(0.07, s + 0.02)
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.3)
+        o.connect(g); g.connect(out); g.connect(tail)
+        o.start(s); o.stop(s + 0.32)
+      })
     })
   }
-  function playBig() {
+  function playBig() {   // fire hit: metallic inharmonic overtones on top
     const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
-    const t = ctx.currentTime + 0.14
-    ;[880, 1180, 1560, 2080].forEach((f, i) => {
-      const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'triangle'; o.frequency.value = f
-      const s = t + i * 0.09
-      g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.11, s + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.3)
-      o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.32)
+    const out = bus(); const t = ctx.currentTime + 0.12
+    ;[1380, 2210, 3170].forEach((f, i) => {
+      const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = f
+      const g = ctx.createGain()
+      const s = t + i * 0.07
+      g.gain.setValueAtTime(0.0001, s)
+      g.gain.exponentialRampToValueAtTime(0.055, s + 0.015)
+      g.gain.exponentialRampToValueAtTime(0.0001, s + 0.34)
+      o.connect(g); g.connect(out); o.start(s); o.stop(s + 0.36)
     })
   }
   function playLose() {
     const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
-    const t = ctx.currentTime; const o = ctx.createOscillator(); const g = ctx.createGain()
+    const out = bus(); const t = ctx.currentTime
+    const o = ctx.createOscillator(); const g = ctx.createGain()
     o.type = 'triangle'; o.frequency.setValueAtTime(300, t); o.frequency.exponentialRampToValueAtTime(110, t + 0.4)
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.13, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.44)
-    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.46)
+    o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.46)
   }
 
-  function scheduleTicks(prevOffset, delta) {
-    tickTimers.current.forEach(clearTimeout); tickTimers.current = []
-    const startK = Math.ceil(prevOffset / STEP)
-    const endK = Math.floor((prevOffset + delta) / STEP)
-    for (let k = startK; k <= endK; k++) {
-      const y = (k * STEP - prevOffset) / delta       // 0..1 travel fraction
-      const tms = timeForProgress(y) * SPIN_MS         // decelerating → sparser ticks
-      tickTimers.current.push(setTimeout(playTick, tms))
+  // rAF spring drive: writes translate3d straight to the strip node every
+  // frame; ticks fire from actual cell-boundary crossings (max one per frame,
+  // so they thin out naturally as the real velocity decays).
+  function animateSpin(from, to, onDone) {
+    const D = to - from
+    const w = SPRING_W
+    const C2 = w * D - SPRING_KICK * w * D   // = (1−KICK)·ωD
+    const t0 = performance.now()
+    let lastK = Math.floor(from / STEP)
+    const step = now => {
+      const t = (now - t0) / 1000
+      const e = Math.exp(-w * t)
+      const x = to - (D + C2 * t) * e
+      const v = (w * (D + C2 * t) - C2) * e
+      if (stripRef.current) stripRef.current.style.transform = `translate3d(${-x}px,0,0)`
+      const k = Math.floor(x / STEP)
+      if (k > lastK) { lastK = k; playTick() }
+      const done = t > 0.25 && Math.abs(x - to) < 0.4 && Math.abs(v) < 10
+      if (done || t > 6.5) {
+        if (stripRef.current) stripRef.current.style.transform = `translate3d(${-to}px,0,0)`
+        playLand()
+        onDone()
+        return
+      }
+      rafRef.current = requestAnimationFrame(step)
     }
-    tickTimers.current.push(setTimeout(playLand, SPIN_MS - 30))
+    rafRef.current = requestAnimationFrame(step)
   }
 
-  function roll() {
-    if (bet > balance || rolling) return
+  function pushToast(label, mult, win) {
+    const id = ++toastIdRef.current
+    setToasts(t => [...t, { id, label: `${label} ${mult}×`, win }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
+  }
+
+  // Bet on a color and immediately roll — Hotline flow. The landing cell and
+  // the settlement share one mapping: pattern[idx] under the golden frame.
+  function betOn(color) {
+    if (bet > balance || bet < 1 || rolling) return
     ensureAudio()
+    playChip()
     setBalance(b => parseFloat((b - bet).toFixed(2)))
-    setResult(null); setWinCell(null)
+    setResult(null); setWinCell(null); setLossFlash(false)
     setRolling(true)
 
-    const idx = Math.floor(Math.random() * VALS.length)
-    const landCell = 36 + idx  // STRIP[36+idx] === VALS[idx]
-    const viewW = viewRef.current ? viewRef.current.offsetWidth : 400
-    const center = viewW / 2
-    const jitter = (Math.random() - 0.5) * (CELL_W * 0.5)
-    const target = landCell * STEP + CELL_W / 2 - center + jitter
+    const mode = highRisk ? 'high' : 'normal'
+    const pattern = highRisk ? PATTERN_HIGH : PATTERN_NORMAL
+    const L = pattern.length
+    const idx = Math.floor(Math.random() * L)
+    // always travel FORWARD: next copy's idx-cell plus 2 extra laps (2–4 laps total)
+    const cur = cellRef.current
+    const landCell = (Math.floor(cur / L) + 1) * L + idx + 2 * L
+    const target = centerOffset(landCell)   // same formula as initial/resize
+    cellRef.current = landCell
+    rollingRef.current = true
     const prevOffset = offset
-    setOffset(target)
-    scheduleTicks(prevOffset, target - prevOffset)
 
-    timerRef.current = setTimeout(() => {
-      const mult = VALS[idx]
+    animateSpin(prevOffset, target, () => {
+      // seamless rewind: same pattern phase in copy 2 paints pixel-identically,
+      // keeping cell indices bounded across rounds (no transition in play)
+      const eqCell = L + (landCell % L)
+      cellRef.current = eqCell
+      const landed = pattern[idx]
+      const win = landed === color
+      const mult = win ? MULTS[mode][color] : 0
       const payout = parseFloat((bet * mult).toFixed(2))
-      if (payout > 0) setBalance(b => parseFloat((b + payout).toFixed(2)))
-      setResult({ mult, payout, win: payout > 0 })
+      if (win) {
+        setBalance(b => parseFloat((b + payout).toFixed(2)))
+        pushToast(COLOR_LABEL[color], MULTS[mode][color], payout)
+      } else {
+        setLossFlash(true)
+        if (lossTimerRef.current) clearTimeout(lossTimerRef.current)
+        lossTimerRef.current = setTimeout(() => setLossFlash(false), 700)
+      }
+      setResult({ color, landed, mult, payout, win })
       setRoundHistory(h => [mult, ...h].slice(0, 20))
-      setWinCell(landCell)
+      setWinCell(eqCell)
       setRolling(false)
-      if (mult >= 3) { playWin(); playBig() }
-      else if (payout > 0) playWin()
+      rollingRef.current = false
+      setOffset(centerOffset(eqCell))
+      if (win && landed === 'F') { playWin(); playBig() }
+      else if (win) playWin()
       else playLose()
-    }, 4200)
+    })
   }
   const isMobile = useIsMobile()
   const won = result && result.win
-  const bigWin = result && result.mult >= 2
+  const fireWin = result && result.win && result.landed === 'F'
+  const mode = highRisk ? 'high' : 'normal'
+  const strip = STRIPS[mode]
+  const mults = MULTS[mode]
 
   // ---------- visual layer (Spribe Hotline 1:1) ----------
   const navPill = {
@@ -174,10 +338,10 @@ export default function StreakRoll({ balance, setBalance }) {
     [up ? 'borderBottom' : 'borderTop']: '10px solid rgba(255,255,255,0.75)',
   })
 
-  // card face: red / navy alternating, golden fire for the top multiplier
-  const cardFace = v => v >= 3
+  // card face by color code: R red / B navy / F golden fire
+  const cardFace = c => c === 'F'
     ? { background: `radial-gradient(circle at 50% 35%, ${HOTLINE.gold}, ${HOTLINE.fire} 55%, ${HOTLINE.fireDeep})`, border: `2px solid ${HOTLINE.gold}` }
-    : v > 0
+    : c === 'R'
       ? { background: `linear-gradient(160deg, ${HOTLINE.cardRed}, ${HOTLINE.cardRedDeep})`, border: '2px solid rgba(255,255,255,0.25)' }
       : { background: HOTLINE.cardNavy, border: '2px solid rgba(0,0,0,0.3)' }
 
@@ -254,10 +418,12 @@ export default function StreakRoll({ balance, setBalance }) {
         <div style={{
           background: HOTLINE.band, borderRadius: 14,
           padding: '10px 0 10px', margin: '0 auto', maxWidth: 860,
+          position: 'relative',
         }}>
+          <WinToast toasts={toasts} />
           <div style={tri(false)} />
           <div ref={viewRef} style={{
-            position: 'relative', width: '100%', height: 96,
+            position: 'relative', width: '100%', height: CARD_H + 12,
             overflow: 'hidden', margin: '8px 0',
           }}>
             {/* fade edges */}
@@ -265,44 +431,55 @@ export default function StreakRoll({ balance, setBalance }) {
             <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 60, zIndex: 2, background: `linear-gradient(270deg, ${HOTLINE.band}, transparent)` }} />
 
             {/* rolling strip — same offset/transition mechanics as before */}
-            <div style={{
-              display: 'flex', gap: GAP, position: 'absolute', top: 12, left: 0,
-              transform: `translateX(${-offset}px)`,
-              transition: rolling ? `transform ${SPIN_MS}ms cubic-bezier(0.15,0.55,0.25,1)` : 'none',
+            <div ref={stripRef} style={{
+              display: 'flex', gap: GAP, position: 'absolute', top: 6, left: 0,
+              transform: `translate3d(${-offset}px,0,0)`,
+              willChange: 'transform',
             }}>
-              {STRIP.map((v, i) => {
+              {strip.map((c, i) => {
                 const isWin = !rolling && winCell === i
+                const dotSize = Math.round(CELL_W * 0.46)
                 return (
                   <div key={i} style={{
-                    width: CELL_W, height: 72, flexShrink: 0, borderRadius: 10,
-                    ...cardFace(v),
+                    width: CELL_W, height: CARD_H, flexShrink: 0, borderRadius: 10,
+                    ...cardFace(c),
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: isWin ? `0 0 18px ${HOTLINE.gold}` : '0 2px 6px rgba(0,0,0,0.3)',
-                    transform: isWin ? 'scale(1.06)' : 'scale(1)',
-                    transition: 'box-shadow 0.2s, transform 0.2s',
-                    fontSize: v >= 3 ? 26 : 8, lineHeight: 1,
+                    // rendering diet: no per-card resting shadow — only the
+                    // single winning card gets a glow after the roll stops
+                    boxShadow: isWin ? `0 0 18px ${HOTLINE.gold}` : 'none',
+                    transform: isWin ? 'scale(1.06)' : 'none',
+                    fontSize: c === 'F' ? 28 : 8, lineHeight: 1,
                   }}>
-                    {v >= 3
+                    {c === 'F'
                       ? '🔥'
-                      : v > 0
-                        ? <span style={{ fontSize: 8 }}>⚽</span>
-                        : <span style={{ fontSize: 8, opacity: 0.35 }}>⚽</span>}
+                      : (
+                        <span style={{
+                          width: dotSize, height: dotSize, borderRadius: RADIUS.pill,
+                          background: c === 'R' ? HOTLINE.cardRedDot : HOTLINE.cardNavyDot,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: Math.round(dotSize * 0.55),
+                          opacity: c === 'R' ? 1 : 0.9,
+                        }}>
+                          <span style={{ opacity: c === 'R' ? 1 : 0.45 }}>⚽</span>
+                        </span>
+                      )}
                   </div>
                 )
               })}
             </div>
 
-            {/* center golden selection frame */}
+            {/* center golden selection frame — flashes red on a lost round */}
             <div style={{
               position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
-              width: CELL_W + 14, height: 88, borderRadius: 12,
-              border: `3px solid ${HOTLINE.gold}`,
-              boxShadow: `0 0 12px rgba(255,213,79,0.45)`,
+              width: CELL_W + 14, height: CARD_H + 12, borderRadius: 12,
+              border: `3px solid ${lossFlash ? HOTLINE.cardRed : HOTLINE.gold}`,
+              boxShadow: lossFlash ? `0 0 16px ${HOTLINE.cardRed}` : '0 0 12px rgba(255,213,79,0.45)',
+              transition: 'border-color 0.15s, box-shadow 0.15s',
               pointerEvents: 'none', zIndex: 3,
             }} />
 
-            {/* win FX (high mult ≥2×): burst + glow at the pointer */}
-            {won && bigWin && (
+            {/* win FX (fire hit): burst + glow at the pointer */}
+            {won && fireWin && (
               <div key={`fx-${winCell}`} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
                 <div style={{
                   position: 'absolute', left: '50%', top: '50%', width: 90, height: 90, borderRadius: '50%',
@@ -327,22 +504,28 @@ export default function StreakRoll({ balance, setBalance }) {
           <div style={tri(true)} />
         </div>
 
-        {/* ---- High risk mode toggle (disabled placeholder) ---- */}
+        {/* ---- High risk mode toggle — swaps distribution + payouts ---- */}
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
-          <span style={{
+          <button type="button" disabled={rolling} onClick={() => setHighRisk(v => !v)} style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
             padding: '5px 16px', borderRadius: RADIUS.pill,
-            background: HOTLINE.bar, border: '1px solid rgba(255,255,255,0.25)',
-            color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.6, cursor: 'not-allowed',
+            background: HOTLINE.bar, border: `1px solid ${highRisk ? HOTLINE.gold : 'rgba(255,255,255,0.25)'}`,
+            color: COLORS.white, fontSize: 12, fontWeight: 800,
+            opacity: rolling ? 0.5 : 1, cursor: rolling ? 'not-allowed' : 'pointer',
           }}>
             <span style={{
               width: 30, height: 16, borderRadius: RADIUS.pill, position: 'relative',
-              background: 'rgba(255,255,255,0.2)', display: 'inline-block',
+              background: highRisk ? 'rgba(53,208,127,0.5)' : 'rgba(255,255,255,0.2)', display: 'inline-block',
+              transition: 'background 0.15s',
             }}>
-              <span style={{ position: 'absolute', top: 2, left: 2, width: 12, height: 12, borderRadius: RADIUS.pill, background: 'rgba(255,255,255,0.7)' }} />
+              <span style={{
+                position: 'absolute', top: 2, left: highRisk ? 16 : 2, width: 12, height: 12,
+                borderRadius: RADIUS.pill, background: highRisk ? '#35d07f' : 'rgba(255,255,255,0.7)',
+                transition: 'left 0.15s, background 0.15s',
+              }} />
             </span>
             High risk mode
-          </span>
+          </button>
         </div>
 
         {/* ---- bottom bet band ---- */}
@@ -359,7 +542,7 @@ export default function StreakRoll({ balance, setBalance }) {
           }}>
             <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
             <input
-              type="number" min="1" value={bet}
+              type="number" min="1" value={bet} disabled={rolling}
               onChange={e => setBet(Math.max(1, Number(e.target.value)))}
               style={{
                 width: 72, background: 'transparent', border: 'none', textAlign: 'center',
@@ -367,25 +550,40 @@ export default function StreakRoll({ balance, setBalance }) {
               }}
             />
           </div>
-          <button type="button" onClick={() => setBet(b => Math.max(1, b - 10))} style={circleBtn}>−</button>
-          <button type="button" style={{ ...circleBtn, fontSize: 12 }} title="筹码">≡</button>
-          <button type="button" onClick={() => setBet(b => b + 10)} style={circleBtn}>+</button>
+          <button type="button" disabled={rolling} onClick={() => { playChip(); setBet(b => Math.max(1, b - 10)) }} style={{ ...circleBtn, opacity: rolling ? 0.5 : 1, cursor: rolling ? 'not-allowed' : 'pointer' }}>−</button>
+          <button type="button" style={{ ...circleBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} title="筹码">
+            {/* chip-stack icon drawn in CSS — the ≡ glyph rendered as a dash in this font */}
+            <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+            </span>
+          </button>
+          <button type="button" disabled={rolling} onClick={() => { playChip(); setBet(b => b + 10) }} style={{ ...circleBtn, opacity: rolling ? 0.5 : 1, cursor: rolling ? 'not-allowed' : 'pointer' }}>+</button>
           <button type="button" disabled title="自动" style={{
             width: 40, height: 40, borderRadius: RADIUS.pill,
             background: HOTLINE.blue, color: COLORS.white,
             border: '2px solid rgba(255,255,255,0.4)',
             fontSize: 16, fontWeight: 900, cursor: 'not-allowed',
           }}>⟳</button>
-          {/* three bet buttons — wired up in H2; roll kept referenced but unreachable */}
-          <button type="button" disabled onClick={roll} style={betBigBtn(`linear-gradient(160deg, ${HOTLINE.cardRed}, ${HOTLINE.cardRedDeep})`, COLORS.white)}>
-            <span>RED</span><span>X2</span>
-          </button>
-          <button type="button" disabled style={betBigBtn(`radial-gradient(circle at 50% 30%, ${HOTLINE.gold}, ${HOTLINE.fireDeep})`, COLORS.white)}>
-            <span>🔥</span><span>X32</span>
-          </button>
-          <button type="button" disabled style={betBigBtn(HOTLINE.black, COLORS.white)}>
-            <span>BLACK</span><span>X2</span>
-          </button>
+          {/* three bet buttons — bet the amount on a color and roll */}
+          {(() => {
+            const locked = rolling || bet > balance || bet < 1
+            const withLock = s => ({ ...s, cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.55 : 1 })
+            return (
+              <>
+                <button type="button" disabled={locked} onClick={() => betOn('R')} style={withLock(betBigBtn(`linear-gradient(160deg, ${HOTLINE.cardRed}, ${HOTLINE.cardRedDeep})`, COLORS.white))}>
+                  <span>RED</span><span>X{mults.R}</span>
+                </button>
+                <button type="button" disabled={locked} onClick={() => betOn('F')} style={withLock(betBigBtn(`radial-gradient(circle at 50% 30%, ${HOTLINE.gold}, ${HOTLINE.fireDeep})`, COLORS.white))}>
+                  <span>🔥</span><span>X{mults.F}</span>
+                </button>
+                <button type="button" disabled={locked} onClick={() => betOn('B')} style={withLock(betBigBtn(HOTLINE.black, COLORS.white))}>
+                  <span>BLACK</span><span>X{mults.B}</span>
+                </button>
+              </>
+            )
+          })()}
         </div>
       </Panel>
     </GameLayout>
