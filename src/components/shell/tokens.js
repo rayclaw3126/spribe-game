@@ -186,6 +186,30 @@ export const GOAL = {
   bet: '#4a9b16',          // big BET button
 }
 
+// Dribble — Spribe Mines reskinned blue→pitch green; sampled from the Mines
+// reference shot (gold opened-cell semantics kept).
+export const MINES = {
+  bgOuter: '#0d4a20',      // dark pitch edges
+  bgCenter: '#2e8f4f',     // bright center
+  band: '#0b3d1c',         // top/bottom bars
+  strip: 'rgba(0,0,0,0.3)',    // second-row strip / RANDOM capsule
+  cellTop: '#1b3d26',      // unopened cell gradient
+  cellBot: '#0f2416',
+  cellBorder: 'rgba(255,255,255,0.14)',
+  dot: 'rgba(255,255,255,0.16)',   // unopened center dot
+  goldTop: '#ffc93c',      // opened-safe cell (语义保留)
+  goldBot: '#f28c17',
+  red: '#d61932',          // exploded tackle cell
+  tackleDark: '#0d1f13',   // revealed-but-not-hit tackle cell
+  next: '#ffc93c',         // Next pill (gold, dark text)
+  progress: '#35d07f',
+  progressTrack: 'rgba(0,0,0,0.4)',
+  cash: '#f5a623',         // gold CASH OUT button
+  blue: '#2f6fe0',
+  orange: '#f28c17',
+  gold: '#ffd54f',
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',
