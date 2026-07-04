@@ -88,8 +88,13 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
 // ---------- 轮次常量（照 Half Time，心跳 500ms/tick）----------
 const TICK_MS = 500
 const BETTING_T = 48    // 24s
-const RACING_T = 6      // 3s 占位 — 单3 换冲刺动画
+const RACING_T = 16     // 8s = 起跑 0.5s + 冲刺 ~6s + 撞线定格 1.5s
 const SETTLED_T = 6     // 3s
+// 冲刺舞台时间轴（rAF 内使用，毫秒）：
+// 冠军冲线 = START + BASE ≈ 5.3s，之后每名次 +160ms（第10名 ~6.74s），余下定格
+const RACE_START = 500
+const SPRINT_BASE = 4800
+const RANK_GAP = 160
 const ROUND_DATE = '20260705'
 const ROAD_CAP = 120
 
@@ -128,6 +133,213 @@ function JerseyBead({ num, size = 16, dim = false }) {
   )
 }
 
+// ---------- 冲刺舞台：单一 rAF 循环驱动全部物理（禁 CSS transition 拼接）----------
+// 10 泳道横向冲刺；每人速度曲线按注入名次反推（基线到达时刻=名次序，叠加
+// base·(1-base) 包络的正弦摆动 → 中途超车交错、冲线时刻不变，结局恒等于注入名次）。
+// 撞线金闪 + 名次侧栏依次落位 + 整卡轻震；prefers-reduced-motion 静态示名次表。
+function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
+  const canvasRef = useRef(null)
+  const cbRef = useRef({ sfx, onFinale })
+  cbRef.current = { sfx, onFinale }
+  const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  useEffect(() => {
+    if (reduced) { cbRef.current.onFinale?.(); return }
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (import.meta.env.DEV) window.__GB_RAF_ACTIVE = (window.__GB_RAF_ACTIVE || 0) + 1
+
+    const dpr = window.devicePixelRatio || 1
+    const fit = () => {
+      const r = canvas.getBoundingClientRect()
+      canvas.width = Math.max(1, Math.floor(r.width * dpr))
+      canvas.height = Math.max(1, Math.floor(r.height * dpr))
+    }
+    fit()
+    window.addEventListener('resize', fit)
+
+    const jersey = new Path2D(JERSEY_PATH)   // 100×90 原空间，绘制时缩放
+    // 装饰性随机（结果早已定，只抖中段轨迹，不碰确定性随机数流的位置）
+    const runners = race.order.map((num, i) => ({
+      num, rank: i + 1,
+      fin: RACE_START + SPRINT_BASE + i * RANK_GAP,
+      phase: Math.random() * Math.PI * 2,
+      wobA: 0.05 + Math.random() * 0.05,
+      p: 0, finished: false, trail: [],
+    }))
+    const byLane = [...runners].sort((a, b) => a.num - b.num)   // 泳道固定按号码
+    const lastFin = RACE_START + SPRINT_BASE + 9 * RANK_GAP
+    const finishedList = []
+    let raf = 0, whistled = false, finaleFired = false
+    let lastStep = 0, shakeUntil = 0, flashUntil = 0
+    const t0 = performance.now()
+
+    const drawBead = (x, y, s, num, big = false) => {
+      ctx.save()
+      ctx.translate(x - s / 2, y - s * 0.45)
+      ctx.scale(s / 100, s / 100)
+      ctx.fillStyle = big ? GOLDENBOOT.gold : GOLDENBOOT.fire
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)'
+      ctx.lineWidth = 4
+      ctx.fill(jersey)
+      ctx.stroke(jersey)
+      ctx.restore()
+      ctx.fillStyle = '#3a2c00'
+      ctx.font = `900 ${Math.round(s * 0.42)}px 'Space Grotesk', sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(String(num), x, y + s * 0.12)
+    }
+
+    const loop = now => {
+      const t = now - t0
+      const W = canvas.width, H = canvas.height
+      const x0 = W * 0.06, x1 = W * 0.84
+      const laneH = H / 10
+      const bead = Math.min(laneH * 0.92, 22 * dpr)
+
+      // —— 时序/物理 ——
+      if (!whistled && t >= RACE_START) { whistled = true; cbRef.current.sfx.whistle() }
+      if (whistled && finishedList.length < 10 && now - lastStep > 170) {
+        lastStep = now
+        cbRef.current.sfx.step()
+      }
+      for (const r of runners) {
+        if (t < RACE_START) { r.p = 0; continue }
+        const base = Math.min(1, (t - RACE_START) / (r.fin - RACE_START))
+        const wob = r.wobA * Math.sin(t / 420 + r.phase) * 4 * base * (1 - base)
+        r.p = Math.max(0, Math.min(1, base + wob))
+        if (!r.finished && base >= 1) {
+          r.finished = true
+          finishedList.push(r)
+          if (r.rank === 1) {
+            cbRef.current.sfx.cheer()
+            shakeUntil = now + 100
+            flashUntil = now + 450
+          }
+        }
+      }
+      if (!finaleFired && t >= lastFin + 120) {
+        finaleFired = true
+        cbRef.current.sfx.chime()
+        cbRef.current.onFinale?.()
+        if (import.meta.env.DEV) window.__GB_ANIM_LAST = race.order.join(',')
+      }
+      if (shakeRef.current) {
+        shakeRef.current.style.transform = now < shakeUntil
+          ? `translate(${Math.sin(now / 7) * 2}px, ${Math.cos(now / 5) * 1.5}px)`
+          : ''
+      }
+
+      // —— 绘制 ——
+      ctx.clearRect(0, 0, W, H)
+      // 泳道分隔线 + 起点/终点线
+      ctx.strokeStyle = 'rgba(255,255,255,0.14)'
+      ctx.lineWidth = 1 * dpr
+      for (let i = 1; i < 10; i++) {
+        ctx.beginPath(); ctx.moveTo(0, i * laneH); ctx.lineTo(W * 0.88, i * laneH); ctx.stroke()
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.45)'
+      ctx.lineWidth = 2 * dpr
+      ctx.beginPath(); ctx.moveTo(x0 - bead, 0); ctx.lineTo(x0 - bead, H); ctx.stroke()
+      // 终点双线
+      ctx.beginPath(); ctx.moveTo(x1 + bead * 0.7, 0); ctx.lineTo(x1 + bead * 0.7, H); ctx.stroke()
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)'
+      ctx.beginPath(); ctx.moveTo(x1 + bead * 0.7 + 4 * dpr, 0); ctx.lineTo(x1 + bead * 0.7 + 4 * dpr, H); ctx.stroke()
+      // 撞线金闪
+      if (now < flashUntil) {
+        const k = (flashUntil - now) / 450
+        ctx.fillStyle = `rgba(255,213,79,${0.35 * k})`
+        ctx.fillRect(x1 - 30 * dpr, 0, bead * 2 + 60 * dpr, H)
+      }
+      // 领先者拖影（2 帧）
+      let leader = null
+      for (const r of runners) if (!leader || r.p > leader.p) leader = r
+      // 选手
+      byLane.forEach((r, i) => {
+        const y = i * laneH + laneH / 2
+        const x = x0 + r.p * (x1 - x0)
+        if (r === leader && whistled && !r.finished) {
+          r.trail.push(x)
+          if (r.trail.length > 2) r.trail.shift()
+          r.trail.forEach((tx, ti) => {
+            ctx.globalAlpha = [0.12, 0.25][ti] ?? 0.1
+            drawBead(tx - bead * 0.5, y, bead, r.num)
+          })
+          ctx.globalAlpha = 1
+        } else {
+          r.trail.length = 0
+        }
+        drawBead(x, y, bead, r.num)
+      })
+      // 名次侧栏 — 撞线依次落位
+      const slotH = H / 10
+      ctx.textAlign = 'left'
+      finishedList.forEach((r, idx) => {
+        const sy = idx * slotH + slotH / 2
+        const sx = W * 0.955
+        ctx.fillStyle = idx === 0 ? GOLDENBOOT.gold : 'rgba(255,255,255,0.55)'
+        ctx.font = `900 ${Math.round(9 * dpr)}px 'Space Grotesk', sans-serif`
+        ctx.textAlign = 'right'
+        ctx.fillText(String(idx + 1), sx - bead * 0.62, sy + 3 * dpr)
+        drawBead(sx, sy, Math.min(slotH * 0.9, 15 * dpr), r.num)
+      })
+      // 收尾：冠军大珠金框定格
+      if (finaleFired) {
+        const cx = (x0 + x1) / 2, cy = H / 2
+        const s = Math.min(H * 0.5, 52 * dpr)
+        ctx.fillStyle = 'rgba(0,0,0,0.45)'
+        ctx.beginPath()
+        ctx.roundRect(cx - s * 1.7, cy - s * 0.8, s * 3.4, s * 1.6, 12 * dpr)
+        ctx.fill()
+        ctx.strokeStyle = GOLDENBOOT.gold
+        ctx.lineWidth = 2 * dpr
+        ctx.shadowColor = GOLDENBOOT.gold
+        ctx.shadowBlur = 14 * dpr
+        ctx.stroke()
+        ctx.shadowBlur = 0
+        drawBead(cx - s * 0.85, cy, s, race.winner, true)
+        ctx.fillStyle = GOLDENBOOT.gold
+        ctx.font = `900 ${Math.round(s * 0.4)}px 'Space Grotesk', sans-serif`
+        ctx.textAlign = 'left'
+        ctx.fillText(`WINNER #${race.winner}`, cx - s * 0.3, cy + s * 0.14)
+      }
+
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', fit)
+      if (shakeRef.current) shakeRef.current.style.transform = ''
+      if (import.meta.env.DEV) window.__GB_RAF_ACTIVE -= 1
+    }
+    // 舞台一次挂载跑完整条时间轴；race 由 key 换新保证重挂载
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (reduced) {
+    return (
+      <div style={{
+        height, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: 6, flexWrap: 'wrap', padding: '0 12px',
+        background: GOLDENBOOT.strip, borderRadius: 12,
+      }}>
+        {race.order.map((n, i) => (
+          <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+            <span style={{ color: GOLDENBOOT.dim, fontSize: 10, fontWeight: 900 }}>{i + 1}.</span>
+            <JerseyBead num={n} size={18} dim={i > 2} />
+          </span>
+        ))}
+        <span style={{ color: GOLDENBOOT.gold, fontSize: 16, fontWeight: 900, marginLeft: 8 }}>WINNER #{race.winner}</span>
+      </div>
+    )
+  }
+  return <canvas ref={canvasRef} style={{ width: '100%', height, display: 'block' }} aria-hidden />
+}
+
 export default function GoldenBoot({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
@@ -135,7 +347,7 @@ export default function GoldenBoot({ balance, setBalance }) {
   // centered DEMO pill would collide with the How-to-Play pill, so hide it
   const deskWide = useMediaQuery('(min-width: 1200px)')
   const [bgmOn, toggleBgm] = useBgm()
-  const [muted, setMuted] = useState(false)   // 纯视觉态 — SFX 单3 一并接
+  const [muted, setMuted] = useState(false)
   const [bet, setBet] = useState(10)
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -149,6 +361,7 @@ export default function GoldenBoot({ balance, setBalance }) {
   const [lastRace, setLastRace] = useState(SEED_LAST)
   const [history, setHistory] = useState(SEED_HISTORY)
   const [result, setResult] = useState(null)   // { hits:Set, winTotal }
+  const [preHits, setPreHits] = useState(null) // 冲刺动画收尾的命中预亮（结算前）
   const [toasts, setToasts] = useState([])
 
   const phaseRef = useRef('betting')
@@ -160,10 +373,63 @@ export default function GoldenBoot({ balance, setBalance }) {
   const pendingRef = useRef(null)
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
+  const audioRef = useRef({ ctx: null, muted: false })
+  const cardShakeRef = useRef(null)
 
   useEffect(() => { balanceRef.current = balance }, [balance])
   useEffect(() => { betRef.current = bet }, [bet])
+  useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
+
+  // ---------- SFX（WebAudio 合成器，muted 门控；全部在结果已定后触发）----------
+  function ensureAudio() {
+    if (audioRef.current.ctx) return audioRef.current.ctx
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
+    audioRef.current.ctx = ctx; return ctx
+  }
+  function sfxWhistle() {   // 起跑哨：短高频颤音
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); o.type = 'square'
+    o.frequency.setValueAtTime(2100, t); o.frequency.setValueAtTime(1900, t + 0.09); o.frequency.setValueAtTime(2100, t + 0.14)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.07, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.3)
+  }
+  function sfxStep() {   // 冲刺脚步：低频短击（rAF 每 ~170ms 触发成节奏簇）
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); o.type = 'sine'
+    o.frequency.setValueAtTime(105, t); o.frequency.exponentialRampToValueAtTime(58, t + 0.05)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.045, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.07)
+  }
+  function sfxCheer() {   // 撞线欢呼：带通噪声上扬浪涌
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const nb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.8), ctx.sampleRate)
+    const d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1)
+    const ns = ctx.createBufferSource(); ns.buffer = nb
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.8
+    bp.frequency.setValueAtTime(420, t); bp.frequency.exponentialRampToValueAtTime(1500, t + 0.5)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.1, t + 0.18); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.78)
+    ns.connect(bp); bp.connect(g); g.connect(ctx.destination); ns.start(t); ns.stop(t + 0.8)
+  }
+  function sfxChime() {   // 收尾定格：上扬三连音
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    ;[660, 880, 1170].forEach((f, i) => {
+      const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f
+      const s = t + i * 0.08
+      g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.1, s + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.28)
+      o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.3)
+    })
+  }
+  const stageSfx = { whistle: sfxWhistle, step: sfxStep, cheer: sfxCheer, chime: sfxChime }
 
   function pushToast(win) {
     const id = ++toastIdRef.current
@@ -212,6 +478,7 @@ export default function GoldenBoot({ balance, setBalance }) {
         betsRef.current = new Map(); setBetsPlaced(new Map())
         picksRef.current = new Set(); setPicks(new Set())
         setResult(null)
+        setPreHits(null)
         setFeedBets(makeFeedBots())
         setRoundNo(n => n + 1)
         phaseRef.current = 'betting'; setGamePhase('betting')
@@ -260,7 +527,7 @@ export default function GoldenBoot({ balance, setBalance }) {
   }
   const cellBtn = (key, { compact = false } = {}) => {
     const sel = picks.has(key)
-    const hit = result?.hits?.has(key)
+    const hit = (result?.hits ?? preHits)?.has(key)   // 结算后 result，动画收尾先预亮
     const placed = betsPlaced.has(key)
     return {
       flex: 1, minWidth: 0, padding: compact ? '5px 2px' : '8px 4px',
@@ -527,7 +794,21 @@ export default function GoldenBoot({ balance, setBalance }) {
         </div>
       </div>
 
-      {beadRoad}
+      {/* ---- 冲刺舞台占珠盘路位：RACING 表演 / SETTLED 定格，回 BETTING 换回珠盘路
+           （等高替换 → 中区盘族与金框预亮全程可见，卡高不抖）---- */}
+      {gamePhase !== 'betting' && pendingRef.current ? (
+        <div style={{
+          flex: '0 0 auto', position: 'relative', zIndex: 1,
+          margin: isMobile ? '0 12px 10px' : '0 18px 12px',
+          background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 10, overflow: 'hidden',
+        }}>
+          <RaceStage key={roundNo} race={pendingRef.current}
+            height={isMobile ? 150 : 178}
+            shakeRef={cardShakeRef} sfx={stageSfx}
+            onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
+        </div>
+      ) : beadRoad}
 
       {/* ---- bottom bet band — pinned ---- */}
       <div style={{
@@ -610,7 +891,9 @@ export default function GoldenBoot({ balance, setBalance }) {
               {roundBar}
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
-              {gameCard}
+              <div ref={cardShakeRef} style={{ height: '100%' }}>
+                {gameCard}
+              </div>
             </div>
           </div>
         </div>
@@ -621,7 +904,9 @@ export default function GoldenBoot({ balance, setBalance }) {
   // ---- stacked layout (<1024) ----
   return (
     <GameLayout title="Golden Boot" color={GOLDENBOOT.gold}>
-      {gameCard}
+      <div ref={cardShakeRef}>
+        {gameCard}
+      </div>
     </GameLayout>
   )
 }
