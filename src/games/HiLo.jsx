@@ -73,6 +73,70 @@ function CardBack({ w, h }) {
   )
 }
 
+// Deal animation overlay — slide in from the deck, 3D flip, then result
+// feedback. Pure presentation: the drawn number is decided BEFORE the
+// animation starts and is only read here. A new deal remounts this component
+// (key change), cutting any in-flight animation — no queueing.
+function DealAnim({ num, kind, dx, w, h, onFlip, onReveal, onDone }) {
+  const [stage, setStage] = useState('slide')   // slide | flip | feedback
+  const revealedRef = useRef(false)
+  const reveal = () => {
+    if (revealedRef.current) return
+    revealedRef.current = true
+    onReveal?.()
+    if (kind === 'win' || kind === 'lose') setStage('feedback')
+    else onDone()
+  }
+  return (
+    <div
+      onAnimationEnd={e => { if (e.animationName === 'hlLoseShake') onDone() }}
+      style={{
+        position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none',
+        animation: stage === 'feedback' && kind === 'lose' ? 'hlLoseShake 0.35s ease-in-out both' : 'none',
+      }}>
+      <div
+        onAnimationEnd={e => {
+          if (e.animationName === 'hlSlideIn') { onFlip?.(); setStage(s => (s === 'slide' ? 'flip' : s)) }
+        }}
+        style={{
+          width: w, height: h,
+          '--dx': `${dx}px`,
+          animation: stage === 'slide' ? 'hlSlideIn 0.35s ease-out both' : 'none',
+        }}>
+        <div style={{ width: w, height: h, perspective: 700 }}>
+          <div
+            onAnimationEnd={e => { if (e.animationName === 'hlFlipIn') reveal() }}
+            style={{
+              position: 'relative', width: w, height: h,
+              transformStyle: 'preserve-3d',
+              transform: stage === 'slide' ? 'rotateY(180deg)' : undefined,
+              animation: stage !== 'slide' ? 'hlFlipIn 0.45s ease-in-out both' : 'none',
+            }}>
+            <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden' }}>
+              <JerseyCard num={num} w={w} h={h} />
+            </div>
+            <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+              <CardBack w={w} h={h} />
+            </div>
+          </div>
+        </div>
+      </div>
+      {stage === 'feedback' && kind === 'win' && (
+        <div onAnimationEnd={e => { if (e.animationName === 'hlWinPulse') onDone() }} style={{
+          position: 'absolute', inset: 0, borderRadius: 10,
+          animation: 'hlWinPulse 0.4s ease-out both',
+        }} />
+      )}
+      {stage === 'feedback' && kind === 'lose' && (
+        <div style={{
+          position: 'absolute', inset: 0, borderRadius: 10,
+          background: 'rgba(224,75,58,0.3)',
+        }} />
+      )}
+    </div>
+  )
+}
+
 export default function HiLo({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
@@ -90,6 +154,8 @@ export default function HiLo({ balance, setBalance }) {
   const cumRef = useRef(1)                     // full-precision running product
   const audioRef = useRef({ ctx: null, muted: false })
   const timersRef = useRef([])
+  const [anim, setAnim] = useState(null)       // { id, num, kind, onReveal } — presentation only
+  const animIdRef = useRef(0)
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
   function later(fn, ms) { const id = setTimeout(fn, ms); timersRef.current.push(id); return id }
@@ -102,15 +168,33 @@ export default function HiLo({ balance, setBalance }) {
     const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
     audioRef.current.ctx = ctx; return ctx
   }
-  function playFlip() {
+  function sfxWhoosh() {   // card slide — noise sweep 400→2200Hz
     const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
     const t = ctx.currentTime
-    const nb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.1), ctx.sampleRate)
+    const nb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.3), ctx.sampleRate)
     const d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length)
     const ns = ctx.createBufferSource(); ns.buffer = nb
-    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400
-    const g = ctx.createGain(); g.gain.value = 0.05
-    ns.connect(bp); bp.connect(g); g.connect(ctx.destination); ns.start(t); ns.stop(t + 0.1)
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4
+    bp.frequency.setValueAtTime(400, t); bp.frequency.exponentialRampToValueAtTime(2200, t + 0.28)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3)
+    ns.connect(bp); bp.connect(g); g.connect(ctx.destination); ns.start(t); ns.stop(t + 0.3)
+  }
+  function sfxSnap() {   // card flip lands — short crisp click + low knock
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const len = Math.floor(ctx.sampleRate * 0.03)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2)
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2600; bp.Q.value = 1.2
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.08, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04)
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination); src.start(t); src.stop(t + 0.035)
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = 210
+    const og = ctx.createGain()
+    og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.05, t + 0.004); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.05)
+    o.connect(og); og.connect(ctx.destination); o.start(t); o.stop(t + 0.06)
   }
   function playCorrect() {
     const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
@@ -140,6 +224,20 @@ export default function HiLo({ balance, setBalance }) {
 
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
 
+  // Kick off the deal animation. The number is already decided by the caller;
+  // this layer only replays it visually. Starting a new deal replaces the anim
+  // object (fresh id → remount), so an in-flight animation is cut, never queued.
+  // prefers-reduced-motion: skip straight to the reveal (static feedback only).
+  function beginDeal(num, kind, onReveal) {
+    sfxWhoosh()
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      onReveal?.()
+      setAnim(null)
+      return
+    }
+    setAnim({ id: ++animIdRef.current, num, kind, onReveal })
+  }
+
   // ---------- game ----------
   function startGame() {
     if (phase === 'playing' || bet > balance || bet < 1) return
@@ -155,18 +253,19 @@ export default function HiLo({ balance, setBalance }) {
     setCardFlash(null)
     setFlipping(false)
     setPhase('playing')
-    playFlip()
+    beginDeal(first, 'deal', null)   // state committed above — anim is a visual replay
   }
 
   function guess(dir) {   // dir: 'high' | 'low' — both include SAME
     if (phase !== 'playing' || flipping) return
-    const next = drawCard()
+    const next = drawCard()   // result decided BEFORE the animation starts
     const p = dir === 'high' ? pHigh(card) : pLow(card)
     const correct = dir === 'high' ? next >= card : next <= card
     setFlipping(true)
-    playFlip()
 
-    later(() => {
+    // Same settle block as before — now triggered by the flip's animationend
+    // (reveal) instead of the old 620ms timer. Money path untouched.
+    beginDeal(next, correct ? 'win' : 'lose', () => {
       setSteps(s => [...s, { n: next, dir, correct }].slice(-10))
       setCard(next)
       if (correct) {
@@ -182,15 +281,15 @@ export default function HiLo({ balance, setBalance }) {
       }
       setFlipping(false)
       later(() => setCardFlash(null), 700)
-    }, 620)
+    })
   }
 
   function skip() {   // swap the face card, no settle, streak keeps (limited per round)
     if (phase !== 'playing' || flipping || skips <= 0) return
     const next = drawCard()
     setSkips(k => k - 1)
-    setCard(next)
-    playFlip()
+    setCard(next)   // committed instantly, exactly as before — spam-safe
+    beginDeal(next, 'skip', null)
   }
 
   // fake feed rows settle for the round: ~45% cash green, the rest grey out
@@ -232,6 +331,9 @@ export default function HiLo({ balance, setBalance }) {
     cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.55 : 1,
   })
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // centered DEMO pill would collide with the How-to-Play pill, so hide it
+  const deskWide = useMediaQuery('(min-width: 1200px)')
 
   // flip-history minis + count/multiplier badge — desktop renders it in the
   // 34px skeleton row, mobile keeps it inside the card (never both)
@@ -275,34 +377,75 @@ export default function HiLo({ balance, setBalance }) {
         </div>
   )
 
+  // Floating jersey-card parallax field — reuses JerseyCard, far layer small &
+  // fainter, near layer big. Positions hug the edges, clear of the table and
+  // button hot zones. Opacity 0.08–0.18 so the foreground always wins.
+  const FLOATERS = [
+    { num: 7,  w: 54,  pos: { left: '6%',  top: '14%' },    rot: -12, op: 0.10, dur: '17s', del: '-3s' },
+    { num: 4,  w: 48,  pos: { right: '9%', top: '20%' },    rot: 10,  op: 0.09, dur: '19s', del: '-8s' },
+    { num: 11, w: 56,  pos: { left: '11%', bottom: '24%' }, rot: 8,   op: 0.10, dur: '15s', del: '-5s' },
+    { num: 2,  w: 50,  pos: { right: '13%', bottom: '30%' }, rot: -9, op: 0.08, dur: '18s', del: '-11s' },
+    { num: 13, w: 96,  pos: { left: '-1%', top: '46%' },    rot: -14, op: 0.16, dur: '13s', del: '-2s' },
+    { num: 1,  w: 104, pos: { right: '-2%', top: '36%' },   rot: 14,  op: 0.17, dur: '11s', del: '-6s' },
+  ]
+  const floatField = (
+    <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <style>{`
+        @keyframes hlDrift {
+          0%   { transform: translate(0px, 0px) rotate(-4deg); }
+          50%  { transform: translate(12px, -16px) rotate(4deg); }
+          100% { transform: translate(0px, 0px) rotate(-4deg); }
+        }
+        .hlFloat { animation: hlDrift var(--dur) ease-in-out infinite; animation-delay: var(--del); }
+        /* deal animation — slide from deck, 3D flip, win ring / lose shake.
+           ring green = HILO.green #35d07f, lose tint = existing #e04b3a */
+        @keyframes hlSlideIn {
+          from { transform: translateX(var(--dx)) scale(0.92); }
+          to   { transform: translateX(0px) scale(1); }
+        }
+        @keyframes hlFlipIn {
+          from { transform: rotateY(180deg); }
+          to   { transform: rotateY(0deg); }
+        }
+        @keyframes hlWinPulse {
+          0%   { box-shadow: 0 0 0 0 rgba(53,208,127,0.8); }
+          100% { box-shadow: 0 0 0 26px rgba(53,208,127,0); }
+        }
+        @keyframes hlLoseShake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-5px); }
+          40% { transform: translateX(5px); }
+          60% { transform: translateX(-4px); }
+          80% { transform: translateX(3px); }
+        }
+        @media (prefers-reduced-motion: reduce) { .hlFloat { animation: none; } }
+      `}</style>
+      {FLOATERS.map(f => (
+        <div key={f.num} style={{
+          position: 'absolute', ...f.pos, opacity: f.op,
+          transform: `rotate(${f.rot}deg)`,
+        }}>
+          <div className="hlFloat" style={{ '--dur': f.dur, '--del': f.del }}>
+            <JerseyCard num={f.num} w={f.w} h={Math.round(f.w * 1.31)} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+
   const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 34%, ${HILO.bgCenter}, ${HILO.bgOuter})`,
-        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        borderColor: COLORS.border, padding: 0, overflow: 'hidden',
         position: 'relative',
+        display: 'flex', flexDirection: 'column',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
-        {/* giant corner rating-card line art (ref A/K positions) */}
-        <div style={{
-          position: 'absolute', left: -50, top: '32%', width: 170, height: 240,
-          border: `3px solid ${HILO.outline}`, borderRadius: 18,
-          transform: 'rotate(-14deg)', pointerEvents: 'none',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Jersey num={13} w={120} outline />
-        </div>
-        <div style={{
-          position: 'absolute', right: -50, bottom: '10%', width: 170, height: 240,
-          border: `3px solid ${HILO.outline}`, borderRadius: 18,
-          transform: 'rotate(14deg)', pointerEvents: 'none',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Jersey num={1} w={120} outline />
-        </div>
+        {floatField}
 
         {/* ---- top bar ---- */}
         <div style={{
-          margin: isMobile ? '-12px -12px 12px' : '-18px -18px 14px',
+          flex: '0 0 auto',
           padding: '8px 14px',
           background: HILO.band,
           display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
@@ -313,7 +456,7 @@ export default function HiLo({ balance, setBalance }) {
             background: HILO.orange, color: COLORS.white,
             fontSize: 12, fontWeight: 900,
           }}>? How to Play?</span>
-          {!isMobile && (
+          {!isMobile && (!isDesk || deskWide) && (
             <span style={{
               position: 'absolute', left: '50%', transform: 'translateX(-50%)',
               padding: '4px 18px', borderRadius: RADIUS.pill,
@@ -342,7 +485,15 @@ export default function HiLo({ balance, setBalance }) {
         </div>
 
         {/* ---- upper region (mobile only — desktop 34px row has it) ---- */}
-        {!isDesk && <div style={{ marginBottom: isMobile ? 16 : 22, position: 'relative', zIndex: 1 }}>{historyStrip}</div>}
+        {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 1 }}>{historyStrip}</div>}
+
+        {/* ---- middle zone: flexes to fill the card, keeps the table group as
+             the vertical visual center; leftover space is absorbed here ---- */}
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
+          display: 'flex', flexDirection: 'column', justifyContent: 'center',
+          padding: isMobile ? '14px 12px' : '16px 18px', boxSizing: 'border-box',
+        }}>
 
         {/* ---- center: hi/lo minis + face card + deck + skip ---- */}
         <div style={{
@@ -370,12 +521,24 @@ export default function HiLo({ balance, setBalance }) {
             </button>
           </div>
 
-          {/* face-up jersey number card — flashes green/red on settle */}
+          {/* face-up jersey number card — flashes green/red on settle. While a
+              deal/skip animation flies in, the slot shows a card back (the
+              committed number stays hidden until the overlay flips). */}
           <div style={{
+            position: 'relative',
             borderRadius: 12, transition: 'box-shadow 0.15s',
             boxShadow: cardFlash === 'win' ? `0 0 18px ${HILO.green}` : cardFlash === 'lose' ? '0 0 18px #e04b3a' : 'none',
           }}>
-            <JerseyCard num={card ?? 9} w={CW} h={CH} />
+            {anim && (anim.kind === 'deal' || anim.kind === 'skip')
+              ? <CardBack w={CW} h={CH} />
+              : <JerseyCard num={card ?? 9} w={CW} h={CH} />}
+            {anim && (
+              <DealAnim key={anim.id} num={anim.num} kind={anim.kind}
+                dx={CW + (isMobile ? 12 : 22)} w={CW} h={CH}
+                onFlip={sfxSnap}
+                onReveal={anim.onReveal}
+                onDone={() => setAnim(a => (a && a.id === anim.id ? null : a))} />
+            )}
           </div>
 
           {/* face-down deck: 3 offset backs + skip button below */}
@@ -401,7 +564,7 @@ export default function HiLo({ balance, setBalance }) {
         {/* ---- choice pills + static payout labels ---- */}
         <div style={{
           display: 'flex', justifyContent: 'center', gap: isMobile ? 12 : 26,
-          marginBottom: 4, position: 'relative', zIndex: 1, flexWrap: 'wrap',
+          position: 'relative', zIndex: 1, flexWrap: 'wrap',
         }}>
           <div style={{ textAlign: 'center' }}>
             <button type="button" onClick={() => guess('low')} disabled={phase !== 'playing' || flipping}
@@ -419,11 +582,14 @@ export default function HiLo({ balance, setBalance }) {
           </div>
         </div>
 
-        {/* ---- bottom bet band ---- */}
+        </div>{/* /middle zone */}
+
+        {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip ---- */}
         <div style={{
-          margin: isMobile ? '12px -12px -12px' : '14px -18px -18px',
+          flex: '0 0 auto',
           padding: '12px 14px',
           background: HILO.band,
+          borderTop: '1px solid rgba(0,0,0,0.25)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
         }}>
