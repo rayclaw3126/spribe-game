@@ -10,6 +10,7 @@ import coverStreakRoll from '../assets/covers/cover-streak-roll.png'
 import coverTeamRoulette from '../assets/covers/cover_miniroulette.png'
 import coverMomentum from '../assets/covers/cover_momentum.png'
 import coverHalfTime from '../assets/covers/cover_halftime.png'
+import coverGoldenBoot from '../assets/covers/cover_goldenboot.png'
 
 const GAMES = [
   { id: 'Aviator',   name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
@@ -24,8 +25,7 @@ const GAMES = [
   { id: 'MiniRoulette', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette },
   { id: 'Momentum', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum },
   { id: 'HalfTime', name: 'Half Time', desc: 'Call the keno sum — over, under, zones!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverHalfTime },
-  // TODO: 换 Codex 专属封面（暂借 Streak Roll 封面占位）
-  { id: 'GoldenBoot', name: 'Golden Boot', desc: 'Ten strikers sprint — call the podium!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll },
+  { id: 'GoldenBoot', name: 'Golden Boot', desc: 'Ten strikers sprint — call the podium!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverGoldenBoot },
 ]
 
 export default function Lobby({ onSelect, balance }) {
