@@ -260,6 +260,10 @@ export default function Dice({ balance, setBalance }) {
   }
 
   // ---------- visual layer (Spribe Dice 1:1, green felt) ----------
+  // Pitch-scene shades — derived from the DICE felt greens (bgOuter #0a5526 /
+  // bgCenter #1c8f45), darkened/lightened in place. Local to this scene only.
+  const TURF_DARK = '#07401c'
+  const TURF_LIGHT = '#0e6a30'
   const navPill = {
     padding: '5px 16px', borderRadius: RADIUS.pill,
     background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
@@ -282,6 +286,9 @@ export default function Dice({ balance, setBalance }) {
   })
   const locked = rolling || bet > balance || bet < 1
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // centered DEMO pill would collide with the How-to-Play pill, so hide it
+  const deskWide = useMediaQuery('(min-width: 1200px)')
 
   // roll-value pill strip — desktop renders it in the 34px skeleton row,
   // mobile keeps it inside the card (never both)
@@ -307,15 +314,68 @@ export default function Dice({ balance, setBalance }) {
         </div>
   )
 
+  // Pitch backdrop — decoration only: absolutely positioned, pointer-events
+  // none, below the content layer. Stripes/glow loop via CSS animation.
+  const pitchScene = (
+    <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <style>{`
+        @keyframes dgTurfDrift { from { background-position-x: 0px; } to { background-position-x: 180px; } }
+        @keyframes dgGlowBreath { 0% { opacity: 0.10; } 50% { opacity: 0.22; } 100% { opacity: 0.10; } }
+        .dgTurf { animation: dgTurfDrift 14s linear infinite; }
+        .dgGlow { animation: dgGlowBreath 6s linear infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .dgTurf, .dgGlow { animation: none; }
+        }
+      `}</style>
+      {/* perspective turf — alternating stripe shades, slow sideways drift */}
+      <div className="dgTurf" style={{
+        position: 'absolute', left: '-25%', right: '-25%', bottom: '-4%', height: '62%',
+        background: `repeating-linear-gradient(90deg, ${TURF_DARK} 0px, ${TURF_DARK} 90px, ${TURF_LIGHT} 90px, ${TURF_LIGHT} 180px)`,
+        transform: 'perspective(520px) rotateX(58deg)',
+        transformOrigin: '50% 100%',
+        opacity: 0.55,
+      }} />
+      {/* white center-circle arc — hugs the card bottom, centered */}
+      <div style={{
+        position: 'absolute', left: '50%', bottom: 0, transform: 'translate(-50%, 55%)',
+        width: 'min(46%, 420px)', aspectRatio: '1 / 1', borderRadius: '50%',
+        border: '2px solid rgba(255,255,255,0.28)',
+      }} />
+      {/* distant goal-frame silhouette + goal line, upper area */}
+      <div style={{
+        position: 'absolute', top: '10%', left: '50%', transform: 'translateX(-50%)',
+        width: 190, height: 56,
+        border: '2px solid rgba(255,255,255,0.24)', borderBottom: 'none',
+        borderRadius: '3px 3px 0 0',
+        background: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.10) 0px, rgba(255,255,255,0.10) 1px, transparent 1px, transparent 14px)',
+      }} />
+      <div style={{
+        position: 'absolute', top: 'calc(10% + 56px)', left: '50%', transform: 'translateX(-50%)',
+        width: 300, height: 2, background: 'rgba(255,255,255,0.20)',
+      }} />
+      {/* stadium light spill — breathes between 0.10 and 0.22 */}
+      <div className="dgGlow" style={{
+        position: 'absolute', top: '-18%', left: '50%', transform: 'translateX(-50%)',
+        width: '80%', height: '55%',
+        background: 'radial-gradient(ellipse at 50% 0%, #ffffff 0%, transparent 65%)',
+        opacity: 0.14,
+      }} />
+    </div>
+  )
+
   const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 50% 30%, ${DICE.bgCenter}, ${DICE.bgOuter})`,
-        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        borderColor: COLORS.border, padding: 0, overflow: 'hidden',
+        position: 'relative',
+        display: 'flex', flexDirection: 'column',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
+        {pitchScene}
+
         {/* ---- top bar ---- */}
         <div style={{
-          margin: isMobile ? '-12px -12px 14px' : '-18px -18px 16px',
+          flex: '0 0 auto', zIndex: 1,
           padding: '8px 14px',
           background: DICE.band,
           display: 'flex', alignItems: 'center', gap: 10, position: 'relative',
@@ -326,7 +386,7 @@ export default function Dice({ balance, setBalance }) {
             background: DICE.orange, color: COLORS.white,
             fontSize: 12, fontWeight: 900,
           }}>? How to Play?</span>
-          {!isMobile && (
+          {!isMobile && (!isDesk || deskWide) && (
             <span style={{
               position: 'absolute', left: '50%', transform: 'translateX(-50%)',
               padding: '4px 18px', borderRadius: RADIUS.pill,
@@ -352,7 +412,16 @@ export default function Dice({ balance, setBalance }) {
         </div>
 
         {/* ---- roll history strip (mobile only — desktop row has it) ---- */}
-        {!isDesk && <div style={{ marginBottom: 14 }}>{historyStrip}</div>}
+        {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 1 }}>{historyStrip}</div>}
+
+        {/* ---- middle zone: flexes to fill the card, keeps the roll area as
+             the vertical visual center; leftover space is absorbed here so no
+             bare felt strip is left above the bet band ---- */}
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
+          display: 'flex', flexDirection: 'column', justifyContent: 'center',
+          padding: isMobile ? '14px 12px' : '18px 18px',
+        }}>
 
         {/* ---- main track panel: big number + double scale bands + ball ---- */}
         <div style={{
@@ -417,7 +486,7 @@ export default function Dice({ balance, setBalance }) {
 
         {/* ---- payout panel: UNDER-side readout + target slider ---- */}
         <div style={{
-          maxWidth: 470, margin: '0 auto 16px',
+          maxWidth: 470, width: '100%', margin: '0 auto', boxSizing: 'border-box',
           background: DICE.panel, border: '1px solid rgba(0,0,0,0.25)',
           borderRadius: 12, overflow: 'hidden',
         }}>
@@ -471,11 +540,15 @@ export default function Dice({ balance, setBalance }) {
           </div>
         </div>
 
-        {/* ---- bottom bet band ---- */}
+        </div>{/* /middle zone */}
+
+        {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip
+             (Breakaway-style bottom bar, styles local to this card) ---- */}
         <div style={{
-          margin: isMobile ? '0 -12px -12px' : '0 -18px -18px',
+          flex: '0 0 auto', position: 'relative', zIndex: 1,
           padding: '12px 14px',
           background: DICE.band,
+          borderTop: '1px solid rgba(0,0,0,0.25)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           gap: 10, flexWrap: 'wrap',
         }}>
