@@ -4,29 +4,22 @@ import { COLORS, RADIUS, HILO } from '../components/shell/tokens'
 import { useIsMobile } from '../hooks/useMediaQuery'
 import bgmUrl from '../assets/covers/bgm.mp3'
 
-// 单HL1: Spribe Hi Lo 1:1 visual replica, pitch-green skin + player rating
-// cards. PURE UI — controls are static/disabled; the existing game logic and
-// audio functions below are kept untouched for HL2 to re-wire.
-
-const POSITIONS = ['GK', 'CB', 'LB', 'RB', 'CM', 'CDM', 'CAM', 'LW', 'RW', 'ST']
-const TEAM_COLORS = ['#DC2626', '#2563EB', '#16A34A', '#CA8A04', '#EA580C', '#0891B2']
-const STREAK_MULTS = [1, 1.5, 2.5, 4, 6.5, 10, 16, 25]
-
-// static fake history — mini jersey cards with ↑/↓ badges (HL2 换真数据)
-const FAKE_HISTORY = [
-  { n: 7, up: true }, { n: 11, up: false }, { n: 12, up: true },
-  { n: 3, up: false }, { n: 9, up: true }, { n: 13, up: true },
-]
-
-function randomCard() {
-  const rank = Math.floor(Math.random() * 13)   // 0..12
-  return {
-    rank,
-    rating: 70 + rank * 2,                        // 70..94, monotonic with rank
-    pos: POSITIONS[Math.floor(Math.random() * POSITIONS.length)],
-    teamColor: TEAM_COLORS[Math.floor(Math.random() * TEAM_COLORS.length)],
-  }
-}
+// 单HL2: Rating Hi-Lo gameplay — 1–13 probability multipliers, skip, streak
+// cashout (Spribe Hi Lo model).
+//
+// 倍数推导: 号码 1–13 均匀抽（同号可重复）。当前明牌 n:
+//   HIGH OR SAME 赢 ⟺ 下一张 m ≥ n，共 14−n 个号码 → P(high) = (14−n)/13
+//   LOW  OR SAME 赢 ⟺ m ≤ n，共 n 个号码       → P(low)  = n/13
+//   倍数 = RTP / P（RTP = 0.97）。边界 n=13: HIGH P=1/13 → 12.61×，
+//   LOW P=1 → 0.97× —— 两钮都正常可押。
+//   猜对倍数累乘（内部保留全精度，显示才 round2），CASHOUT = 注金 × 累乘。
+const RTP = 0.97
+const SKIPS_PER_ROUND = 3   // 每局 skip 限次（可调）
+const round2 = x => Math.round(x * 100) / 100
+const pHigh = n => (14 - n) / 13
+const pLow = n => n / 13
+// uniform 1..13 draw (module-level: event-time randomness only)
+const drawCard = () => 1 + Math.floor(Math.random() * 13)
 
 // flat block-style football jersey: body + sleeves + collar, deep green,
 // big squad number (1–13) on the chest
@@ -78,19 +71,16 @@ export default function HiLo({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
   const [phase, setPhase] = useState('idle')   // idle | playing | done
-  const [currentCard, setCurrentCard] = useState(null)
-  const [, setNextCard] = useState(null)
-  const [, setRevealNext] = useState(false)
+  const [card, setCard] = useState(null)       // current face-up number 1..13
   const [flipping, setFlipping] = useState(false)
-  const [streak, setStreak] = useState(0)
-  const [currentMult, setCurrentMult] = useState(1)
-  const [, setHistory] = useState([])
-  const [, setRoundHistory] = useState([])   // final multiplier per round (0 = bust), newest first
-  const [, setMessage] = useState(null)
-  const [cashedOut, setCashedOut] = useState(false)
+  const [skips, setSkips] = useState(SKIPS_PER_ROUND)
+  const [cum, setCum] = useState(1)            // display copy of the running product
+  const [steps, setSteps] = useState([])       // this round's flips {n, dir, correct}
+  const [cardFlash, setCardFlash] = useState(null)   // 'win' | 'lose' | null
   const [muted, setMuted] = useState(false)
   const [bgmOn, setBgmOn] = useState(false)
 
+  const cumRef = useRef(1)                     // full-precision running product
   const audioRef = useRef({ ctx: null, muted: false })
   const bgmRef = useRef({ audio: null })
   const timersRef = useRef([])
@@ -150,58 +140,62 @@ export default function HiLo({ balance, setBalance }) {
   }, [bgmOn])
   useEffect(() => () => { stopBgm(); timersRef.current.forEach(clearTimeout) }, [])
 
-  // ---------- game (kept for HL2 — not wired to the static UI) ----------
+  // ---------- game ----------
   function startGame() {
-    if (bet > balance || bet < 1) return
+    if (phase === 'playing' || bet > balance || bet < 1) return
+    const first = drawCard()   // draw first — SFX noise randoms must not sit ahead
     ensureAudio()
-    setBalance(b => parseFloat((b - bet).toFixed(2)))
-    setCurrentCard(randomCard())
-    setNextCard(null); setRevealNext(false); setFlipping(false)
-    setStreak(0); setCurrentMult(1); setHistory([]); setMessage(null); setCashedOut(false)
+    setBalance(b => round2(b - bet))
+    cumRef.current = 1
+    setCum(1)
+    setCard(first)
+    setSteps([])
+    setSkips(SKIPS_PER_ROUND)
+    setCardFlash(null)
+    setFlipping(false)
     setPhase('playing')
+    playFlip()
   }
 
-  function guess(direction) {
+  function guess(dir) {   // dir: 'high' | 'low' — both include SAME
     if (phase !== 'playing' || flipping) return
-    ensureAudio()
-    const next = randomCard()
-    const correct = direction === 'higher' ? next.rank > currentCard.rank : next.rank < currentCard.rank
-    setNextCard(next); setRevealNext(true); setFlipping(true)
+    const next = drawCard()
+    const p = dir === 'high' ? pHigh(card) : pLow(card)
+    const correct = dir === 'high' ? next >= card : next <= card
+    setFlipping(true)
     playFlip()
 
     later(() => {
-      setHistory(h => [...h, { card: currentCard, correct }].slice(-8))
-      if (!correct) {
-        playWrong()
-        setMessage({ text: `Wrong! It was ${next.rating}. Streak lost.`, win: false })
-        setRoundHistory(rh => [0, ...rh].slice(0, 20))
-        setStreak(0); setPhase('done'); setFlipping(false)
-      } else {
+      setSteps(s => [...s, { n: next, dir, correct }].slice(-10))
+      setCard(next)
+      if (correct) {
+        cumRef.current *= RTP / p        // full precision; round only at display/settle
+        setCum(cumRef.current)
+        setCardFlash('win')
         playCorrect()
-        const newStreak = streak + 1
-        const mult = STREAK_MULTS[Math.min(newStreak, STREAK_MULTS.length - 1)]
-        setStreak(newStreak); setCurrentMult(mult)
-        if (newStreak >= 7) {
-          const payout = parseFloat((bet * 25).toFixed(2))
-          setBalance(b => parseFloat((b + payout).toFixed(2)))
-          setMessage({ text: `MAX STREAK! 25× — Won $${payout.toFixed(2)}! 🏆`, win: true })
-          setRoundHistory(rh => [25, ...rh].slice(0, 20))
-          setPhase('done'); setFlipping(false)
-        } else {
-          setMessage({ text: `Correct! ${next.rating} — keep going!`, win: true })
-          setCurrentCard(next); setNextCard(null); setRevealNext(false); setFlipping(false)
-        }
+      } else {
+        setCardFlash('lose')
+        setPhase('done')                 // stake already deducted — round over
+        playWrong()
       }
+      setFlipping(false)
+      later(() => setCardFlash(null), 700)
     }, 620)
   }
 
+  function skip() {   // swap the face card, no settle, streak keeps (limited per round)
+    if (phase !== 'playing' || flipping || skips <= 0) return
+    const next = drawCard()
+    setSkips(k => k - 1)
+    setCard(next)
+    playFlip()
+  }
+
+  // single money path: every payout goes through here
   function cashOut() {
-    if (phase !== 'playing' || streak === 0 || cashedOut || flipping) return
-    const payout = parseFloat((bet * currentMult).toFixed(2))
-    setBalance(b => parseFloat((b + payout).toFixed(2)))
-    setCashedOut(true)
-    setMessage({ text: `Cashed out ${currentMult}× — Won $${payout.toFixed(2)}!`, win: true })
-    setRoundHistory(rh => [currentMult, ...rh].slice(0, 20))
+    if (phase !== 'playing' || flipping) return
+    const payout = round2(bet * cumRef.current)
+    setBalance(b => round2(b + payout))
     setPhase('done')
     playCash()
   }
@@ -220,12 +214,12 @@ export default function HiLo({ balance, setBalance }) {
   }
   const CW = isMobile ? 96 : 118
   const CH = isMobile ? 126 : 155
-  const choicePill = bg => ({
+  const choicePill = (bg, locked) => ({
     minWidth: isMobile ? 130 : 156, padding: '9px 0', borderRadius: RADIUS.pill,
     background: bg, color: COLORS.white,
     border: '1px solid rgba(255,255,255,0.45)',
     fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-    cursor: 'not-allowed', opacity: 0.92,
+    cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.55 : 1,
   })
 
   return (
@@ -299,19 +293,20 @@ export default function HiLo({ balance, setBalance }) {
             flex: 1, minWidth: 0, background: HILO.band, borderRadius: 8,
             padding: '6px 8px', display: 'flex', gap: 6, alignItems: 'center', overflow: 'hidden',
           }}>
-            {(isMobile ? FAKE_HISTORY.slice(0, 4) : FAKE_HISTORY).map((h, i) => (
-              <div key={i} style={{
+            {(isMobile ? steps.slice(-4) : steps).map((h, i) => (
+              <div key={steps.length - i} style={{
                 position: 'relative', width: 34, height: 46, borderRadius: 5, flex: '0 0 auto',
-                background: '#ffffff', border: '1px solid rgba(0,0,0,0.3)',
+                background: '#ffffff',
+                border: `2px solid ${h.correct ? HILO.green : '#e04b3a'}`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 <Jersey num={h.n} w={26} />
                 <span style={{
                   position: 'absolute', top: -5, left: -5, width: 15, height: 15, borderRadius: '50%',
-                  background: h.up ? HILO.badgeUp : HILO.badgeDown, color: COLORS.white,
+                  background: h.dir === 'high' ? HILO.badgeUp : HILO.badgeDown, color: COLORS.white,
                   fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   border: '1px solid rgba(255,255,255,0.6)',
-                }}>{h.up ? '↑' : '↓'}</span>
+                }}>{h.dir === 'high' ? '↑' : '↓'}</span>
               </div>
             ))}
           </div>
@@ -321,13 +316,13 @@ export default function HiLo({ balance, setBalance }) {
           }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
               <span style={{ width: 11, height: 15, borderRadius: 2, background: '#ffffff', border: '1px solid rgba(0,0,0,0.4)', display: 'inline-block' }} />
-              6
+              {steps.length}
             </span>
-            <button type="button" disabled onClick={cashOut} style={{
+            <span style={{
               padding: '2px 10px', borderRadius: 4,
-              background: HILO.green, color: '#083a1b', border: 'none',
-              fontSize: 12, fontWeight: 900, cursor: 'not-allowed',
-            }}>27.64x</button>
+              background: HILO.green, color: '#083a1b',
+              fontSize: 12, fontWeight: 900,
+            }}>{round2(cum).toFixed(2)}x</span>
           </div>
         </div>
 
@@ -357,8 +352,13 @@ export default function HiLo({ balance, setBalance }) {
             </button>
           </div>
 
-          {/* face-up jersey number card */}
-          <JerseyCard num={9} w={CW} h={CH} />
+          {/* face-up jersey number card — flashes green/red on settle */}
+          <div style={{
+            borderRadius: 12, transition: 'box-shadow 0.15s',
+            boxShadow: cardFlash === 'win' ? `0 0 18px ${HILO.green}` : cardFlash === 'lose' ? '0 0 18px #e04b3a' : 'none',
+          }}>
+            <JerseyCard num={card ?? 9} w={CW} h={CH} />
+          </div>
 
           {/* face-down deck: 3 offset backs + skip button below */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
@@ -367,12 +367,16 @@ export default function HiLo({ balance, setBalance }) {
               <div style={{ position: 'absolute', left: 5, top: 4 }}><CardBack w={CW} h={CH} /></div>
               <div style={{ position: 'absolute', left: 0, top: 0 }}><CardBack w={CW} h={CH} /></div>
             </div>
-            <button type="button" disabled title="换一张" style={{
-              width: 36, height: 36, borderRadius: RADIUS.pill,
-              background: 'rgba(0,0,0,0.35)', color: COLORS.white,
-              border: '1px solid rgba(255,255,255,0.35)',
-              fontSize: 15, fontWeight: 900, cursor: 'not-allowed',
-            }}>⟲</button>
+            <button type="button" onClick={skip}
+              disabled={phase !== 'playing' || flipping || skips <= 0}
+              title={`换一张（剩 ${skips} 次）`} style={{
+                minWidth: 48, height: 36, borderRadius: RADIUS.pill,
+                background: 'rgba(0,0,0,0.35)', color: COLORS.white,
+                border: '1px solid rgba(255,255,255,0.35)',
+                fontSize: 13, fontWeight: 900,
+                cursor: phase === 'playing' && skips > 0 && !flipping ? 'pointer' : 'not-allowed',
+                opacity: phase === 'playing' && skips > 0 ? 1 : 0.5,
+              }}>⟲ {skips}</button>
           </div>
         </div>
 
@@ -382,12 +386,18 @@ export default function HiLo({ balance, setBalance }) {
           marginBottom: 4, position: 'relative', zIndex: 1, flexWrap: 'wrap',
         }}>
           <div style={{ textAlign: 'center' }}>
-            <button type="button" disabled style={choicePill(HILO.low)}>⌄ LOW OR SAME</button>
-            <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>44.92x</div>
+            <button type="button" onClick={() => guess('low')} disabled={phase !== 'playing' || flipping}
+              style={choicePill(HILO.low, phase !== 'playing' || flipping)}>⌄ LOW OR SAME</button>
+            <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
+              {round2(RTP / pLow(card ?? 9)).toFixed(2)}x
+            </div>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <button type="button" disabled style={choicePill(HILO.high)}>⌃ HIGH OR SAME</button>
-            <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>59.90x</div>
+            <button type="button" onClick={() => guess('high')} disabled={phase !== 'playing' || flipping}
+              style={choicePill(HILO.high, phase !== 'playing' || flipping)}>⌃ HIGH OR SAME</button>
+            <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
+              {round2(RTP / pHigh(card ?? 9)).toFixed(2)}x
+            </div>
           </div>
         </div>
 
@@ -407,6 +417,7 @@ export default function HiLo({ balance, setBalance }) {
             <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
             <input
               value={bet}
+              disabled={phase === 'playing'}
               onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{
                 width: 56, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
@@ -414,7 +425,7 @@ export default function HiLo({ balance, setBalance }) {
               }}
             />
           </div>
-          <button type="button" onClick={() => setBet(b => Math.max(1, b - 10))} style={circleBtn}>−</button>
+          <button type="button" disabled={phase === 'playing'} onClick={() => setBet(b => Math.max(1, b - 10))} style={{ ...circleBtn, opacity: phase === 'playing' ? 0.5 : 1, cursor: phase === 'playing' ? 'not-allowed' : 'pointer' }}>−</button>
           <button type="button" style={{ ...circleBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} title="筹码">
             {/* chip-stack icon drawn in CSS — the ≡ glyph renders as a dash in this font */}
             <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
@@ -423,14 +434,29 @@ export default function HiLo({ balance, setBalance }) {
               <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
             </span>
           </button>
-          <button type="button" onClick={() => setBet(b => b + 10)} style={circleBtn}>+</button>
-          <button type="button" disabled onClick={startGame} style={{
-            minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
-            background: HILO.bet, color: COLORS.white,
-            border: '1px solid rgba(255,255,255,0.35)',
-            fontSize: 14, fontWeight: 900, letterSpacing: 1,
-            cursor: 'not-allowed', opacity: 0.92,
-          }}>▷ BET</button>
+          <button type="button" disabled={phase === 'playing'} onClick={() => setBet(b => b + 10)} style={{ ...circleBtn, opacity: phase === 'playing' ? 0.5 : 1, cursor: phase === 'playing' ? 'not-allowed' : 'pointer' }}>+</button>
+          {phase === 'playing' ? (
+            <button type="button" onClick={cashOut} disabled={flipping} style={{
+              minWidth: isMobile ? 170 : 230, padding: '7px 0', borderRadius: RADIUS.pill,
+              background: HILO.cashout, color: COLORS.white,
+              border: '1px solid rgba(255,255,255,0.4)',
+              fontSize: 13, fontWeight: 900, letterSpacing: 0.5, lineHeight: 1.3,
+              cursor: flipping ? 'not-allowed' : 'pointer', opacity: flipping ? 0.6 : 1,
+              display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
+            }}>
+              <span>CASHOUT</span>
+              <span style={{ fontSize: 12, opacity: 0.92 }}>{round2(bet * cum).toFixed(2)} USD</span>
+            </button>
+          ) : (
+            <button type="button" onClick={startGame} disabled={bet > balance || bet < 1} style={{
+              minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
+              background: HILO.bet, color: COLORS.white,
+              border: '1px solid rgba(255,255,255,0.35)',
+              fontSize: 14, fontWeight: 900, letterSpacing: 1,
+              cursor: bet > balance || bet < 1 ? 'not-allowed' : 'pointer',
+              opacity: bet > balance || bet < 1 ? 0.55 : 1,
+            }}>▷ BET</button>
+          )}
         </div>
       </Panel>
     </GameLayout>

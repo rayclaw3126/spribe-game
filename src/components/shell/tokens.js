@@ -162,6 +162,7 @@ export const HILO = {
   badgeUp: '#e0821a',      // history ↑ badge
   badgeDown: '#2f6fe0',    // history ↓ badge
   outline: 'rgba(0,0,0,0.16)',  // giant corner card line art
+  cashout: '#d63b10',      // CASHOUT button (ref red-orange)
   gold: '#ffd54f',
   orange: '#f28c17',
 }
