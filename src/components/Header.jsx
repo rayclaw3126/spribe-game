@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMediaQuery } from '../hooks/useMediaQuery'
+import { COLORS } from './shell/tokens'
 
 const GAME_NAMES = {
   Aviator: 'Breakaway',
@@ -17,6 +18,8 @@ export default function Header({ balance, onHome, activeGame }) {
   const tabs = ['体育', '滚球', '真人', '电子', '电竞', '彩票']
   const isMobile = useMediaQuery('(max-width: 900px)')
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // BGM master toggle — visual state only for now; audio wiring lands in a later PR.
+  const [bgmUiOn, setBgmUiOn] = useState(false)
 
   return (
     <header style={{
@@ -110,6 +113,35 @@ export default function Header({ balance, onHome, activeGame }) {
             <span>›</span>
             <span style={{ color: '#16c784', fontWeight: 700 }}>{GAME_NAMES[activeGame] || activeGame}</span>
           </div>
+        )}
+
+        {!activeGame && (
+          <button
+            type="button"
+            onClick={() => setBgmUiOn(v => !v)}
+            aria-label={bgmUiOn ? '关闭背景音乐' : '开启背景音乐'}
+            title={bgmUiOn ? '关闭背景音乐' : '开启背景音乐'}
+            style={{
+              width: 34, height: 34, borderRadius: '50%',
+              flex: '0 0 auto', padding: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: bgmUiOn ? COLORS.greenTint : COLORS.surface,
+              border: `1px solid ${bgmUiOn ? COLORS.greenGlow : COLORS.border}`,
+              color: bgmUiOn ? COLORS.green : COLORS.textMuted,
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M11 5 6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none" />
+              {bgmUiOn ? (
+                <>
+                  <path d="M15 8.5a5 5 0 0 1 0 7" />
+                  <path d="M18 5.5a9.5 9.5 0 0 1 0 13" />
+                </>
+              ) : (
+                <line x1="14.5" y1="8.5" x2="21.5" y2="15.5" />
+              )}
+            </svg>
+          </button>
         )}
 
         <div style={{
