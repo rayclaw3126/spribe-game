@@ -5,6 +5,8 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
+import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import ballUrl from '../assets/covers/ball-3d.png'
 
 // 单HL2: Rating Hi-Lo gameplay — 1–13 probability multipliers, skip, streak
 // cashout (Spribe Hi Lo model).
@@ -64,7 +66,9 @@ function CardBack({ w, h }) {
       border: '4px solid #ffffff', boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
-      <span style={{ fontSize: w * 0.3, opacity: 0.55 }}>⚽</span>
+      <img src={ballUrl} alt="" draggable={false} style={{
+        width: w * 0.3, height: w * 0.3, opacity: 0.55, pointerEvents: 'none', display: 'block',
+      }} />
     </div>
   )
 }
@@ -323,17 +327,18 @@ export default function HiLo({ balance, setBalance }) {
           <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
             background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-            color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-            fontSize: 13, cursor: 'pointer',
-            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
-          }}>🎵</button>
+            color: bgmOn ? COLORS.white : COLORS.textMuted,
+            border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><MusicNoteIcon on={bgmOn} /></button>
           <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+            background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
             border: '1px solid rgba(255,255,255,0.25)',
-            fontSize: 14, cursor: 'pointer',
-            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
-          }}>{muted ? '🔇' : '🔊'}</button>
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><SpeakerIcon on={!muted} /></button>
         </div>
 
         {/* ---- upper region (mobile only — desktop 34px row has it) ---- */}
@@ -514,7 +519,7 @@ export default function HiLo({ balance, setBalance }) {
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Rating Hi-Lo" emoji="📊" color={HILO.green}>
+    <GameLayout title="Rating Hi-Lo" color={HILO.green}>
       {gameCard}
     </GameLayout>
   )

@@ -150,7 +150,10 @@ export default function Header({ balance, onHome, activeGame }) {
           padding: '8px 14px',
           border: '1px solid #232c39',
         }}>
-          <span style={{ fontSize: 15 }}>💳</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16c784" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} aria-hidden="true">
+            <rect x="2" y="5" width="20" height="14" rx="3" />
+            <line x1="2" y1="10" x2="22" y2="10" />
+          </svg>
           <span style={{ fontWeight: 800, fontSize: 14, color: '#e8edf2' }}>
             ${balance.toFixed(2)}
           </span>

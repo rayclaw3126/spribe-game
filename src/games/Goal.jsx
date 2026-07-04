@@ -5,6 +5,9 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots, createArenaFx, drawArenaFx } from '../components/shell/arenaFx'
+import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import ballUrl from '../assets/covers/ball-3d.png'
+import cardRedUrl from '../assets/shared/card_red.png'
 import { useBgm } from '../components/shell/bgmManager'
 
 // 单G2: Goal gameplay — Field tiers, column-by-column advance, bomb bust,
@@ -339,17 +342,18 @@ export default function Goal({ balance, setBalance }) {
           <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
             background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-            color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-            fontSize: 13, cursor: 'pointer',
-            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
-          }}>🎵</button>
+            color: bgmOn ? COLORS.white : COLORS.textMuted,
+            border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><MusicNoteIcon on={bgmOn} /></button>
           <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+            background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
             border: '1px solid rgba(255,255,255,0.25)',
-            fontSize: 14, cursor: 'pointer',
-            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
-          }}>{muted ? '🔇' : '🔊'}</button>
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><SpeakerIcon on={!muted} /></button>
         </div>
 
         {/* ---- middle zone: flexes to fill the card, keeps the grid group as
@@ -418,12 +422,21 @@ export default function Goal({ balance, setBalance }) {
               if (done) {
                 if (picks[c] === r) {
                   content = (c === curCol - 1 && !bustInfo)
-                    ? <span style={{ fontSize: isMobile ? 22 : 30, lineHeight: 1 }}>⚽</span>
+                    ? <img src={ballUrl} alt="" draggable={false} style={{
+                        width: isMobile ? 22 : 30, height: isMobile ? 22 : 30,
+                        pointerEvents: 'none', display: 'block',
+                      }} />
                     : <span style={{ width: 14, height: 14, borderRadius: '50%', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
                 }
               } else if (isBustCol) {
-                if (bustInfo.picked === r) content = <span style={{ fontSize: isMobile ? 20 : 27, lineHeight: 1 }}>💥</span>
-                else if (bustInfo.bombs.includes(r)) content = <span style={{ fontSize: isMobile ? 20 : 27, lineHeight: 1 }}>💣</span>
+                // red card = tackled; the picked cell shows it full-strength,
+                // other bomb cells dimmed. 批2 升级为铲球特效图
+                if (bustInfo.picked === r) content = <img src={cardRedUrl} alt="" draggable={false} style={{
+                  height: isMobile ? 24 : 32, width: 'auto', pointerEvents: 'none', display: 'block',
+                }} />
+                else if (bustInfo.bombs.includes(r)) content = <img src={cardRedUrl} alt="" draggable={false} style={{
+                  height: isMobile ? 20 : 26, width: 'auto', opacity: 0.55, pointerEvents: 'none', display: 'block',
+                }} />
               }
               return (
                 <button key={`${r}-${c}`} type="button"
@@ -584,7 +597,7 @@ export default function Goal({ balance, setBalance }) {
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Goal" emoji="🥅" color={GOAL.win}>
+    <GameLayout title="Goal" color={GOAL.win}>
       {gameCard}
     </GameLayout>
   )

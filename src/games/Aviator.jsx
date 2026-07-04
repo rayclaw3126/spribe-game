@@ -9,6 +9,7 @@ import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import ballUrl from '../assets/covers/ball-3d.png'
 import { useBgm } from '../components/shell/bgmManager'
+import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 
 const GREEN = '#16C784'
@@ -670,11 +671,11 @@ export default function Aviator({ balance, setBalance }) {
               background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)',
               color: bgmOn ? GREEN : '#7d8a99',
               border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : '#232c39'}`,
-              fontSize: 16,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             }}
             title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
           >
-            🎵
+            <MusicNoteIcon on={bgmOn} size={18} />
           </button>
 
           {/* Mute — canvas top-right */}
@@ -689,11 +690,11 @@ export default function Aviator({ balance, setBalance }) {
               background: 'rgba(26,34,48,0.85)',
               color: muted ? '#7d8a99' : GREEN,
               border: '1px solid #232c39',
-              fontSize: 18,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             }}
             title={muted ? '取消静音' : '静音'}
           >
-            {muted ? '🔇' : '🔊'}
+            <SpeakerIcon on={!muted} size={18} />
           </button>
 
           {/* Big multiplier + status — centered overlay. Hidden while betting:
@@ -804,7 +805,7 @@ export default function Aviator({ balance, setBalance }) {
 
   // ---- stacked layout (<1024): unchanged mobile arrangement ----
   return (
-    <GameLayout title="Breakaway" emoji="✈️" color={GREEN}>
+    <GameLayout title="Breakaway" color={GREEN}>
       {arena}
       <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bay}</div>
       <div style={{ marginTop: 14 }}>

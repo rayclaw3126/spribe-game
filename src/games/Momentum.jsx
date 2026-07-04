@@ -7,7 +7,9 @@ import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import bayBgUrl from '../assets/shared/bay_bg.png'
+import cardRedUrl from '../assets/shared/card_red.png'
 import { useBgm } from '../components/shell/bgmManager'
+import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 
 // 单T2: Momentum random-walk engine + bet/cashout settlement.
 //
@@ -282,15 +284,16 @@ export default function Momentum({ balance, setBalance }) {
         <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
           position: 'absolute', top: 10, right: 52, zIndex: 3, width: 32, height: 32, borderRadius: '50%',
           background: bgmOn ? 'rgba(53,208,127,0.2)' : 'rgba(0,0,0,0.35)',
-          color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.5 : 0.25})`, fontSize: 13, cursor: 'pointer',
-          fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
-        }}>🎵</button>
+          color: bgmOn ? COLORS.white : COLORS.textMuted,
+          border: `1px solid rgba(255,255,255,${bgmOn ? 0.5 : 0.25})`, cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}><MusicNoteIcon on={bgmOn} size={16} /></button>
         <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
           position: 'absolute', top: 10, right: 12, zIndex: 3, width: 32, height: 32, borderRadius: '50%',
-          background: 'rgba(0,0,0,0.35)', color: COLORS.white,
-          border: '1px solid rgba(255,255,255,0.25)', fontSize: 14, cursor: 'pointer',
-          fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
-        }}>{muted ? '🔇' : '🔊'}</button>
+          background: 'rgba(0,0,0,0.35)', color: muted ? COLORS.textMuted : COLORS.white,
+          border: '1px solid rgba(255,255,255,0.25)', cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}><SpeakerIcon on={!muted} size={16} /></button>
 
         {!isDesk && <div style={{ position: 'relative', zIndex: 1, marginBottom: 10 }}>{historyStrip}</div>}
 
@@ -359,7 +362,10 @@ export default function Momentum({ balance, setBalance }) {
                     ? `linear-gradient(180deg, ${MOMENTUM.barTop}, ${MOMENTUM.green})`
                     : `linear-gradient(180deg, #ff8a75, ${MOMENTUM.red})`,
                 boxShadow: isBustBar ? `0 0 16px ${MOMENTUM.red}` : up ? '0 0 12px rgba(53,208,127,0.35)' : '0 0 10px rgba(224,75,58,0.3)',
-              }}>{isBustBar && <span style={{ position: 'absolute', top: -22, left: '50%', transform: 'translateX(-50%)', fontSize: 16 }}>💥</span>}</span>
+              }}>{isBustBar && <img src={cardRedUrl} alt="" draggable={false} style={{
+                position: 'absolute', top: -24, left: '50%', transform: 'translateX(-50%)',
+                height: 18, width: 'auto', pointerEvents: 'none', display: 'block',
+              }} />}</span>
             )
           })}
         </div>
@@ -444,7 +450,7 @@ export default function Momentum({ balance, setBalance }) {
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="Momentum" emoji="📊" color={MOMENTUM.green}>
+    <GameLayout title="Momentum" color={MOMENTUM.green}>
       {gameCard}
       <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bayPanel}</div>
     </GameLayout>

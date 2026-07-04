@@ -8,6 +8,9 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import ballUrl from '../assets/covers/ball-3d.png'
 import { useBgm } from '../components/shell/bgmManager'
+import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import badgeWinUrl from '../assets/shared/badge_win.png'
+import badgeLoseUrl from '../assets/shared/badge_lose.png'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 
 const COLOR = '#16C784'
@@ -428,8 +431,11 @@ export default function Limbo({ balance, setBalance }) {
           border: `1px solid ${result.win ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
           color: result.win ? '#6EE7B7' : '#FCA5A5',
           fontWeight: 600, fontSize: 12,
+          display: 'flex', alignItems: 'center', gap: 6,
         }}>
-          {result.win ? '🎉' : '💔'} Final {result.mult.toFixed(2)}× — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Below target'}
+          <img src={result.win ? badgeWinUrl : badgeLoseUrl} alt="" draggable={false}
+            style={{ height: 15, width: 'auto', pointerEvents: 'none', display: 'block' }} />
+          <span>Final {result.mult.toFixed(2)}× — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Below target'}</span>
         </div>
       )}
     </div>
@@ -465,12 +471,11 @@ export default function Limbo({ balance, setBalance }) {
             background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)',
             color: bgmOn ? COLOR : '#7d8a99',
             border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : '#232c39'}`,
-            fontSize: 16,
-            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}
           title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
         >
-          🎵
+          <MusicNoteIcon on={bgmOn} size={18} />
         </button>
 
         {/* Mute — game-card top-right */}
@@ -485,12 +490,11 @@ export default function Limbo({ balance, setBalance }) {
             background: 'rgba(26,34,48,0.85)',
             color: muted ? '#7d8a99' : COLOR,
             border: '1px solid #232c39',
-            fontSize: 18,
-            fontFamily: "'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif",
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}
           title={muted ? '取消静音' : '静音'}
         >
-          {muted ? '🔇' : '🔊'}
+          <SpeakerIcon on={!muted} size={18} />
         </button>
 
         <div style={{ position: 'relative', ...(isDesk ? { width: '100%', maxWidth: 720, margin: '0 auto' } : {}) }}>
@@ -588,7 +592,7 @@ export default function Limbo({ balance, setBalance }) {
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Odds Climb" emoji="📈" color={COLOR} sidebar={side}>
+    <GameLayout title="Odds Climb" color={COLOR} sidebar={side}>
       {mainPanel}
       <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bayPanel}</div>
     </GameLayout>
@@ -638,8 +642,11 @@ function SideControls({ bet, target, setTarget, rolling, result, t, winChance, p
           background: result.win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
           border: `1px solid ${result.win ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
           color: result.win ? '#6EE7B7' : '#FCA5A5',
-          fontWeight: 600, fontSize: 14, animation: 'winPop 0.4s ease' }}>
-          {result.win ? '🎉' : '💔'} Final {result.mult.toFixed(2)}× — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Below target'}
+          fontWeight: 600, fontSize: 14, animation: 'winPop 0.4s ease',
+          display: 'flex', alignItems: 'center', gap: 8 }}>
+          <img src={result.win ? badgeWinUrl : badgeLoseUrl} alt="" draggable={false}
+            style={{ height: 18, width: 'auto', pointerEvents: 'none', display: 'block' }} />
+          <span>Final {result.mult.toFixed(2)}× — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Below target'}</span>
         </div>
       )}
     </Panel>

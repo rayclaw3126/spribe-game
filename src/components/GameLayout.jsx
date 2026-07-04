@@ -1,6 +1,8 @@
 import { useIsMobile } from '../hooks/useMediaQuery'
+import badgeWinUrl from '../assets/shared/badge_win.png'
+import badgeLoseUrl from '../assets/shared/badge_lose.png'
 
-export default function GameLayout({ title, emoji, color = '#16C784', children, sidebar }) {
+export default function GameLayout({ title, color = '#16C784', children, sidebar }) {
   const isMobile = useIsMobile()
   return (
     <div style={{
@@ -9,14 +11,8 @@ export default function GameLayout({ title, emoji, color = '#16C784', children, 
     }}>
       {/* Game title bar */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28,
+        display: 'flex', alignItems: 'center', marginBottom: 20,
       }}>
-        <div style={{
-          width: isMobile ? 40 : 48, height: isMobile ? 40 : 48, borderRadius: 14,
-          background: color + '20',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 24,
-        }}>{emoji}</div>
         <h2 style={{
           fontFamily: "'Space Grotesk', sans-serif",
           fontWeight: 800, fontSize: isMobile ? 21 : 26, color: 'var(--text)',
@@ -126,7 +122,8 @@ export function ResultBadge({ result, win, profit }) {
       animation: 'winPop 0.4s ease',
       marginTop: 16,
     }}>
-      <span style={{ fontSize: 22 }}>{win ? '🎉' : '💔'}</span>
+      <img src={win ? badgeWinUrl : badgeLoseUrl} alt="" draggable={false}
+        style={{ height: 26, width: 'auto', pointerEvents: 'none', display: 'block' }} />
       <div>
         <div>{result}</div>
         {profit !== undefined && (

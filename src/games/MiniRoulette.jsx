@@ -7,6 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
+import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 
 // Team Roulette — full bet/spin/settle round on the Spribe-replica board.
 // Standard 12-number mini-roulette paytable:
@@ -394,13 +395,14 @@ export default function MiniRoulette({ balance, setBalance }) {
             style={{
               width: 30, height: 30, borderRadius: RADIUS.pill,
               background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-              color: COLORS.white,
+              color: bgmOn ? COLORS.white : COLORS.textMuted,
               border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-              fontSize: 13, cursor: 'pointer',
+              cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             }}
             title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
           >
-            🎵
+            <MusicNoteIcon on={bgmOn} />
           </button>
           <button
             type="button"
@@ -408,13 +410,14 @@ export default function MiniRoulette({ balance, setBalance }) {
             style={{
               width: 30, height: 30, borderRadius: RADIUS.pill,
               background: 'rgba(0,0,0,0.3)',
-              color: COLORS.white,
+              color: muted ? COLORS.textMuted : COLORS.white,
               border: '1px solid rgba(255,255,255,0.25)',
-              fontSize: 14, cursor: 'pointer',
+              cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             }}
             title={muted ? '取消静音' : '静音'}
           >
-            {muted ? '🔇' : '🔊'}
+            <SpeakerIcon on={!muted} />
           </button>
         </div>
 
@@ -618,7 +621,7 @@ export default function MiniRoulette({ balance, setBalance }) {
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="Team Roulette" emoji="⚽" color={COLORS.green}>
+    <GameLayout title="Team Roulette" color={COLORS.green}>
       {gameCard}
     </GameLayout>
   )

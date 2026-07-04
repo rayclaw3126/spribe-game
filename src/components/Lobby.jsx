@@ -11,17 +11,17 @@ import coverTeamRoulette from '../assets/covers/cover_miniroulette.png'
 import coverMomentum from '../assets/covers/cover_momentum.png'
 
 const GAMES = [
-  { id: 'Aviator',  emoji: '🏃',  name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
-  { id: 'Dice',     emoji: '⚽',  name: 'Total Goals',     desc: 'Over or under? Call the score.',   color: '#2563EB', bg: 'linear-gradient(135deg, #DBEAFE, #BFDBFE)', cover: coverTotalGoals },
-  { id: 'Plinko',   emoji: '⚽',  name: 'Free Kick',   desc: 'Curl it into the zone!',         color: '#D97706', bg: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', cover: coverFreeKick },
-  { id: 'Goal',     emoji: '⚽',  name: 'Goal',     desc: 'Score past the goalkeeper!',      color: '#059669', bg: 'linear-gradient(135deg, #D1FAE5, #A7F3D0)', cover: coverGoal },
-  { id: 'HiLo',     emoji: '📊',  name: 'Rating Hi-Lo',    desc: 'Higher or lower rating?',    color: '#DC2626', bg: 'linear-gradient(135deg, #FEE2E2, #FECACA)', cover: coverRatingHiLo },
-  { id: 'Mines',    emoji: '👟',  name: 'Dribble',    desc: 'Beat defenders, avoid tackles.', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverDribble },
-  { id: 'Keno',     emoji: '⚽',  name: 'Team Keno', desc: 'Pick the winning teams!',        color: '#DB2777', bg: 'linear-gradient(135deg, #FCE7F3, #FBCFE8)', cover: coverTeamKeno },
-  { id: 'Limbo',    emoji: '📈',  name: 'Odds Climb', desc: 'Set target odds, kick off to climb!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverOddsClimb },
-  { id: 'StreakRoll', emoji: '🎯', name: 'Streak Roll', desc: 'Roll the strip, stop on a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll },
-  { id: 'MiniRoulette', emoji: '⚽', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette },
-  { id: 'Momentum', emoji: '📊', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum },
+  { id: 'Aviator',   name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
+  { id: 'Dice',      name: 'Total Goals',     desc: 'Over or under? Call the score.',   color: '#2563EB', bg: 'linear-gradient(135deg, #DBEAFE, #BFDBFE)', cover: coverTotalGoals },
+  { id: 'Plinko',    name: 'Free Kick',   desc: 'Curl it into the zone!',         color: '#D97706', bg: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', cover: coverFreeKick },
+  { id: 'Goal',      name: 'Goal',     desc: 'Score past the goalkeeper!',      color: '#059669', bg: 'linear-gradient(135deg, #D1FAE5, #A7F3D0)', cover: coverGoal },
+  { id: 'HiLo',      name: 'Rating Hi-Lo',    desc: 'Higher or lower rating?',    color: '#DC2626', bg: 'linear-gradient(135deg, #FEE2E2, #FECACA)', cover: coverRatingHiLo },
+  { id: 'Mines',     name: 'Dribble',    desc: 'Beat defenders, avoid tackles.', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverDribble },
+  { id: 'Keno',      name: 'Team Keno', desc: 'Pick the winning teams!',        color: '#DB2777', bg: 'linear-gradient(135deg, #FCE7F3, #FBCFE8)', cover: coverTeamKeno },
+  { id: 'Limbo',     name: 'Odds Climb', desc: 'Set target odds, kick off to climb!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverOddsClimb },
+  { id: 'StreakRoll', name: 'Streak Roll', desc: 'Roll the strip, stop on a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll },
+  { id: 'MiniRoulette', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette },
+  { id: 'Momentum', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum },
 ]
 
 export default function Lobby({ onSelect, balance }) {
@@ -81,7 +81,7 @@ export default function Lobby({ onSelect, balance }) {
 
       {/* Footer note */}
       <p style={{ textAlign: 'center', color: '#7d8a99', fontSize: 13, marginTop: 42 }}>
-        🎮 All games use demo balance — play responsibly and have fun!
+        All games use demo balance — play responsibly and have fun!
       </p>
     </div>
   )
@@ -132,9 +132,7 @@ function GameCard({ game, index, onSelect }) {
           color: '#16c784',
           fontSize: 26,
           marginBottom: 16,
-        }}>
-          {game.emoji}
-        </div>
+        }} />
       )}
       <div style={{ fontWeight: 800, fontSize: 17, color: '#e8edf2', marginBottom: 6 }}>
         {game.name}

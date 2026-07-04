@@ -7,6 +7,7 @@ import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
+import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 
 const CELL_W = 64          // portrait cards, ref-proportioned (≈64×84)
 const CARD_H = 84
@@ -389,15 +390,18 @@ export default function StreakRoll({ balance, setBalance }) {
           <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
             background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-            color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-            fontSize: 13, cursor: 'pointer',
-          }}>🎵</button>
+            color: bgmOn ? COLORS.white : COLORS.textMuted,
+            border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><MusicNoteIcon on={bgmOn} /></button>
           <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+            background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
             border: '1px solid rgba(255,255,255,0.25)',
-            fontSize: 14, cursor: 'pointer',
-          }}>{muted ? '🔇' : '🔊'}</button>
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><SpeakerIcon on={!muted} /></button>
         </div>
 
         <style>{`
@@ -630,7 +634,7 @@ export default function StreakRoll({ balance, setBalance }) {
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Streak Roll" emoji="🎯" color={HOTLINE.blue}>
+    <GameLayout title="Streak Roll" color={HOTLINE.blue}>
       {gameCard}
     </GameLayout>
   )

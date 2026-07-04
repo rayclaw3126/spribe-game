@@ -6,6 +6,7 @@ import WinToast from '../components/shell/WinToast'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
+import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 
 // 单D2: Total Goals gameplay — 0–100 roll, UNDER/OVER settle, RTP-calibrated
 // payouts. Slider sets the target line (4.00–96.00); the roll is uniform on
@@ -400,15 +401,18 @@ export default function Dice({ balance, setBalance }) {
           <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
             background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-            color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-            fontSize: 13, cursor: 'pointer',
-          }}>🎵</button>
+            color: bgmOn ? COLORS.white : COLORS.textMuted,
+            border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><MusicNoteIcon on={bgmOn} /></button>
           <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+            background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
             border: '1px solid rgba(255,255,255,0.25)',
-            fontSize: 14, cursor: 'pointer',
-          }}>{muted ? '🔇' : '🔊'}</button>
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><SpeakerIcon on={!muted} /></button>
         </div>
 
         {/* ---- roll history strip (mobile only — desktop row has it) ---- */}
@@ -636,7 +640,7 @@ export default function Dice({ balance, setBalance }) {
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Total Goals" emoji="⚽" color={DICE.teal}>
+    <GameLayout title="Total Goals" color={DICE.teal}>
       {gameCard}
     </GameLayout>
   )

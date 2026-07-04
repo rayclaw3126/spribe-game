@@ -6,6 +6,9 @@ import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
+import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import ballUrl from '../assets/covers/ball-3d.png'
+import badgeWinUrl from '../assets/shared/badge_win.png'
 
 // Team Keno — Spribe-aligned rules: 36-ball pool, pick up to 10, 10 balls
 // drawn per round. Visual layer is the 1:1 Spribe replica from K1.
@@ -157,7 +160,7 @@ export default function Keno({ balance, setBalance }) {
     const matchStr = `${matches}/${picks} matched`
     setMessage(
       payout > 0
-        ? { text: `${matchStr} — ${mult}× — Won $${payout.toFixed(2)}! 🎉`, win: true }
+        ? { text: `${matchStr} — ${mult}× — Won $${payout.toFixed(2)}!`, win: true }
         : { text: `${matchStr} — No win this time`, win: false }
     )
     setRoundHistory(h => [mult, ...h].slice(0, 20))
@@ -272,15 +275,18 @@ export default function Keno({ balance, setBalance }) {
           <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
             background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-            color: COLORS.white, border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-            fontSize: 13, cursor: 'pointer',
-          }}>🎵</button>
+            color: bgmOn ? COLORS.white : COLORS.textMuted,
+            border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><MusicNoteIcon on={bgmOn} /></button>
           <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
             width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+            background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
             border: '1px solid rgba(255,255,255,0.25)',
-            fontSize: 14, cursor: 'pointer',
-          }}>{muted ? '🔇' : '🔊'}</button>
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><SpeakerIcon on={!muted} /></button>
         </div>
 
         {/* ---- board ---- */}
@@ -298,7 +304,12 @@ export default function Keno({ balance, setBalance }) {
             color: message ? (message.win ? KENO.green : '#ff8a80') : KENO.green,
             fontSize: 12, fontWeight: 800, letterSpacing: 1.5,
           }}>
-            {phase === 'drawing' ? 'DRAWING…' : message ? message.text : 'PICK NUMBERS FOR START'}
+            {phase === 'drawing' ? 'DRAWING…' : message ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle' }}>
+                {message.win && <img src={badgeWinUrl} alt="" draggable={false} style={{ height: 16, width: 'auto', pointerEvents: 'none', display: 'block' }} />}
+                {message.text}
+              </span>
+            ) : 'PICK NUMBERS FOR START'}
           </div>
 
           <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 14 }}>
@@ -309,7 +320,9 @@ export default function Keno({ balance, setBalance }) {
                 return (
                   <button key={n} type="button" onClick={() => toggleNumber(n)} style={ballStyle(sel, drawnSet.has(n))}>
                     <span>{n}</span>
-                    {sel && <span style={{ fontSize: 8, lineHeight: 1, marginTop: 1 }}>⚽</span>}
+                    {sel && <img src={ballUrl} alt="" draggable={false} style={{
+                      width: 9, height: 9, marginTop: 1, pointerEvents: 'none', display: 'block',
+                    }} />}
                   </button>
                 )
               })}
@@ -443,7 +456,7 @@ export default function Keno({ balance, setBalance }) {
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Team Keno" emoji="⚽" color={KENO.pill}>
+    <GameLayout title="Team Keno" color={KENO.pill}>
       {gameCard}
     </GameLayout>
   )
