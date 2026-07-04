@@ -225,6 +225,29 @@ export const MOMENTUM = {
   badgeBg: 'rgba(0,0,0,0.35)',
 }
 
+// Half Time — 快乐8和值盘 midnight-pitch palette. Derived, no invented hues:
+// bg pair = MOMENTUM.bgTop/bgBot family darkened one step; band/cell from
+// MINES.band/cellTop darkened; accents reuse shared greens/gold/red/blue.
+export const HALFTIME = {
+  bgOuter: '#07130c',      // = MOMENTUM.bgBot (midnight pitch edge)
+  bgCenter: '#123424',     // MOMENTUM.bgTop #12301d nudged toward MINES green
+  band: '#08240f',         // MINES.band #0b3d1c darkened (top/bottom bars)
+  strip: 'rgba(0,0,0,0.32)',   // round bar / bead-road backing
+  cellTop: '#12351f',      // bet cell gradient — MINES.cellTop family, darker
+  cellBot: '#0a1f12',
+  cellBorder: 'rgba(255,255,255,0.16)',
+  sel: '#35d07f',          // selected outline (shared green)
+  selTint: 'rgba(53,208,127,0.16)',
+  odds: '#ffd54f',         // odds gold (shared)
+  over: '#e2564a',         // O beads / over accents (shared crash red)
+  under: '#2f6fe0',        // U beads / under accents (shared blue)
+  draw: '#f28c17',         // draw / neutral accent (shared orange)
+  text: '#e8f5ec',         // = MOMENTUM.text
+  dim: 'rgba(255,255,255,0.55)',
+  gold: '#ffd54f',
+  orange: '#f28c17',
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',

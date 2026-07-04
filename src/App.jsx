@@ -12,8 +12,9 @@ import Limbo from './games/Limbo'
 import StreakRoll from './games/StreakRoll'
 import MiniRoulette from './games/MiniRoulette'
 import Momentum from './games/Momentum'
+import HalfTime from './games/HalfTime'
 
-const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum }
+const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum, HalfTime }
 
 export default function App() {
   const [balance, setBalance] = useState(1000)

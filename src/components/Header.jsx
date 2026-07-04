@@ -13,6 +13,7 @@ const GAME_NAMES = {
   Keno: 'Team Keno',
   Limbo: 'Odds Climb',
   StreakRoll: 'Streak Roll',
+  HalfTime: 'Half Time',
 }
 
 export default function Header({ balance, onHome, activeGame }) {
