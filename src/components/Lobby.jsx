@@ -26,6 +26,8 @@ const GAMES = [
   { id: 'StreakRoll', emoji: '🎯', name: 'Streak Roll', desc: 'Roll the strip, stop on a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll },
   { id: 'Tower', emoji: '🏆', name: 'Striker Tower', desc: 'Climb the tower, dodge defenders!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStrikerTower },
   { id: 'MiniRoulette', emoji: '⚽', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette },
+  // Momentum 封面暂用 Odds Climb 图占位（Codex 封面后补）
+  { id: 'Momentum', emoji: '📊', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverOddsClimb },
 ]
 
 export default function Lobby({ onSelect, balance }) {

@@ -14,8 +14,9 @@ import PenaltyWheel from './games/PenaltyWheel'
 import StreakRoll from './games/StreakRoll'
 import Tower from './games/Tower'
 import MiniRoulette from './games/MiniRoulette'
+import Momentum from './games/Momentum'
 
-const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Balloon, Limbo, PenaltyWheel, StreakRoll, Tower, MiniRoulette }
+const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Balloon, Limbo, PenaltyWheel, StreakRoll, Tower, MiniRoulette, Momentum }
 
 export default function App() {
   const [balance, setBalance] = useState(1000)

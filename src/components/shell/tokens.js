@@ -210,6 +210,21 @@ export const MINES = {
   gold: '#ffd54f',
 }
 
+// Momentum — Spribe Trader reskinned dark-purple→midnight pitch; sampled
+// from the Trader how-to-play shots (purple accents → green).
+export const MOMENTUM = {
+  bgTop: '#12301d',        // midnight pitch gradient top
+  bgBot: '#07130c',        // …bottom
+  grid: 'rgba(53,208,127,0.09)',   // turf grid lines
+  green: '#35d07f',        // big multiplier + rising bars
+  barTop: '#5ee8a0',       // bar gradient head
+  red: '#e04b3a',          // sub-1x history pills
+  greyPill: 'rgba(255,255,255,0.35)',   // 0.00x busted pill
+  text: '#e8f5ec',
+  dim: 'rgba(255,255,255,0.55)',
+  badgeBg: 'rgba(0,0,0,0.35)',
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',
