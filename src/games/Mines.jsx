@@ -52,6 +52,23 @@ function Football({ size = 22, tone = '#ffffff', ink = '#3a2c00' }) {
     </svg>
   )
 }
+// pentagon-football line art — backdrop watermark (stroke = existing 0.18 black)
+function BallLineArt({ size }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" style={{ display: 'block' }}>
+      <circle cx="50" cy="50" r="48" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
+      <polygon points="50,32 66,44 60,63 40,63 34,44" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
+      <g stroke="rgba(0,0,0,0.18)" strokeWidth="2" fill="none">
+        <line x1="50" y1="32" x2="50" y2="4" />
+        <line x1="66" y1="44" x2="90" y2="34" />
+        <line x1="60" y1="63" x2="74" y2="86" />
+        <line x1="40" y1="63" x2="26" y2="86" />
+        <line x1="34" y1="44" x2="10" y2="34" />
+      </g>
+    </svg>
+  )
+}
+
 export default function Mines({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
@@ -242,37 +259,78 @@ export default function Mines({ balance, setBalance }) {
   })
 
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // centered DEMO pill would collide with the How-to-Play pill, so hide it
+  const deskWide = useMediaQuery('(min-width: 1200px)')
+
+  // Turf-sheen backdrop (方案C): a skewed light band sweeps the card, the
+  // football line-art watermarks slowly roll + drift (near big, far small),
+  // the tactics rings stay put with a gentle opacity breath. Line color is
+  // the existing watermark rgba(0,0,0,0.18); layer depth via wrapper opacity.
+  const pitchGlow = (
+    <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <style>{`
+        @keyframes mnSweep {
+          from { transform: skewX(-18deg) translateX(-40%); }
+          to   { transform: skewX(-18deg) translateX(360%); }
+        }
+        @keyframes mnSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes mnDrift {
+          0%   { transform: translate(0px, 0px); }
+          50%  { transform: translate(14px, -10px); }
+          100% { transform: translate(0px, 0px); }
+        }
+        @keyframes mnRingBreath { 0% { opacity: 0.55; } 50% { opacity: 1; } 100% { opacity: 0.55; } }
+        @media (prefers-reduced-motion: reduce) {
+          .mnAnim { animation: none !important; }
+        }
+      `}</style>
+      {/* sweeping turf sheen — one full pass every 11s, uniform speed */}
+      <div className="mnAnim" style={{
+        position: 'absolute', top: '-20%', left: 0, width: '42%', height: '140%',
+        background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent)',
+        animation: 'mnSweep 11s linear infinite',
+      }} />
+      {/* rolling football line-art watermarks */}
+      {[
+        { size: 290, pos: { left: -120, top: '34%' },   op: 1,    spin: '75s', dur: '15s', del: '0s' },
+        { size: 170, pos: { right: '5%', top: '5%' },   op: 0.75, spin: '90s', dur: '13s', del: '-4s' },
+        { size: 110, pos: { left: '16%', bottom: '9%' }, op: 0.55, spin: '62s', dur: '17s', del: '-9s' },
+      ].map((b, i) => (
+        <div key={i} style={{ position: 'absolute', ...b.pos, opacity: b.op }}>
+          <div className="mnAnim" style={{ animation: `mnDrift ${b.dur} ease-in-out infinite`, animationDelay: b.del }}>
+            <div className="mnAnim" style={{ animation: `mnSpin ${b.spin} linear infinite` }}>
+              <BallLineArt size={b.size} />
+            </div>
+          </div>
+        </div>
+      ))}
+      {/* tactics-board rings — static position, opacity breath only */}
+      <svg className="mnAnim" width="260" height="260" viewBox="0 0 100 100" style={{
+        position: 'absolute', right: -100, top: '40%',
+        animation: 'mnRingBreath 12s ease-in-out infinite',
+      }}>
+        <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
+        <circle cx="50" cy="50" r="26" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
+        <circle cx="50" cy="50" r="4" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
+        <line x1="4" y1="50" x2="96" y2="50" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
+      </svg>
+    </div>
+  )
 
   const gameCard = (
       <Panel style={{
         background: `radial-gradient(circle at 42% 30%, ${MINES.bgCenter}, ${MINES.bgOuter})`,
-        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        borderColor: COLORS.border, padding: 0, overflow: 'hidden',
         position: 'relative',
+        display: 'flex', flexDirection: 'column',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
-        {/* left giant football line art (ref star position) */}
-        <svg width="290" height="290" viewBox="0 0 100 100" style={{ position: 'absolute', left: -120, top: '34%', pointerEvents: 'none' }}>
-          <circle cx="50" cy="50" r="48" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
-          <polygon points="50,32 66,44 60,63 40,63 34,44" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
-          <g stroke="rgba(0,0,0,0.18)" strokeWidth="2" fill="none">
-            <line x1="50" y1="32" x2="50" y2="4" />
-            <line x1="66" y1="44" x2="90" y2="34" />
-            <line x1="60" y1="63" x2="74" y2="86" />
-            <line x1="40" y1="63" x2="26" y2="86" />
-            <line x1="34" y1="44" x2="10" y2="34" />
-          </g>
-        </svg>
-        {/* right tactics-board rings line art (ref snowflake position) */}
-        <svg width="260" height="260" viewBox="0 0 100 100" style={{ position: 'absolute', right: -100, top: '40%', pointerEvents: 'none' }}>
-          <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
-          <circle cx="50" cy="50" r="26" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
-          <circle cx="50" cy="50" r="4" fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
-          <line x1="4" y1="50" x2="96" y2="50" stroke="rgba(0,0,0,0.18)" strokeWidth="2" />
-        </svg>
+        {pitchGlow}
 
         {/* ---- top bar ---- */}
         <div style={{
-          margin: isMobile ? '-12px -12px 12px' : '-18px -18px 14px',
+          flex: '0 0 auto',
           padding: '8px 14px',
           background: MINES.band,
           display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 1,
@@ -283,7 +341,7 @@ export default function Mines({ balance, setBalance }) {
             background: MINES.orange, color: COLORS.white,
             fontSize: 12, fontWeight: 900,
           }}>? How to Play?</span>
-          {!isMobile && (
+          {!isMobile && (!isDesk || deskWide) && (
             <span style={{
               position: 'absolute', left: '50%', transform: 'translateX(-50%)',
               padding: '4px 18px', borderRadius: RADIUS.pill,
@@ -310,6 +368,14 @@ export default function Mines({ balance, setBalance }) {
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}><SpeakerIcon on={!muted} /></button>
         </div>
+
+        {/* ---- middle zone: flexes to fill the card, keeps the grid group as
+             the vertical visual center; leftover space is absorbed here ---- */}
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
+          display: 'flex', flexDirection: 'column', justifyContent: 'center',
+          padding: isMobile ? '12px 12px' : '14px 18px', boxSizing: 'border-box',
+        }}>
 
         {/* ---- second row: Defenders selector + Next + progress strip ---- */}
         <div style={{ width: isMobile ? '100%' : 420, maxWidth: '100%', margin: '0 auto 10px', position: 'relative', zIndex: 3 }}>
@@ -388,7 +454,7 @@ export default function Mines({ balance, setBalance }) {
 
         {/* ---- RANDOM / refresh / Auto Game row ---- */}
         <div style={{
-          width: isMobile ? '100%' : 420, maxWidth: '100%', margin: '0 auto 14px',
+          width: isMobile ? '100%' : 420, maxWidth: '100%', margin: '0 auto',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
           position: 'relative', zIndex: 1,
         }}>
@@ -425,11 +491,14 @@ export default function Mines({ balance, setBalance }) {
           </button>
         </div>
 
-        {/* ---- bottom bet band ---- */}
+        </div>{/* /middle zone */}
+
+        {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip ---- */}
         <div style={{
-          margin: isMobile ? '0 -12px -12px' : '0 -18px -18px',
+          flex: '0 0 auto',
           padding: '12px 14px',
           background: MINES.band,
+          borderTop: '1px solid rgba(0,0,0,0.25)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
         }}>
