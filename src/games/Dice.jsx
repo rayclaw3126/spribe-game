@@ -1,308 +1,300 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
-import RoundHistoryBar from '../components/shell/RoundHistoryBar'
-import BetPanel from '../components/shell/BetPanel'
-import bgmUrl from '../assets/covers/bgm.mp3'
+import { COLORS, RADIUS, DICE } from '../components/shell/tokens'
+import { useIsMobile } from '../hooks/useMediaQuery'
 
-const COLOR = '#16C784'
+// 单D1: Spribe Dice 1:1 visual replica, purple→green, PURE UI — no betting,
+// no rolling, no settlement. Mechanic upgrade locked in: 0–100 roll (old 1–6
+// die UI scrapped). Slider is draggable for display linkage only.
 
-// Which of the 3×3 grid cells (1..9) hold pips for each die value.
-const PIPS = {
-  1: [5],
-  2: [1, 9],
-  3: [1, 5, 9],
-  4: [1, 3, 7, 9],
-  5: [1, 3, 5, 7, 9],
-  6: [1, 3, 4, 6, 7, 9],
-}
+// D2 校准占位: chance ∈ [4, 96] %, payout = RTP·100/chance with RTP = 0.97.
+// Thresholds shown on the buttons/bands: under = chance, over = 100 − chance.
+const RTP = 0.97
+const CHANCE_MIN = 4
+const CHANCE_MAX = 96
+const round2 = x => Math.round(x * 100) / 100
 
-function Die({ value, size = 120 }) {
-  const pips = PIPS[value] || []
-  const dot = Math.round(size * 0.16)
+// static fake history — display only, real rounds land here in D2
+const FAKE_HISTORY = ['63.95', '12.40', '50.01', '77.31', '5.62', '94.20', '48.50', '66.01', '23.77', '81.09']
+
+// slider handle: a small football drawn in SVG (white ball, black patches)
+function BallHandle({ size = 24 }) {
   return (
-    <div style={{
-      width: size, height: size, borderRadius: size * 0.16,
-      background: '#f4f8ff', border: '1px solid #d3dae6',
-      boxShadow: '0 8px 24px rgba(0,0,0,0.45), inset 0 -4px 10px rgba(0,0,0,0.08)',
-      display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(3, 1fr)',
-      padding: size * 0.12, boxSizing: 'border-box', gap: size * 0.04,
-    }}>
-      {Array.from({ length: 9 }).map((_, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {pips.includes(i + 1) && (
-            <div style={{ width: dot, height: dot, borderRadius: '50%', background: '#1a2230' }} />
-          )}
-        </div>
-      ))}
-    </div>
+    <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: 'block' }}>
+      <circle cx="12" cy="12" r="11" fill="#f5f7fa" stroke="rgba(0,0,0,0.45)" strokeWidth="1" />
+      <polygon points="12,8 15.4,10.5 14.1,14.4 9.9,14.4 8.6,10.5" fill="#16181d" />
+      <g stroke="#16181d" strokeWidth="1.1" fill="none">
+        <line x1="12" y1="8" x2="12" y2="3.4" />
+        <line x1="15.4" y1="10.5" x2="19.6" y2="8.9" />
+        <line x1="14.1" y1="14.4" x2="16.8" y2="18.2" />
+        <line x1="9.9" y1="14.4" x2="7.2" y2="18.2" />
+        <line x1="8.6" y1="10.5" x2="4.4" y2="8.9" />
+      </g>
+    </svg>
   )
 }
 
-export default function Dice({ balance, setBalance }) {
+export default function Dice({ balance }) {
+  const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
-  const [target, setTarget] = useState(4)   // total goals OVER this
-  const [mode, setMode] = useState('over')  // over | under
-  const [rolling, setRolling] = useState(false)
-  const [result, setResult] = useState(null)
-  const [roundHistory, setRoundHistory] = useState([])   // won multiplier per round (0 = loss), newest first
-  const [face, setFace] = useState(4)
-  const [muted, setMuted] = useState(false)
-  const [bgmOn, setBgmOn] = useState(false)
+  const [chance, setChance] = useState(48.5)   // slider-driven display state
+  const trackRef = useRef(null)
+  const dragRef = useRef(false)
 
-  const audioRef = useRef({ ctx: null, muted: false })
-  const bgmRef = useRef({ audio: null })
+  const payout = round2(RTP * 100 / chance)
+  const underT = round2(chance)          // UNDER wins below this
+  const overT = round2(100 - chance)     // OVER wins above this
+  const sliderPos = (CHANCE_MAX - chance) / (CHANCE_MAX - CHANCE_MIN)   // right = higher payout
 
-  const winChance = mode === 'over' ? (6 - target) / 6 : target / 6
-  const multiplier = parseFloat((0.97 / winChance).toFixed(2))
+  function chanceFromPointer(e) {
+    const r = trackRef.current.getBoundingClientRect()
+    const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+    setChance(round2(CHANCE_MAX - p * (CHANCE_MAX - CHANCE_MIN)))
+  }
+  function onDown(e) { dragRef.current = true; e.currentTarget.setPointerCapture(e.pointerId); chanceFromPointer(e) }
+  function onMove(e) { if (dragRef.current) chanceFromPointer(e) }
+  function onUp() { dragRef.current = false }
 
-  useEffect(() => { audioRef.current.muted = muted }, [muted])
-
-  // ---------- SFX (Web Audio synth) ----------
-  function ensureAudio() {
-    if (audioRef.current.ctx) return audioRef.current.ctx
-    const AC = window.AudioContext || window.webkitAudioContext
-    if (!AC) return null
-    const ctx = new AC()
-    if (ctx.state === 'suspended') ctx.resume()
-    audioRef.current.ctx = ctx
-    return ctx
+  // ---------- visual layer (Spribe Dice 1:1, green felt) ----------
+  const navPill = {
+    padding: '5px 16px', borderRadius: RADIUS.pill,
+    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
+    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
   }
-  // Dice rattle: a quick short click each tumble frame.
-  function playTick() {
-    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
-    const t = ctx.currentTime
-    const o = ctx.createOscillator(); const g = ctx.createGain()
-    o.type = 'square'; o.frequency.value = 420 + Math.random() * 520
-    g.gain.setValueAtTime(0.0001, t)
-    g.gain.exponentialRampToValueAtTime(0.05, t + 0.004)
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05)
-    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.06)
+  const circleBtn = {
+    width: 30, height: 30, borderRadius: RADIUS.pill,
+    background: DICE.band, color: COLORS.white,
+    border: '1px solid rgba(255,255,255,0.35)',
+    fontSize: 15, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
   }
-  // Landing "啪": punchy thump + short noise.
-  function playLand() {
-    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
-    const t = ctx.currentTime
-    const o = ctx.createOscillator(); const g = ctx.createGain()
-    o.type = 'sine'; o.frequency.setValueAtTime(230, t); o.frequency.exponentialRampToValueAtTime(90, t + 0.12)
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16)
-    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.18)
-    const nb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.05), ctx.sampleRate)
-    const d = nb.getChannelData(0)
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length)
-    const ns = ctx.createBufferSource(); ns.buffer = nb
-    const ng = ctx.createGain(); ng.gain.value = 0.09
-    ns.connect(ng); ng.connect(ctx.destination); ns.start(t); ns.stop(t + 0.05)
-  }
-  // Win: bright rising arpeggio.
-  function playWin() {
-    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
-    const t = ctx.currentTime
-    ;[660, 880, 1180].forEach((f, i) => {
-      const o = ctx.createOscillator(); const g = ctx.createGain()
-      o.type = 'sine'; o.frequency.value = f
-      const s = t + i * 0.09
-      g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.13, s + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.28)
-      o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.3)
-    })
-  }
-  // Lose: low descending tone.
-  function playLose() {
-    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
-    const t = ctx.currentTime
-    const o = ctx.createOscillator(); const g = ctx.createGain()
-    o.type = 'triangle'; o.frequency.setValueAtTime(330, t); o.frequency.exponentialRampToValueAtTime(120, t + 0.4)
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.14, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45)
-    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.47)
-  }
-
-  // ---------- BGM (real mp3, HTML Audio) — mirrors Breakaway ----------
-  function startBgm() {
-    if (bgmRef.current.audio) return
-    const audio = new Audio(bgmUrl)
-    audio.loop = true
-    audio.volume = 0.25
-    audio.play().catch(() => {})
-    bgmRef.current.audio = audio
-  }
-  function stopBgm() {
-    if (bgmRef.current.audio) {
-      bgmRef.current.audio.pause()
-      bgmRef.current.audio = null
-    }
-  }
-  useEffect(() => {
-    if (bgmOn) startBgm()
-    else stopBgm()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgmOn])
-  useEffect(() => () => stopBgm(), [])
-
-  function roll() {
-    if (bet > balance || rolling || bet < 1) return
-    ensureAudio()
-    setBalance(b => parseFloat((b - bet).toFixed(2)))
-    setResult(null)
-    setRolling(true)
-
-    let ticks = 0
-    const id = setInterval(() => {
-      setFace(1 + Math.floor(Math.random() * 6))
-      playTick()
-      ticks++
-      if (ticks >= 14) {
-        clearInterval(id)
-        const r = 1 + Math.floor(Math.random() * 6)
-        setFace(r)
-        playLand()
-        const win = mode === 'over' ? r > target : r <= target
-        const profit = win ? parseFloat((bet * multiplier).toFixed(2)) : 0
-        if (win) setBalance(b => parseFloat((b + profit).toFixed(2)))
-        setResult({ roll: r, win, profit })
-        setRoundHistory(h => [win ? multiplier : 0, ...h].slice(0, 20))
-        setRolling(false)
-        setTimeout(() => (win ? playWin() : playLose()), 150)
-      }
-    }, 60)
-  }
+  // ribbed scale band: colored teeth over the dark panel
+  const ribbed = color => `repeating-linear-gradient(90deg, ${color} 0px, ${color} 3px, rgba(0,0,0,0.5) 3px, rgba(0,0,0,0.5) 5px)`
+  const bigBtn = bg => ({
+    minWidth: 118, padding: '8px 0', borderRadius: RADIUS.pill,
+    background: bg, color: COLORS.white,
+    border: '1px solid rgba(255,255,255,0.3)',
+    fontSize: 13, fontWeight: 900, letterSpacing: 0.5,
+    cursor: 'not-allowed', opacity: 0.92,
+    display: 'inline-flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.3,
+  })
 
   return (
-    <GameLayout title="Total Goals" emoji="⚽" color={COLOR}
-      sidebar={
-        <Panel>
-          {/* Mode toggle */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
-              Bet Type
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {['over', 'under'].map(m => (
-                <button key={m} onClick={() => !rolling && setMode(m)} disabled={rolling} style={{
-                  flex: 1, padding: '9px', borderRadius: 10, fontSize: 13, fontWeight: 700,
-                  border: `2px solid ${mode === m ? COLOR : 'var(--border)'}`,
-                  background: mode === m ? COLOR + '15' : 'var(--surface)',
-                  color: mode === m ? COLOR : 'var(--text2)',
-                  cursor: rolling ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.15s',
-                }}>
-                  {m === 'over' ? '⬆️ Over' : '⬇️ Under'}
-                </button>
+    <GameLayout title="Total Goals" emoji="⚽" color={DICE.teal}>
+      <Panel style={{
+        background: `radial-gradient(circle at 50% 30%, ${DICE.bgCenter}, ${DICE.bgOuter})`,
+        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+      }}>
+        {/* ---- top bar ---- */}
+        <div style={{
+          margin: isMobile ? '-12px -12px 14px' : '-18px -18px 16px',
+          padding: '8px 14px',
+          background: DICE.band,
+          display: 'flex', alignItems: 'center', gap: 10, position: 'relative',
+        }}>
+          <span style={navPill}>TOTAL GOALS ▾</span>
+          <span style={{
+            padding: '5px 14px', borderRadius: RADIUS.pill,
+            background: DICE.orange, color: COLORS.white,
+            fontSize: 12, fontWeight: 900,
+          }}>? How to Play?</span>
+          {!isMobile && (
+            <span style={{
+              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+              padding: '4px 18px', borderRadius: RADIUS.pill,
+              border: `1px solid ${DICE.gold}`, color: DICE.gold,
+              fontSize: 11, fontWeight: 900, letterSpacing: 2,
+            }}>DEMO MODE</span>
+          )}
+          <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
+            {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
+          </span>
+        </div>
+
+        {/* ---- roll history strip: value pills + refresh pill ---- */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: DICE.band, borderRadius: RADIUS.pill,
+          padding: '4px 6px', marginBottom: 14, overflow: 'hidden',
+        }}>
+          {(isMobile ? FAKE_HISTORY.slice(0, 5) : FAKE_HISTORY).map((v, i) => (
+            <span key={i} style={{
+              padding: '3px 10px', borderRadius: RADIUS.pill,
+              background: 'rgba(0,0,0,0.3)', color: COLORS.white,
+              fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
+            }}>{v}</span>
+          ))}
+          <span style={{
+            marginLeft: 'auto', padding: '3px 12px', borderRadius: RADIUS.pill,
+            background: DICE.circleBlue, color: COLORS.white,
+            fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
+          }}>⟲ ˅</span>
+        </div>
+
+        {/* ---- main track panel: big number + double scale bands + ball ---- */}
+        <div style={{
+          background: DICE.panel, border: '1px solid rgba(0,0,0,0.25)',
+          borderRadius: 12, padding: isMobile ? '14px 12px 10px' : '18px 16px 12px',
+          marginBottom: 16,
+        }}>
+          <div style={{
+            textAlign: 'center', color: COLORS.white,
+            fontSize: isMobile ? 44 : 60, fontWeight: 900, lineHeight: 1.1,
+            fontFamily: "'Space Grotesk', sans-serif", marginBottom: 12,
+          }}>50.00</div>
+
+          <div style={{ position: 'relative', padding: '10px 0 4px' }}>
+            {/* tick marks above the bands */}
+            {[0, 25, 50, 75, 100].map(p => (
+              <span key={p} style={{
+                position: 'absolute', top: 0, left: `${p}%`, width: 1, height: 7,
+                background: 'rgba(255,255,255,0.65)',
+                transform: p === 0 ? 'none' : p === 100 ? 'translateX(-1px)' : 'translateX(-0.5px)',
+              }} />
+            ))}
+
+            {/* upper band — OVER: red lose 0→overT, blue win overT→100 */}
+            <div style={{ display: 'flex', height: 28, borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: `${overT}%`, background: ribbed(DICE.red) }} />
+              <div style={{ flex: 1, background: ribbed(DICE.blue) }} />
+            </div>
+
+            {/* golden landing ball (static at 50 until D2 wires the roll) */}
+            <div style={{
+              position: 'relative', height: 10, margin: '−2px 0',
+            }}>
+              <div style={{
+                position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+                width: 26, height: 26, borderRadius: '50%',
+                background: DICE.ball, border: '2px solid rgba(0,0,0,0.35)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+              }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#16181d' }} />
+              </div>
+            </div>
+
+            {/* lower band — UNDER: teal win 0→underT, red lose underT→100 */}
+            <div style={{ display: 'flex', height: 28, borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: `${underT}%`, background: ribbed(DICE.teal) }} />
+              <div style={{ flex: 1, background: ribbed(DICE.red) }} />
+            </div>
+
+            {/* scale labels */}
+            <div style={{ position: 'relative', height: 16, marginTop: 4 }}>
+              {[0, 25, 50, 75, 100].map(p => (
+                <span key={p} style={{
+                  position: 'absolute', left: `${p}%`, top: 0,
+                  transform: p === 0 ? 'none' : p === 100 ? 'translateX(-100%)' : 'translateX(-50%)',
+                  color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: 700,
+                }}>{p}</span>
               ))}
             </div>
           </div>
+        </div>
 
-          {/* Target slider */}
-          <div style={{ marginBottom: 20 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
-              {mode === 'over' ? `Goals Over: ${target}` : `Goals Under or Equal: ${target}`}
-            </label>
-            <input type="range" min={1} max={5} value={target}
-              onChange={e => setTarget(Number(e.target.value))}
-              disabled={rolling}
-              style={{ width: '100%', accentColor: COLOR }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
-              <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
-            </div>
-          </div>
-
-          {/* Stats */}
-          <div style={{
-            background: 'var(--bg2)', borderRadius: 12, padding: '12px 14px',
-            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16,
-          }}>
-            <StatBox label="Win Chance" value={`${(winChance * 100).toFixed(0)}%`} color={COLOR} />
-            <StatBox label="Multiplier" value={`${multiplier}×`} color='#10B981' />
-            <StatBox label="Payout" value={`$${(bet * multiplier).toFixed(2)}`} color='#F59E0B' />
-            <StatBox label="Profit" value={`$${(bet * multiplier - bet).toFixed(2)}`} color='#16C784' />
-          </div>
-
-          {result && (
-            <div style={{
-              marginTop: 14, padding: '12px 16px', borderRadius: 12,
-              background: result.win ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-              color: result.win ? '#6EE7B7' : '#FCA5A5',
-              fontWeight: 600, fontSize: 14, animation: 'winPop 0.4s ease',
-            }}>
-              {result.win ? '🎉' : '💔'} {result.roll} goals — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Better luck next time!'}
-            </div>
-          )}
-        </Panel>
-      }
-    >
-      <Panel style={{ position: 'relative', minHeight: 320, display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
-        <RoundHistoryBar rounds={roundHistory} />
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-        {/* Audio toggles — top-right corner (🎵 music + 🔊 sfx, independent) */}
-        <button type="button" onClick={() => setBgmOn(v => !v)} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-          position: 'absolute', top: 12, right: 60, width: 40, height: 40, borderRadius: '50%',
-          background: bgmOn ? 'rgba(22,199,132,0.18)' : 'var(--bg2)',
-          color: bgmOn ? COLOR : 'var(--text3)',
-          border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : 'var(--border)'}`, fontSize: 16, cursor: 'pointer',
-        }}>🎵</button>
-        <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-          position: 'absolute', top: 12, right: 12, width: 40, height: 40, borderRadius: '50%',
-          background: 'var(--bg2)', color: muted ? 'var(--text3)' : COLOR,
-          border: '1px solid var(--border)', fontSize: 18, cursor: 'pointer',
-        }}>{muted ? '🔇' : '🔊'}</button>
-
-        {/* Big die */}
+        {/* ---- payout panel: payout box + slider + potential win / chance ---- */}
         <div style={{
-          marginBottom: 28,
-          animation: rolling ? 'spin 0.3s linear infinite' : result ? 'winPop 0.4s ease' : 'float 3s ease-in-out infinite',
-          filter: result?.win ? 'drop-shadow(0 0 22px rgba(16,185,129,0.5))' : 'none',
+          maxWidth: 470, margin: '0 auto 16px',
+          background: DICE.panel, border: '1px solid rgba(0,0,0,0.25)',
+          borderRadius: 12, overflow: 'hidden',
         }}>
-          <Die value={face} size={120} />
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 14,
+            padding: isMobile ? '10px 12px' : '12px 16px',
+          }}>
+            <div style={{ flex: '0 0 auto', textAlign: 'center' }}>
+              <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Payout</div>
+              <div style={{
+                padding: '6px 18px', borderRadius: 8,
+                background: DICE.panelDeep, border: '1px solid rgba(255,255,255,0.3)',
+                color: COLORS.white, fontSize: 15, fontWeight: 900,
+              }}>{payout.toFixed(2)} x</div>
+            </div>
+            {/* slider — football handle, pure display linkage */}
+            <div
+              ref={trackRef}
+              onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
+              style={{ flex: 1, position: 'relative', height: 34, cursor: 'pointer', touchAction: 'none' }}
+            >
+              <div style={{
+                position: 'absolute', left: 0, right: 0, top: 12, height: 6,
+                borderRadius: 3, background: DICE.panelDeep, border: '1px solid rgba(0,0,0,0.4)',
+              }} />
+              {/* ruler teeth under the track */}
+              <div style={{
+                position: 'absolute', left: 2, right: 2, top: 22, height: 5,
+                background: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.35) 0px, rgba(255,255,255,0.35) 1px, transparent 1px, transparent 7px)',
+              }} />
+              <div style={{
+                position: 'absolute', top: 3, left: `${sliderPos * 100}%`,
+                transform: 'translateX(-50%)', pointerEvents: 'none',
+              }}>
+                <BallHandle size={24} />
+              </div>
+            </div>
+          </div>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '8px 16px', background: DICE.panelDeep,
+          }}>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, fontWeight: 700 }}>
+              Potential win: <span style={{ color: COLORS.white, fontSize: 13, fontWeight: 900 }}>{(bet * payout).toFixed(2)} USD</span>
+            </span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, fontWeight: 700 }}>
+              Chance: <span style={{ color: COLORS.white, fontSize: 13, fontWeight: 900 }}>{chance.toFixed(2)} %</span>
+            </span>
+          </div>
         </div>
 
-        {/* Winning numbers row */}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-          {[1, 2, 3, 4, 5, 6].map(n => {
-            const isWin = mode === 'over' ? n > target : n <= target
-            return (
-              <div key={n} style={{
-                width: 40, height: 40, borderRadius: 10, fontSize: 16, fontWeight: 800,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: isWin ? COLOR + '20' : 'var(--bg2)',
-                border: `2px solid ${isWin ? COLOR : 'var(--border)'}`,
-                color: isWin ? COLOR : 'var(--text3)',
-                transition: 'all 0.2s',
-              }}>{n}</div>
-            )
-          })}
-        </div>
-
-        <p style={{ color: 'var(--text3)', fontSize: 14, textAlign: 'center' }}>
-          {mode === 'over'
-            ? `Win when total goals OVER ${target} (${[...Array(6)].map((_, i) => i + 1).filter(n => n > target).join(', ')})`
-            : `Win when total goals ${target} OR UNDER (${[...Array(6)].map((_, i) => i + 1).filter(n => n <= target).join(', ')})`
-          }
-        </p>
+        {/* ---- bottom bet band (controls disabled — logic lands in D2) ---- */}
+        <div style={{
+          margin: isMobile ? '0 -12px -12px' : '0 -18px -18px',
+          padding: '12px 14px',
+          background: DICE.band,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: 10, flexWrap: 'wrap',
+        }}>
+          <div style={{
+            padding: '5px 18px', borderRadius: RADIUS.pill,
+            background: DICE.panelDeep, border: '1px solid rgba(255,255,255,0.3)',
+            textAlign: 'center', lineHeight: 1.2,
+          }}>
+            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <input
+              value={bet}
+              onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              style={{
+                width: 56, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
+                color: COLORS.white, fontSize: 15, fontWeight: 900,
+              }}
+            />
+          </div>
+          <button type="button" onClick={() => setBet(b => Math.max(1, b - 10))} style={circleBtn}>−</button>
+          <button type="button" style={{ ...circleBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} title="筹码">
+            {/* chip-stack icon drawn in CSS — the ≡ glyph renders as a dash in this font */}
+            <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+              <span style={{ width: 12, height: 2.5, borderRadius: 2, background: COLORS.white, display: 'block' }} />
+            </span>
+          </button>
+          <button type="button" onClick={() => setBet(b => b + 10)} style={circleBtn}>+</button>
+          <button type="button" disabled title="刷新" style={{
+            width: 40, height: 40, borderRadius: RADIUS.pill,
+            background: DICE.circleBlue, color: COLORS.white,
+            border: '1px solid rgba(255,255,255,0.4)',
+            fontSize: 17, fontWeight: 900, cursor: 'not-allowed',
+          }}>⟳</button>
+          <button type="button" disabled style={bigBtn(DICE.btnUnder)}>
+            <span>UNDER</span>
+            <span style={{ fontSize: 12, opacity: 0.9 }}>↓ {underT.toFixed(2)}</span>
+          </button>
+          <button type="button" disabled style={bigBtn(DICE.btnOver)}>
+            <span>OVER</span>
+            <span style={{ fontSize: 12, opacity: 0.9 }}>↑ {overT.toFixed(2)}</span>
+          </button>
         </div>
       </Panel>
-
-      {/* Shell bet bay — one-shot mode, no Auto tab */}
-      <div style={{ maxWidth: 480, margin: '14px auto 0' }}>
-        <BetPanel
-          bet={bet}
-          setBet={setBet}
-          max={balance}
-          inputDisabled={rolling}
-          chipDisabled={rolling}
-          showAuto={false}
-          button={rolling
-            ? { state: 'waiting', label: '结算中…', disabled: true }
-            : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: roll, disabled: bet > balance || bet < 1 }}
-        />
-      </div>
     </GameLayout>
-  )
-}
-
-function StatBox({ label, value, color }) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 15, fontWeight: 700, color }}>{value}</div>
-    </div>
   )
 }

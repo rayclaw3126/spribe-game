@@ -107,6 +107,25 @@ export const HOTLINE = {
   orange: '#f28c17',
 }
 
+// Total Goals — Spribe Dice reskinned purple→green (felt family shared with
+// ROULETTE); red lose-band / teal under-win / blue over-win semantics kept.
+export const DICE = {
+  bgOuter: '#0a5526',    // felt edge
+  bgCenter: '#1c8f45',   // felt center
+  band: '#0b4d23',       // top/bottom bars
+  panel: '#093f1d',      // track + payout panels (darker felt)
+  panelDeep: '#072f16',  // payout sub-strip / inset boxes
+  red: '#c41836',        // lose segments on both scale bands
+  blue: '#25b1f0',       // OVER win segment (top band, right)
+  teal: '#2ee08c',       // UNDER win segment (bottom band, left)
+  ball: '#ffb300',       // golden landing ball
+  gold: '#ffd54f',       // DEMO pill
+  orange: '#f28c17',     // How to Play pill
+  btnUnder: '#18a54a',   // ROLL UNDER big button
+  btnOver: '#1976d2',    // ROLL OVER big button
+  circleBlue: '#2f6fe0', // round refresh button
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',
