@@ -6,8 +6,8 @@ import BetFeed from '../components/shell/BetFeed'
 import BetButton from '../components/shell/BetButton'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
 import cardRedImg from '../assets/shared/card_red.png'
 import cardYellowImg from '../assets/shared/card_yellow.png'
 
@@ -246,13 +246,10 @@ function DrawStage({ round, sfx, children }) {
   return children(animViewAt(round, order, reduced ? Infinity : tRef.current))
 }
 
-export default function LineUp({ balance, setBalance }) {
+export default function LineUp({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk 模式被 400px feed 收窄——1200 以下居中 DEMO 与 How-to-Play 相撞，隐藏
-  const deskWide = useMediaQuery('(min-width: 1200px)')
-  const [bgmOn, toggleBgm] = useBgm()
-  const [muted, setMuted] = useState(false)
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -442,11 +439,6 @@ export default function LineUp({ balance, setBalance }) {
   const shown = gamePhase === 'settled' && cur ? cur : lastRound   // 开奖区当前展示局
 
   // ---- 样式件（选中=金框；命中=绿框绿晕，同 Derby 惯例）----
-  const navPill = {
-    padding: '5px 16px', borderRadius: RADIUS.pill,
-    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
-    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-  }
   // settled 相位三档：命中+有注 = 绿框绿晕+注码chip；命中+无注 = 绿框亮灯弱一档
   // （无晕）；未命中压暗（有注留金框认输）。A/B 双视图同走这一份，key 同源天然同步；
   // betting/drawing（无 result）恢复常态不残留
@@ -489,33 +481,27 @@ export default function LineUp({ balance, setBalance }) {
     }}>${betsPlaced.get(key)}</span>
   )
 
-  // ---- 场馆头行（desk 走骨架 34px 历史行位）----
+  // ---- 相位 chip（原样式传入 GameTopBar；场馆行并入顶栏）----
   const phaseChip = betting
     ? { text: `⏱ 00:${String(Math.ceil(countdown / 2)).padStart(2, '0')}`, c: DERBY.sel }
     : gamePhase === 'drawing'
       ? { text: '开奖中…', c: DERBY.orange }
       : { text: result && result.winTotal > 0 ? `+$${result.winTotal.toFixed(2)}` : '已开奖', c: DERBY.gold }
-  const roundBar = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isDesk ? 0 : isMobile ? '10px 12px 0' : '12px 18px 0',
-      padding: '4px 10px', borderRadius: RADIUS.pill,
-      background: DERBY.strip,
-      display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-    }}>
-      <span style={{
-        color: DERBY.gold, fontSize: 12, fontWeight: 900, letterSpacing: 1.5,
-        fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap',
-      }}>{VENUE}</span>
-      <span style={{ color: DERBY.dim, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>
-        #{ROUND_DATE}-{String(roundNo).padStart(3, '0')}
-      </span>
-      <span style={{
-        padding: '2px 10px', borderRadius: RADIUS.pill,
-        background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-        color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>{phaseChip.text}</span>
-    </div>
+  const phaseChipNode = (
+    <span style={{
+      padding: '2px 10px', borderRadius: RADIUS.pill,
+      background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
+    }}>{phaseChip.text}</span>
+  )
+  const topBar = (
+    <GameTopBar
+      gameName="LINE UP"
+      venue={VENUE}
+      roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
+      phaseChip={phaseChipNode}
+      onBack={onBack}
+    />
   )
 
   // ---- ① 开奖区：5×5 号码牌（行标 + 行和）+ 统计带（主客计数/TOTAL/高低）----
@@ -841,49 +827,8 @@ export default function LineUp({ balance, setBalance }) {
     }}>
       <style>{`.luCell:hover:not(:disabled) { filter: brightness(1.2); }`}</style>
 
-      {/* ---- top bar ---- */}
-      <div style={{
-        flex: '0 0 auto',
-        padding: '8px 14px',
-        background: DERBY.band,
-        display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
-      }}>
-        <span style={navPill}>LINE UP ▾</span>
-        <span style={{
-          padding: '5px 14px', borderRadius: RADIUS.pill,
-          background: DERBY.orange, color: COLORS.white,
-          fontSize: 12, fontWeight: 900,
-        }}>? How to Play?</span>
-        {!isMobile && (!isDesk || deskWide) && (
-          <span style={{
-            position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-            padding: '4px 18px', borderRadius: RADIUS.pill,
-            border: `1px solid ${DERBY.gold}`, color: DERBY.gold,
-            fontSize: 11, fontWeight: 900, letterSpacing: 2,
-          }}>DEMO MODE</span>
-        )}
-        <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
-          {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
-        </span>
-        <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-          width: 30, height: 30, borderRadius: RADIUS.pill,
-          background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-          color: bgmOn ? COLORS.white : COLORS.textMuted,
-          border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-          cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><MusicNoteIcon on={bgmOn} /></button>
-        <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-          width: 30, height: 30, borderRadius: RADIUS.pill,
-          background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
-          border: '1px solid rgba(255,255,255,0.25)',
-          cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><SpeakerIcon on={!muted} /></button>
-      </div>
-
-      {/* 场馆头行 — desk 在骨架历史行，卡内只在 <1024 渲染 */}
-      {!isDesk && roundBar}
+      {/* ---- top bar（共享件：名 pill 下拉 + 场馆/期号/相位 + ?/音频钮）---- */}
+      {topBar}
 
       {/* ① 开奖区（顶部）：5×5 号码牌 + 统计带 */}
       {drawZone}
@@ -1002,11 +947,8 @@ export default function LineUp({ balance, setBalance }) {
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />
           </div>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
-            {/* 场馆头行占骨架历史行位（34px 行惯例） */}
-            <div style={{ flex: '0 0 auto', minHeight: LAYOUT.historyH }}>
-              {roundBar}
-            </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12 }}>
+            {/* 场馆行已并入 GameTopBar，骨架历史行位撤除 */}
             <div style={{ flex: 1, minHeight: 0 }}>
               {gameCard}
             </div>

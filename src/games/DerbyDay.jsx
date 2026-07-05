@@ -6,8 +6,8 @@ import BetFeed from '../components/shell/BetFeed'
 import BetButton from '../components/shell/BetButton'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
 import trophyImg from '../assets/shared/trophy.png'
 
 // Derby Day — 主客对抗 Keno（主队 10 珠 vs 客队 10 珠比和值），第 16 卡。
@@ -467,13 +467,10 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
   return <canvas ref={canvasRef} style={{ width: '100%', height: innerH, display: 'block' }} aria-hidden />
 }
 
-export default function DerbyDay({ balance, setBalance }) {
+export default function DerbyDay({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk 模式被 400px feed 收窄——1200 以下居中 DEMO 与 How-to-Play 相撞，隐藏
-  const deskWide = useMediaQuery('(min-width: 1200px)')
-  const [bgmOn, toggleBgm] = useBgm()
-  const [muted, setMuted] = useState(false)
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -700,11 +697,6 @@ export default function DerbyDay({ balance, setBalance }) {
   const ftVisible = cur && gamePhase === 'settled'
 
   // ---- 样式件（选中=金框；命中=绿框绿晕；push=灰金框）----
-  const navPill = {
-    padding: '5px 16px', borderRadius: RADIUS.pill,
-    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
-    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-  }
   // 三件套之三 · 胜侧泛光（settled，FT 平局整套不出）：胜方 H/A 键队色呼吸光、
   // 败方压暗；灯色由 DERBY.home/away 现组 hexA 派生，键集仅四个 H/A 键
   const hexA = (hex, a) => {
@@ -772,27 +764,21 @@ export default function DerbyDay({ balance, setBalance }) {
         : gamePhase === 'ft_draw'
           ? { text: '全场开奖中…', c: DERBY.orange }
           : { text: result && result.winTotal + result.refundTotal > 0 ? `+$${(result.winTotal + result.refundTotal).toFixed(2)}` : '已开奖', c: DERBY.gold }
-  const roundBar = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isDesk ? 0 : isMobile ? '10px 12px 0' : '12px 18px 0',
-      padding: '4px 10px', borderRadius: RADIUS.pill,
-      background: DERBY.strip,
-      display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-    }}>
-      <span style={{
-        color: DERBY.gold, fontSize: 12, fontWeight: 900, letterSpacing: 1.5,
-        fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap',
-      }}>{VENUE}</span>
-      <span style={{ color: DERBY.dim, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>
-        #{ROUND_DATE}-{String(roundNo).padStart(3, '0')}
-      </span>
-      <span style={{
-        padding: '2px 10px', borderRadius: RADIUS.pill,
-        background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-        color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>{phaseChip.text}</span>
-    </div>
+  const phaseChipNode = (
+    <span style={{
+      padding: '2px 10px', borderRadius: RADIUS.pill,
+      background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
+    }}>{phaseChip.text}</span>
+  )
+  const topBar = (
+    <GameTopBar
+      gameName="DERBY DAY"
+      venue={VENUE}
+      roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
+      phaseChip={phaseChipNode}
+      onBack={onBack}
+    />
   )
 
   // ---- ① 开奖区：半场块（前 10 珠）+ 全场块（后 10 珠 + 累计和值） ----
@@ -1056,49 +1042,8 @@ export default function DerbyDay({ balance, setBalance }) {
         }
       `}</style>
 
-      {/* ---- top bar ---- */}
-      <div style={{
-        flex: '0 0 auto',
-        padding: '8px 14px',
-        background: DERBY.band,
-        display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
-      }}>
-        <span style={navPill}>DERBY DAY ▾</span>
-        <span style={{
-          padding: '5px 14px', borderRadius: RADIUS.pill,
-          background: DERBY.orange, color: COLORS.white,
-          fontSize: 12, fontWeight: 900,
-        }}>? How to Play?</span>
-        {!isMobile && (!isDesk || deskWide) && (
-          <span style={{
-            position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-            padding: '4px 18px', borderRadius: RADIUS.pill,
-            border: `1px solid ${DERBY.gold}`, color: DERBY.gold,
-            fontSize: 11, fontWeight: 900, letterSpacing: 2,
-          }}>DEMO MODE</span>
-        )}
-        <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
-          {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
-        </span>
-        <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-          width: 30, height: 30, borderRadius: RADIUS.pill,
-          background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-          color: bgmOn ? COLORS.white : COLORS.textMuted,
-          border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-          cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><MusicNoteIcon on={bgmOn} /></button>
-        <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-          width: 30, height: 30, borderRadius: RADIUS.pill,
-          background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
-          border: '1px solid rgba(255,255,255,0.25)',
-          cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><SpeakerIcon on={!muted} /></button>
-      </div>
-
-      {/* 场馆头行 — desk 在骨架历史行，卡内只在 <1024 渲染 */}
-      {!isDesk && roundBar}
+      {/* ---- top bar（共享件：名 pill 下拉 + 场馆/期号/相位 + ?/音频钮）---- */}
+      {topBar}
 
       {/* ① 开奖区（顶部）：全场块 + 半场块（按相位亮真珠） */}
       {drawZone}
@@ -1220,11 +1165,8 @@ export default function DerbyDay({ balance, setBalance }) {
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />
           </div>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
-            {/* 场馆头行占骨架历史行位（34px 行惯例） */}
-            <div style={{ flex: '0 0 auto', minHeight: LAYOUT.historyH }}>
-              {roundBar}
-            </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12 }}>
+            {/* 场馆行已并入 GameTopBar，骨架历史行位撤除 */}
             <div style={{ flex: 1, minHeight: 0 }}>
               {gameCard}
             </div>

@@ -46,3 +46,24 @@ export function useBgm() {
   const bgmOn = useSyncExternalStore(subscribe, isOn)
   return [bgmOn, toggle]
 }
+
+// ---- 全局 SFX 静音（各游戏 WebAudio 合成器共用一个开关，跨游戏同步；同 useBgm 模式）----
+let sfxMuted = false
+const sfxListeners = new Set()
+
+export function isSfxMuted() { return sfxMuted }
+
+export function toggleSfxMuted() {
+  sfxMuted = !sfxMuted
+  sfxListeners.forEach(cb => cb())
+}
+
+export function subscribeSfx(cb) {
+  sfxListeners.add(cb)
+  return () => sfxListeners.delete(cb)
+}
+
+export function useSfxMuted() {
+  const muted = useSyncExternalStore(subscribeSfx, isSfxMuted)
+  return [muted, toggleSfxMuted]
+}
