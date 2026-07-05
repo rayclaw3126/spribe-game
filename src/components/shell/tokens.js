@@ -322,6 +322,26 @@ export const HATTRICK = {
   orange: '#f28c17',
 }
 
+// Derby Day — 主客对抗 Keno：绿 chrome 四键取 KENO 终态；主队蓝按单据定
+// #2563c9 系；客队红取共享 crash red（=NUMBERUP.hi/HATTRICK.big 同源）；
+// 深灰格底取共享 COLORS.surface；金/绿/橙取共享。纯新增零删改
+export const DERBY = {
+  bgOuter: '#0d4a20',   // = KENO.bgOuter（球场绿边缘）
+  bgCenter: '#28814a',  // = KENO.bgCenter（球场绿中央）
+  band: '#0b3d1c',      // = KENO.band（顶栏/注栏）
+  ctrl: '#11582a',      // = KENO.ctrl（chrome 控件底）
+  strip: 'rgba(0,0,0,0.32)',
+  home: '#2563c9',      // 主队蓝（单据定 #2563c9 系）
+  away: '#e2564a',      // 客队红（共享 crash red）
+  grey: '#1a2230',      // 深灰格底（= COLORS.surface）
+  gold: '#ffd54f',      // 共享金 — 选中金框/赔率字/TOTAL 胶囊
+  sel: '#35d07f',       // 确认绿（共享）
+  selTint: 'rgba(53,208,127,0.16)',
+  text: '#e8f5ec',
+  dim: 'rgba(255,255,255,0.55)',
+  orange: '#f28c17',
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',

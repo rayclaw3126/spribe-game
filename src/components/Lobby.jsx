@@ -30,6 +30,8 @@ const GAMES = [
   { id: 'NumberUp', name: 'Number Up', desc: 'Pick the shirt number — 00 to 99!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverNumberUp },
   // TODO: 换 Codex 专属封面（暂借 Total Goals 封面占位）
   { id: 'HatTrick', name: 'Hat Trick', desc: 'Three dice — call the total!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals },
+  // TODO: 换 Codex 专属封面（暂借 Team Keno 封面占位）
+  { id: 'DerbyDay', name: 'Derby Day', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamKeno },
 ]
 
 export default function Lobby({ onSelect, balance }) {
