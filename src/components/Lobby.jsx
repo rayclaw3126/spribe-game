@@ -12,6 +12,7 @@ import coverMomentum from '../assets/covers/cover_momentum.png'
 import coverHalfTime from '../assets/covers/cover_halftime.png'
 import coverGoldenBoot from '../assets/covers/cover_goldenboot.png'
 import coverNumberUp from '../assets/covers/cover_numberup.png'
+import coverDerbyDay from '../assets/covers/cover_derbyday.png'
 
 const GAMES = [
   { id: 'Aviator',   name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
@@ -30,8 +31,7 @@ const GAMES = [
   { id: 'NumberUp', name: 'Number Up', desc: 'Pick the shirt number — 00 to 99!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverNumberUp },
   // TODO: 换 Codex 专属封面（暂借 Total Goals 封面占位）
   { id: 'HatTrick', name: 'Hat Trick', desc: 'Three dice — call the total!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals },
-  // TODO: 换 Codex 专属封面（暂借 Team Keno 封面占位）
-  { id: 'DerbyDay', name: 'Derby Day', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamKeno },
+  { id: 'DerbyDay', name: 'Derby Day', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDerbyDay },
 ]
 
 export default function Lobby({ onSelect, balance }) {
