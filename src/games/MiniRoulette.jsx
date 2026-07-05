@@ -6,8 +6,8 @@ import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
 
 // Team Roulette — full bet/spin/settle round on the Spribe-replica board.
 // Standard 12-number mini-roulette paytable:
@@ -90,7 +90,7 @@ function winMult(key, n) {
   return 0
 }
 
-export default function MiniRoulette({ balance, setBalance }) {
+export default function MiniRoulette({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [hoverNum, setHoverNum] = useState(null)
@@ -105,8 +105,7 @@ export default function MiniRoulette({ balance, setBalance }) {
   const [toasts, setToasts] = useState([])
   const [note, setNote] = useState('')
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
-  const [muted, setMuted] = useState(false)
-  const [bgmOn, toggleBgm] = useBgm()
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   const balanceRef = useRef(balance)
   const betsRef = useRef(bets)
@@ -358,68 +357,8 @@ export default function MiniRoulette({ balance, setBalance }) {
         borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
-        {/* ---- top bar ---- */}
-        <div style={{
-          margin: isMobile ? '-12px -12px 12px' : '-18px -18px 16px',
-          padding: '8px 14px',
-          background: ROULETTE.band,
-          display: 'flex', alignItems: 'center', gap: 10,
-        }}>
-          <span style={{
-            padding: '5px 14px', borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.25)',
-            color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-          }}>
-            TEAM ROULETTE ▾
-          </span>
-          <span style={{
-            padding: '5px 14px', borderRadius: RADIUS.pill,
-            background: ROULETTE.orange, color: COLORS.white,
-            fontSize: 12, fontWeight: 800,
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-          }}>
-            <span style={{
-              width: 15, height: 15, borderRadius: RADIUS.pill,
-              background: 'rgba(0,0,0,0.3)', fontSize: 10, fontWeight: 900,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}>?</span>
-            How to Play?
-          </span>
-          <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 13, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
-          </span>
-          {/* BGM toggle — left of mute, beside the balance */}
-          <button
-            type="button"
-            onClick={toggleBgm}
-            style={{
-              width: 30, height: 30, borderRadius: RADIUS.pill,
-              background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-              color: bgmOn ? COLORS.white : COLORS.textMuted,
-              border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-              cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}
-            title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
-          >
-            <MusicNoteIcon on={bgmOn} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setMuted(v => !v)}
-            style={{
-              width: 30, height: 30, borderRadius: RADIUS.pill,
-              background: 'rgba(0,0,0,0.3)',
-              color: muted ? COLORS.textMuted : COLORS.white,
-              border: '1px solid rgba(255,255,255,0.25)',
-              cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}
-            title={muted ? '取消静音' : '静音'}
-          >
-            <SpeakerIcon on={!muted} />
-          </button>
-        </div>
+        {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
+        <GameTopBar gameName="TEAM ROULETTE" band={ROULETTE.band} onBack={onBack} />
 
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 16 : 26, alignItems: isMobile ? 'center' : 'flex-start', position: 'relative' }}>
           {/* cash-out style toast for wins */}

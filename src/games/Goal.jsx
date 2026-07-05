@@ -5,10 +5,10 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots, createArenaFx, drawArenaFx } from '../components/shell/arenaFx'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import GameTopBar from '../components/shell/GameTopBar'
 import ballUrl from '../assets/covers/ball-3d.png'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
-import { useBgm } from '../components/shell/bgmManager'
+import { useSfxMuted } from '../components/shell/bgmManager'
 
 // 单G2: Goal gameplay — Field tiers, column-by-column advance, bomb bust,
 // Auto Game.
@@ -36,7 +36,7 @@ function drawBombRows(n) {
 }
 const randomRow = () => Math.floor(Math.random() * ROWS)
 
-export default function Goal({ balance, setBalance }) {
+export default function Goal({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
 
   const [bet, setBet] = useState(10)
@@ -50,8 +50,7 @@ export default function Goal({ balance, setBalance }) {
   const [autoOn, setAutoOn] = useState(false)
   const [roundHistory, setRoundHistory] = useState([])   // final mult per round, newest first
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
-  const [muted, setMuted] = useState(false)
-  const [bgmOn, toggleBgm] = useBgm()
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   const phaseRef = useRef('idle')
   const tierRef = useRef('md')
@@ -241,11 +240,6 @@ export default function Goal({ balance, setBalance }) {
   }
 
   // ---------- visual layer (Spribe Goal 1:1) ----------
-  const navPill = {
-    padding: '5px 16px', borderRadius: RADIUS.pill,
-    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
-    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-  }
   const circleBtn = {
     width: 30, height: 30, borderRadius: RADIUS.pill,
     background: GOAL.band, color: COLORS.white,
@@ -268,8 +262,6 @@ export default function Goal({ balance, setBalance }) {
   const cashable = round2(bet * cum)
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
-  // centered DEMO pill would collide with the How-to-Play pill, so hide it
-  const deskWide = useMediaQuery('(min-width: 1200px)')
 
   // Darkened arena floor — derived in place from the GOAL felt greens
   // (bgCenter #4a7a1a / bgOuter #1c3a06) so the arenaFx star field reads.
@@ -310,51 +302,15 @@ export default function Goal({ balance, setBalance }) {
           <path d="M76 75 A 22 22 0 0 1 76 115" fill="none" stroke={GOAL.line} strokeWidth="2" />
         </svg>
 
-        {/* ---- top bar ---- */}
-        <div style={{
-          flex: '0 0 auto',
-          padding: '8px 14px',
-          background: GOAL.band,
-          display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
-        }}>
-          <span style={navPill}>GOAL ▾</span>
+        {/* ---- top bar（共享件；特有件：即时兑现指示 pill 经 rightExtra 原样传）---- */}
+        <GameTopBar gameName="GOAL" band={GOAL.band} onBack={onBack} rightExtra={
           <span style={{
-            padding: '5px 14px', borderRadius: RADIUS.pill,
-            background: GOAL.orange, color: COLORS.white,
-            fontSize: 12, fontWeight: 900,
-          }}>? How to Play?</span>
-          {!isMobile && (!isDesk || deskWide) && (
-            <span style={{
-              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-              padding: '4px 18px', borderRadius: RADIUS.pill,
-              border: `1px solid ${GOAL.gold}`, color: GOAL.gold,
-              fontSize: 11, fontWeight: 900, letterSpacing: 2,
-            }}>DEMO MODE</span>
-          )}
-          <span style={{
-            marginLeft: 'auto', padding: '3px 12px', borderRadius: RADIUS.pill,
+            padding: '3px 12px', borderRadius: RADIUS.pill,
             background: GOAL.win, color: '#083a1b',
             fontSize: 11, fontWeight: 900, opacity: playing ? 1 : 0.55,
+            flex: '0 0 auto',
           }}>+{(playing ? cashable : 0).toFixed(2)} USD</span>
-          <span style={{ color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
-          </span>
-          <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-            width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-            color: bgmOn ? COLORS.white : COLORS.textMuted,
-            border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-            cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}><MusicNoteIcon on={bgmOn} /></button>
-          <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-            width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
-            border: '1px solid rgba(255,255,255,0.25)',
-            cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}><SpeakerIcon on={!muted} /></button>
-        </div>
+        } />
 
         {/* ---- middle zone: flexes to fill the card, keeps the grid group as
              the vertical visual center; leftover space is absorbed here ---- */}

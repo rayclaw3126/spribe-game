@@ -4,8 +4,8 @@ import { COLORS, RADIUS, LAYOUT, HILO } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
 import ballUrl from '../assets/covers/ball-3d.png'
 
 // 单HL2: Rating Hi-Lo gameplay — 1–13 probability multipliers, skip, streak
@@ -137,7 +137,7 @@ function DealAnim({ num, kind, dx, w, h, onFlip, onReveal, onDone }) {
   )
 }
 
-export default function HiLo({ balance, setBalance }) {
+export default function HiLo({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
   const [phase, setPhase] = useState('idle')   // idle | playing | done
@@ -148,8 +148,7 @@ export default function HiLo({ balance, setBalance }) {
   const [steps, setSteps] = useState([])       // this round's flips {n, dir, correct}
   const [cardFlash, setCardFlash] = useState(null)   // 'win' | 'lose' | null
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
-  const [muted, setMuted] = useState(false)
-  const [bgmOn, toggleBgm] = useBgm()
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   const cumRef = useRef(1)                     // full-precision running product
   const audioRef = useRef({ ctx: null, muted: false })
@@ -310,11 +309,6 @@ export default function HiLo({ balance, setBalance }) {
   }
 
   // ---------- visual layer (Spribe Hi Lo 1:1, pitch green) ----------
-  const navPill = {
-    padding: '5px 16px', borderRadius: RADIUS.pill,
-    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
-    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-  }
   const circleBtn = {
     width: 30, height: 30, borderRadius: RADIUS.pill,
     background: 'rgba(0,0,0,0.35)', color: COLORS.white,
@@ -332,8 +326,6 @@ export default function HiLo({ balance, setBalance }) {
   })
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
-  // centered DEMO pill would collide with the How-to-Play pill, so hide it
-  const deskWide = useMediaQuery('(min-width: 1200px)')
 
   // flip-history minis + count/multiplier badge — desktop renders it in the
   // 34px skeleton row, mobile keeps it inside the card (never both)
@@ -443,46 +435,8 @@ export default function HiLo({ balance, setBalance }) {
       }}>
         {floatField}
 
-        {/* ---- top bar ---- */}
-        <div style={{
-          flex: '0 0 auto',
-          padding: '8px 14px',
-          background: HILO.band,
-          display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
-        }}>
-          <span style={navPill}>RATING HI-LO ▾</span>
-          <span style={{
-            padding: '5px 14px', borderRadius: RADIUS.pill,
-            background: HILO.orange, color: COLORS.white,
-            fontSize: 12, fontWeight: 900,
-          }}>? How to Play?</span>
-          {!isMobile && (!isDesk || deskWide) && (
-            <span style={{
-              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-              padding: '4px 18px', borderRadius: RADIUS.pill,
-              border: `1px solid ${HILO.gold}`, color: HILO.gold,
-              fontSize: 11, fontWeight: 900, letterSpacing: 2,
-            }}>DEMO MODE</span>
-          )}
-          <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
-          </span>
-          <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-            width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-            color: bgmOn ? COLORS.white : COLORS.textMuted,
-            border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-            cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}><MusicNoteIcon on={bgmOn} /></button>
-          <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-            width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
-            border: '1px solid rgba(255,255,255,0.25)',
-            cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}><SpeakerIcon on={!muted} /></button>
-        </div>
+        {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
+        <GameTopBar gameName="RATING HI-LO" band={HILO.band} onBack={onBack} />
 
         {/* ---- upper region (mobile only — desktop 34px row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 1 }}>{historyStrip}</div>}

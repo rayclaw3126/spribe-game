@@ -6,8 +6,8 @@ import WinToast from '../components/shell/WinToast'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
 import flameUrl from '../assets/shared/flame_tier_sm.png'
 import ballUrl from '../assets/covers/ball-3d.png'
 import silKeeperUrl from '../assets/shared/silhouette_keeper.png'
@@ -56,7 +56,7 @@ const COLOR_LABEL = { R: 'RED', B: 'BLACK', F: 'FIRE' }
 const SPRING_W = 1.55       // rad/s — ≈4.2s of glide + settle
 const SPRING_KICK = 1.15
 
-export default function StreakRoll({ balance, setBalance }) {
+export default function StreakRoll({ balance, setBalance, onBack }) {
   const [bet, setBet] = useState(10)
   const [offset, setOffset] = useState(0)
   const [rolling, setRolling] = useState(false)
@@ -71,8 +71,7 @@ export default function StreakRoll({ balance, setBalance }) {
   const rafRef = useRef(null)
   const [toasts, setToasts] = useState([])
   const [lossFlash, setLossFlash] = useState(false)
-  const [muted, setMuted] = useState(false)
-  const [bgmOn, toggleBgm] = useBgm()
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const toastIdRef = useRef(0)
   const lossTimerRef = useRef(null)
 
@@ -325,11 +324,6 @@ export default function StreakRoll({ balance, setBalance }) {
   const mults = MULTS[mode]
 
   // ---------- visual layer (Spribe Hotline 1:1) ----------
-  const navPill = {
-    padding: '5px 16px', borderRadius: RADIUS.pill,
-    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
-    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-  }
   const circleBtn = {
     width: 30, height: 30, borderRadius: RADIUS.pill,
     background: HOTLINE.bar, color: COLORS.white,
@@ -421,54 +415,8 @@ export default function StreakRoll({ balance, setBalance }) {
       }}>
         {speedLines}
 
-        {/* ---- top bar ---- */}
-        <div style={{
-          flex: '0 0 auto',
-          padding: '8px 14px',
-          background: HOTLINE.bar,
-          display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
-        }}>
-          <span style={navPill}>STREAK ROLL ▾</span>
-          <span style={{
-            padding: '5px 14px', borderRadius: RADIUS.pill,
-            background: HOTLINE.orange, color: COLORS.white,
-            fontSize: 12, fontWeight: 800,
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-          }}>
-            <span style={{
-              width: 15, height: 15, borderRadius: RADIUS.pill,
-              background: 'rgba(0,0,0,0.3)', fontSize: 10, fontWeight: 900,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}>?</span>
-            How to Play?
-          </span>
-          {!isMobile && (!isDesk || deskWide) && (
-            <span style={{
-              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-              padding: '4px 18px', borderRadius: RADIUS.pill,
-              background: 'rgba(255,179,0,0.18)', border: `1px solid ${HOTLINE.gold}`,
-              color: HOTLINE.gold, fontSize: 11, fontWeight: 900, letterSpacing: 2,
-            }}>DEMO MODE</span>
-          )}
-          <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 13, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
-          </span>
-          <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-            width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-            color: bgmOn ? COLORS.white : COLORS.textMuted,
-            border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-            cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}><MusicNoteIcon on={bgmOn} /></button>
-          <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-            width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
-            border: '1px solid rgba(255,255,255,0.25)',
-            cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}><SpeakerIcon on={!muted} /></button>
-        </div>
+        {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
+        <GameTopBar gameName="STREAK ROLL" band={HOTLINE.bar} onBack={onBack} />
 
         <style>{`
           @keyframes srParticle { from { transform: translate(0,0); opacity:1 } to { transform: translate(var(--tx), var(--ty)); opacity:0 } }

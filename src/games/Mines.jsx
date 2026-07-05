@@ -5,8 +5,8 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 
 // 单M2: Dribble gameplay — adjustable defenders, hypergeometric multipliers,
@@ -69,7 +69,7 @@ function BallLineArt({ size }) {
   )
 }
 
-export default function Mines({ balance, setBalance }) {
+export default function Mines({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
   const [mineCount, setMineCount] = useState(3)
@@ -83,8 +83,7 @@ export default function Mines({ balance, setBalance }) {
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [cashedOut, setCashedOut] = useState(false)
   const [, setShaking] = useState(false)
-  const [muted, setMuted] = useState(false)
-  const [bgmOn, toggleBgm] = useBgm()
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   const audioRef = useRef({ ctx: null, muted: false })
   const shakeTimer = useRef(null)
@@ -225,11 +224,6 @@ export default function Mines({ balance, setBalance }) {
   }, [autoOn, phase, revealed])
 
   // ---------- visual layer (Spribe Mines 1:1, pitch green) ----------
-  const navPill = {
-    padding: '5px 16px', borderRadius: RADIUS.pill,
-    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
-    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-  }
   const circleBtn = {
     width: 30, height: 30, borderRadius: RADIUS.pill,
     background: MINES.band, color: COLORS.white,
@@ -260,8 +254,6 @@ export default function Mines({ balance, setBalance }) {
 
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
-  // centered DEMO pill would collide with the How-to-Play pill, so hide it
-  const deskWide = useMediaQuery('(min-width: 1200px)')
 
   // Turf-sheen backdrop (方案C): a skewed light band sweeps the card, the
   // football line-art watermarks slowly roll + drift (near big, far small),
@@ -328,46 +320,8 @@ export default function Mines({ balance, setBalance }) {
       }}>
         {pitchGlow}
 
-        {/* ---- top bar ---- */}
-        <div style={{
-          flex: '0 0 auto',
-          padding: '8px 14px',
-          background: MINES.band,
-          display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 1,
-        }}>
-          <span style={navPill}>DRIBBLE ▾</span>
-          <span style={{
-            padding: '5px 14px', borderRadius: RADIUS.pill,
-            background: MINES.orange, color: COLORS.white,
-            fontSize: 12, fontWeight: 900,
-          }}>? How to Play?</span>
-          {!isMobile && (!isDesk || deskWide) && (
-            <span style={{
-              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-              padding: '4px 18px', borderRadius: RADIUS.pill,
-              border: `1px solid ${MINES.gold}`, color: MINES.gold,
-              fontSize: 11, fontWeight: 900, letterSpacing: 2,
-            }}>DEMO MODE</span>
-          )}
-          <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
-          </span>
-          <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-            width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-            color: bgmOn ? COLORS.white : COLORS.textMuted,
-            border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-            cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}><MusicNoteIcon on={bgmOn} /></button>
-          <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-            width: 30, height: 30, borderRadius: RADIUS.pill,
-            background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
-            border: '1px solid rgba(255,255,255,0.25)',
-            cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}><SpeakerIcon on={!muted} /></button>
-        </div>
+        {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
+        <GameTopBar gameName="DRIBBLE" band={MINES.band} onBack={onBack} />
 
         {/* ---- middle zone: flexes to fill the card, keeps the grid group as
              the vertical visual center; leftover space is absorbed here ---- */}
