@@ -59,10 +59,15 @@ export function deriveMatch({ home20, away20 }) {
 //   单双：合计和值奇偶 ≈ 0.5/0.5（97.5% 压线量级，实测 97.4–97.6%，维持 1.95）。
 //   H/A：和值比大小，平局 PUSH 退注 ⇒ EV = 1.95×P(win) + 1×P(tie)，
 //     P(tie) = Σ P(s)²（离散巧合，HT≈0.004/FT≈0.003），由 1e6 模拟单列回报。
-export const ODDS = { main: 1.95, side: 1.95, small: 1.92 }
+//   半全场（D3 定价，1e7 联合大样本照引擎复刻——FT 含 HT 段 + 队内无放回，禁拆乘）：
+//     p(主/主)=p(客/客)=0.3618、p(主/客)=p(客/主)=0.1347（对称差 < 3σ），
+//     push = HT 平或 FT 平 = 0.00717（四键全退注）。
+//     EV = odds×p + p(push)：同向 2.65 → 96.58%、反转 7.10 → 96.32%（均入 94-97.5% 带）
+export const ODDS = { main: 1.95, side: 1.95, small: 1.92, htftSame: 2.65, htftFlip: 7.1 }
 const HT_BIG = 811, FT_BIG = 1621
 
-// 盘区判定表 — 数据驱动生成（12 键）：hit = 赢；push = 退注（仅 H/A 盘平局）
+// 盘区判定表 — 数据驱动生成（12 键 + 半全场 4 键）：hit = 赢；push = 退注
+// （H/A 盘平局；半全场 HT 平或 FT 平四键全 push）
 export const MARKETS = {
   'ht-home':  { odds: ODDS.main, hit: r => r.htHome > r.htAway, push: r => r.htHome === r.htAway },
   'ht-away':  { odds: ODDS.main, hit: r => r.htAway > r.htHome, push: r => r.htHome === r.htAway },
@@ -77,6 +82,14 @@ export const MARKETS = {
   'ft-odd':   { odds: ODDS.side, hit: r => r.ftTotal % 2 === 1 },
   'ft-even':  { odds: ODDS.side, hit: r => r.ftTotal % 2 === 0 },
 }
+// 半全场四键：严格不等判胜（任一段平局 hit 必假），push 四键共用同一判定
+const htftPush = r => r.htHome === r.htAway || r.ftHome === r.ftAway
+Object.assign(MARKETS, {
+  'ht-ft-hh': { odds: ODDS.htftSame, hit: r => r.htHome > r.htAway && r.ftHome > r.ftAway, push: htftPush },
+  'ht-ft-ha': { odds: ODDS.htftFlip, hit: r => r.htHome > r.htAway && r.ftAway > r.ftHome, push: htftPush },
+  'ht-ft-ah': { odds: ODDS.htftFlip, hit: r => r.htAway > r.htHome && r.ftHome > r.ftAway, push: htftPush },
+  'ht-ft-aa': { odds: ODDS.htftSame, hit: r => r.htAway > r.htHome && r.ftAway > r.ftHome, push: htftPush },
+})
 const MARKET_KEYS = Object.keys(MARKETS)
 export const hitsOf = r => new Set(MARKET_KEYS.filter(k => MARKETS[k].hit(r)))
 export const pushesOf = r => new Set(MARKET_KEYS.filter(k => MARKETS[k].push?.(r)))
@@ -821,7 +834,7 @@ export default function DerbyDay({ balance, setBalance }) {
     </div>
   )
 
-  // ---- ②b 半全场组合盘（纯 UI 占位：赔率 D3 枚举后填，未定价不进扣款路径）----
+  // ---- ②b 半全场组合盘（D3 已定价接结算：走 MARKETS 既有 hit/push 路径）----
   const HTFT = [
     { key: 'ht-ft-hh', a: '主', b: '主' },
     { key: 'ht-ft-ha', a: '主', b: '客' },
@@ -836,19 +849,13 @@ export default function DerbyDay({ balance, setBalance }) {
         <span style={{ color: DERBY.dim, padding: '0 3px' }}>/</span>
         <span style={{ color: m.b === '主' ? DERBY.home : DERBY.away }}>{m.b}</span>
       </span>
-      <span style={cellOdds}>--</span>
+      <span style={cellOdds}>{MARKETS[m.key].odds.toFixed(2)}</span>
+      {stakeChip(m.key)}
     </button>
   )
   const htftGroup = (
     <div style={secBox}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={secHead}>半全场 · 半场胜方 / 全场胜方</div>
-        <span style={{
-          padding: '1px 8px', borderRadius: RADIUS.pill, marginBottom: 4,
-          border: `1px solid ${DERBY.orange}`, color: DERBY.orange,
-          fontSize: 9, fontWeight: 900, whiteSpace: 'nowrap',
-        }}>即将开放</span>
-      </div>
+      <div style={secHead}>半全场 · 半场胜方 / 全场胜方</div>
       <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 6 }}>
         {HTFT.slice(0, 2).map(htftCell)}
       </div>
