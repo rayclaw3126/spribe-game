@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
@@ -12,7 +12,9 @@ import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 // Line Up — ATOM 5×5 数字彩（25 个 0-9 独立均匀随机数排成五行），第 17 卡。
 // X2：结算引擎 + 轮次状态机 + 赔率参数化。开奖舞台动画走后续单（静态直出）。
 // X3：投注盘 A/B 双视图（A 维度列表 / B 矩阵，42 键同源同 key，选中态互通）
-//     + 注栏两行压一行；MARKETS/结算零改动。
+//     + 注栏 grid 4列×2行 + 重复投注；MARKETS/结算零改动。
+// X4：drawing 相位开奖舞台（25 格乱序砸落 + 滚数快闪 + 行和/TOTAL 累加滚动
+//     + TOTAL 砸出）+ SFX（落格 tick/行满短哨/终场哨）；引擎/结算零改动。
 // 规则对照 /tmp/atom_ref/atom_rules.txt（help.sbobet.com Atom Betting Rules #4303）原文：
 //   Red  = "drawn at 0, 2, 6, 7 and 8, which are classified as Red"   → 本作客红
 //   Black = "drawn at 1, 3, 4, 5 and 9, which are classified as Black" → 本作主蓝
@@ -94,8 +96,14 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
 // ---------- 轮次常量（心跳 500ms/tick）----------
 const TICK_MS = 500
 const BETTING_T = 48    // 24s
-const DRAW_T = 6        // 3s 静态占位（开奖舞台动画后续单换）
+const DRAW_T = 9        // 4.5s 开奖舞台（时间轴 ~4.1s 收尾，留半秒余量）
 const SETTLED_T = 8     // 4s
+// 舞台时间轴（rAF 内使用，毫秒）：乱序砸落 25 格 → TOTAL 放大砸出
+const ANIM_T0 = 250       // 首格砸落时刻
+const ANIM_GAP = 125      // 落格间隔（24×125+250 ≈ 3.25s 落完）
+const ANIM_FLASH = 320    // 落定前 0-9 快闪滚数窗口（80ms/帧 ≈ 4 帧）
+const ANIM_POP = 120      // 落格轻弹时长
+const ANIM_SLAM = 3600    // TOTAL 放大砸出时刻
 const VENUE = 'SAPPHIRE PARK'          // 架空场馆名（禁真实球场名）
 const ROUND_DATE = 'SP20260705'
 const ROAD_CAP = 120
@@ -126,6 +134,111 @@ const ZONES = [
   { key: 'zone-euro', name: '欧战区', range: '113–129' },
   { key: 'zone-champ', name: '夺冠', range: '130–225' },
 ]
+
+// ---------- 开奖舞台（drawing 相位；结果进相前已全锁定，动画只读）----------
+// 落格乱序从已锁结果派生（mulberry32 播种 + Fisher-Yates）——零额外随机数消耗，
+// 引擎随机序列与动画解耦（已知坑：乱序若走 Math.random 会破坏引擎可复现性）
+function orderFrom(cells) {
+  let a = 0x2f6e2b1
+  cells.forEach((d, i) => { a = (Math.imul(a, 31) + d * 7 + i + 1) >>> 0 })
+  const rng = () => {
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  const order = Array.from({ length: 25 }, (_, i) => i)
+  for (let i = 24; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[order[i], order[j]] = [order[j], order[i]]
+  }
+  return order
+}
+
+// t 时刻舞台视图（纯函数）：digits[i] = 已定格数字或 null；flash = 滚数快闪帧；
+// popAge = 落格轻弹进度；slamAge = TOTAL 砸出进度；行和/计数只算已落格
+function animViewAt(round, order, t) {
+  const digits = new Array(25).fill(null)
+  const flash = new Map()
+  const popAge = new Map()
+  order.forEach((cell, k) => {
+    const landAt = ANIM_T0 + k * ANIM_GAP
+    if (t >= landAt) {
+      digits[cell] = round.cells[cell]
+      if (t - landAt < ANIM_POP) popAge.set(cell, t - landAt)
+    } else if (t >= landAt - ANIM_FLASH) {
+      // 滚数帧 = 真值+格位派生的伪序列（零随机数）
+      const fr = Math.floor((t - (landAt - ANIM_FLASH)) / 80)
+      flash.set(cell, (round.cells[cell] * 3 + fr * 7 + cell) % 10)
+    }
+  })
+  const rowSums = [0, 1, 2, 3, 4].map(ri =>
+    digits.slice(ri * 5, ri * 5 + 5).reduce((x, y) => x + (y ?? 0), 0))
+  let home = 0, away = 0, high = 0, low = 0
+  digits.forEach(d => {
+    if (d == null) return
+    if (AWAY_DIGITS.has(d)) away++; else home++
+    if (HIGH_DIGITS.has(d)) high++; else low++
+  })
+  return {
+    digits, flash, popAge, rowSums,
+    total: rowSums.reduce((x, y) => x + y, 0),
+    homeCount: home, awayCount: away, highCount: high, lowCount: low,
+    slamAge: t >= ANIM_SLAM ? t - ANIM_SLAM : null,
+  }
+}
+
+// 单 rAF 循环驱动整条时间轴（禁 CSS transition 拼接）；key=期号保证重挂载；
+// sfx 全部在结果已锁后触发；StrictMode 双挂载由 cleanup 兜底
+function DrawStage({ round, sfx, children }) {
+  const [, setFrame] = useState(0)
+  const tRef = useRef(0)
+  const cbRef = useRef(sfx)
+  cbRef.current = sfx
+  const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const order = useMemo(() => orderFrom(round.cells), [round])
+
+  useEffect(() => {
+    if (reduced) {   // 减动效：静态直出终态，不起 rAF 不发声
+      if (import.meta.env.DEV) window.__LU_ANIM_LAST = round.cells.join(',')
+      return
+    }
+    if (import.meta.env.DEV) window.__LU_RAF_ACTIVE = (window.__LU_RAF_ACTIVE || 0) + 1
+    const landed = new Array(25).fill(false)
+    const rowLand = new Array(5).fill(0)
+    let slammed = false
+    let raf = 0
+    const t0 = performance.now()
+    const loop = now => {
+      const t = now - t0
+      tRef.current = t
+      // —— 事件沿：落格 tick ×25 / 行满短哨 ×5 / TOTAL 终场哨 ——
+      order.forEach((cell, k) => {
+        if (landed[k] || t < ANIM_T0 + k * ANIM_GAP) return
+        landed[k] = true
+        cbRef.current.tick(k)
+        const ri = Math.floor(cell / 5)
+        if (++rowLand[ri] === 5) cbRef.current.row()
+      })
+      if (t >= ANIM_SLAM && !slammed) {
+        slammed = true
+        cbRef.current.final()
+        if (import.meta.env.DEV) window.__LU_ANIM_LAST = round.cells.join(',')
+      }
+      setFrame(f => f + 1)
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => {
+      cancelAnimationFrame(raf)
+      if (import.meta.env.DEV) window.__LU_RAF_ACTIVE -= 1
+    }
+    // 舞台一次挂载跑完整条时间轴
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return children(animViewAt(round, order, reduced ? Infinity : tRef.current))
+}
 
 export default function LineUp({ balance, setBalance }) {
   const isMobile = useIsMobile()
@@ -163,9 +276,52 @@ export default function LineUp({ balance, setBalance }) {
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
 
+  const audioRef = useRef({ ctx: null, muted: false })
+
   useEffect(() => { balanceRef.current = balance }, [balance])
   useEffect(() => { betRef.current = bet }, [bet])
+  useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
+
+  // ---------- SFX（WebAudio 合成器，照 Derby 配方；muted 门控，全部在结果已锁后触发）----------
+  function ensureAudio() {
+    if (audioRef.current.ctx) return audioRef.current.ctx
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
+    audioRef.current.ctx = ctx; return ctx
+  }
+  function sfxTick(k) {   // 落格 tick：短 blip，音高随落格序缓升（25 连发）
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); o.type = 'sine'
+    const f = 460 + k * 9
+    o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 1.3, t + 0.04)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.045, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.08)
+  }
+  function sfxRow() {   // 行满：短哨单响
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); o.type = 'square'
+    o.frequency.setValueAtTime(2100, t); o.frequency.linearRampToValueAtTime(2350, t + 0.1)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.13)
+  }
+  function sfxFinal() {   // TOTAL 砸出：终场哨两响（次响拉长）
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    ;[[0, 0.14], [0.2, 0.3]].forEach(([off, len]) => {
+      const o = ctx.createOscillator(); o.type = 'square'
+      o.frequency.setValueAtTime(2050, t + off); o.frequency.linearRampToValueAtTime(2400, t + off + len)
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(0.0001, t + off); g.gain.exponentialRampToValueAtTime(0.04, t + off + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + off + len)
+      o.connect(g); g.connect(ctx.destination); o.start(t + off); o.stop(t + off + len + 0.02)
+    })
+  }
+  const stageSfx = { tick: sfxTick, row: sfxRow, final: sfxFinal }
 
   function pushToast(label, win) {
     const id = ++toastIdRef.current
@@ -285,21 +441,27 @@ export default function LineUp({ balance, setBalance }) {
     background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
     color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
   }
+  // settled 相位三档：命中+有注 = 绿框绿晕+注码chip；命中+无注 = 绿框亮灯弱一档
+  // （无晕）；未命中压暗（有注留金框认输）。A/B 双视图同走这一份，key 同源天然同步；
+  // betting/drawing（无 result）恢复常态不残留
   const cellBase = (key, bg) => {
     const sel = picks.has(key)
-    const hit = result?.hits?.has(key) && betsPlaced.has(key)
-    const placed = betsPlaced.has(key)
+    const hits = result?.hits ?? null            // 仅 settled 相位非空
+    const isHit = hits?.has(key)
+    const staked = betsPlaced.has(key)
     return {
       flex: 1, minWidth: 0, padding: isMobile ? '6px 2px' : '6px 4px',
       borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
       background: bg,
-      border: `1.5px solid ${hit ? DERBY.sel : sel || placed ? DERBY.gold : 'rgba(255,255,255,0.16)'}`,
-      boxShadow: hit
+      border: `1.5px solid ${isHit ? DERBY.sel : sel || staked ? DERBY.gold : 'rgba(255,255,255,0.16)'}`,
+      boxShadow: isHit && staked
         ? '0 0 12px rgba(53,208,127,0.6)'
         : sel ? '0 0 10px rgba(255,213,79,0.45)' : 'inset 0 1px 0 rgba(255,255,255,0.08)',
-      opacity: betting || hit || placed ? 1 : 0.75,
+      opacity: hits
+        ? (isHit ? 1 : staked ? 0.6 : 0.45)
+        : betting || staked ? 1 : 0.75,
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-      transition: 'filter 0.12s, border-color 0.12s, box-shadow 0.15s',
+      transition: 'filter 0.12s, border-color 0.12s, box-shadow 0.15s, opacity 0.2s',
       boxSizing: 'border-box', position: 'relative',
     }
   }
@@ -350,22 +512,21 @@ export default function LineUp({ balance, setBalance }) {
     </div>
   )
 
-  // ---- ① 开奖区：5×5 号码牌（行标 + 行和）+ 统计带（主客计数/总和/高低）----
-  // drawing 相静态压暗占位（开奖舞台动画后续单换）；settled 直出本局，其余回显上局
+  // ---- ① 开奖区：5×5 号码牌（行标 + 行和）+ 统计带（主客计数/TOTAL/高低）----
+  // drawing 相位挂开奖舞台（乱序砸落+滚数快闪+行和/TOTAL 累加）；settled 直出本局，
+  // 其余回显上局。静态与舞台视图同构，网格渲染共用 gridBody
   const tile = isMobile ? 30 : isDesk ? 26 : 36   // desk 收档给盘区留高
   const drawing = gamePhase === 'drawing'
   const zoneTitle = drawing ? '首发阵容 · 开奖中' : gamePhase === 'settled' ? '首发阵容 · 本局' : '首发阵容 · 上局'
-  const drawZone = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '8px 12px 0' : '6px 18px 0',
-      borderRadius: 12, padding: isMobile ? '8px 8px 6px' : '8px 12px 8px',
-      background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
-      display: 'flex', flexDirection: 'column', gap: isMobile ? 3 : 4,
-      boxSizing: 'border-box',
-      opacity: drawing ? 0.55 : 1,
-      transition: 'opacity 0.3s',
-    }}>
+  const staticView = {
+    digits: shown.cells, flash: null, popAge: null,
+    rowSums: shown.rowSums, total: shown.total,
+    homeCount: shown.homeCount, awayCount: shown.awayCount,
+    highCount: shown.highCount, lowCount: shown.lowCount,
+    slamAge: null,
+  }
+  const gridBody = view => (
+    <>
       {/* desk 头行并入底部统计带省一行 */}
       {!isDesk && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -373,7 +534,7 @@ export default function LineUp({ balance, setBalance }) {
           <span style={{ color: DERBY.dim, fontSize: 10, fontWeight: 800 }}>25 数 · 0-9</span>
         </div>
       )}
-      {shown.rows.map((row, ri) => (
+      {[0, 1, 2, 3, 4].map(ri => (
         <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 6, justifyContent: 'center' }}>
           {/* 行标：L 号圈 + 位置名 */}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, flex: '0 0 auto', width: isMobile ? 58 : 72 }}>
@@ -386,29 +547,43 @@ export default function LineUp({ balance, setBalance }) {
             }}>L{ri + 1}</span>
             <span style={{ color: DERBY.text, fontSize: isMobile ? 10 : 11, fontWeight: 900, whiteSpace: 'nowrap' }}>{ROW_LABELS[ri]}</span>
           </span>
-          {/* 5 号码牌：主蓝 = Black(1,3,4,5,9) / 客红 = Red(0,2,6,7,8) */}
-          {row.map((n, ci) => (
-            <span key={ci} style={{
-              width: tile, height: tile, borderRadius: 8,
-              background: AWAY_DIGITS.has(n) ? DERBY.away : DERBY.home,
-              border: '1px solid rgba(0,0,0,0.35)',
-              boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.25), 0 1px 3px rgba(0,0,0,0.35)',
-              color: COLORS.white, fontSize: tile * 0.5, fontWeight: 900,
-              fontFamily: "'Space Grotesk', sans-serif",
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              boxSizing: 'border-box', flex: '0 0 auto',
-            }}>{n}</span>
-          ))}
-          {/* 行尾行和 */}
+          {/* 5 号码牌：主蓝 = Black(1,3,4,5,9) / 客红 = Red(0,2,6,7,8)；
+              舞台三态：待落=淡格 / 快闪=灰底滚数 / 已定格=队色+轻弹 */}
+          {[0, 1, 2, 3, 4].map(ci => {
+            const i = ri * 5 + ci
+            const d = view.digits[i]
+            const f = view.flash?.get(i)
+            const pop = view.popAge?.get(i)
+            const scale = pop != null ? 1.35 - 0.35 * (pop / ANIM_POP) : 1
+            return (
+              <span key={ci} data-cell={i} data-landed={d != null ? 1 : 0}
+                data-final={drawing && cur ? cur.cells[i] : d ?? ''}
+                style={{
+                  width: tile, height: tile, borderRadius: 8,
+                  background: d != null
+                    ? (AWAY_DIGITS.has(d) ? DERBY.away : DERBY.home)
+                    : f != null ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(0,0,0,0.35)',
+                  boxShadow: d != null ? 'inset 0 2px 3px rgba(255,255,255,0.25), 0 1px 3px rgba(0,0,0,0.35)' : 'none',
+                  color: d != null ? COLORS.white : 'rgba(255,255,255,0.7)',
+                  fontSize: tile * 0.5, fontWeight: 900,
+                  fontFamily: "'Space Grotesk', sans-serif",
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  boxSizing: 'border-box', flex: '0 0 auto',
+                  transform: `scale(${scale})`,
+                }}>{d ?? (f != null ? f : '')}</span>
+            )
+          })}
+          {/* 行尾行和（舞台期随落格累加滚动） */}
           <span style={{
             flex: '0 0 auto', minWidth: isMobile ? 26 : 32, textAlign: 'center',
             padding: '2px 6px', borderRadius: RADIUS.pill,
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.2)',
             color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900,
-          }}>{shown.rowSums[ri]}</span>
+          }}>{view.rowSums[ri]}</span>
         </div>
       ))}
-      {/* 统计带：主/客计数 + 总和大字 + 高/低 */}
+      {/* 统计带：主/客计数 + TOTAL 大字（砸出放大一拍）+ 高/低 */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: isMobile ? 6 : 10, paddingTop: 2, flexWrap: 'wrap',
@@ -418,19 +593,34 @@ export default function LineUp({ balance, setBalance }) {
             <span style={{ color: drawing ? DERBY.orange : DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginRight: 8 }}>{zoneTitle}</span>
           )}
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: DERBY.home, display: 'inline-block' }} />
-          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>主 {shown.homeCount}</span>
+          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>主 {view.homeCount}</span>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: DERBY.away, display: 'inline-block', marginLeft: 6 }} />
-          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>客 {shown.awayCount}</span>
+          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>客 {view.awayCount}</span>
         </span>
         <span style={{
           padding: '2px 14px', borderRadius: RADIUS.pill,
           background: DERBY.gold, color: '#3a2c00',
           fontSize: isMobile ? 13 : 15, fontWeight: 900, letterSpacing: 0.5,
-        }}>SUM {shown.total}</span>
+          transform: `scale(${view.slamAge != null ? 1 + 0.3 * Math.sin(Math.min(1, view.slamAge / 350) * Math.PI) : 1})`,
+        }}>TOTAL {view.total}</span>
         <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>
-          高 {shown.highCount} <span style={{ color: DERBY.dim, fontWeight: 700 }}>/</span> 低 {shown.lowCount}
+          高 {view.highCount} <span style={{ color: DERBY.dim, fontWeight: 700 }}>/</span> 低 {view.lowCount}
         </span>
       </div>
+    </>
+  )
+  const drawZone = (
+    <div style={{
+      flex: '0 0 auto', position: 'relative', zIndex: 1,
+      margin: isMobile ? '8px 12px 0' : '6px 18px 0',
+      borderRadius: 12, padding: isMobile ? '8px 8px 6px' : '8px 12px 8px',
+      background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
+      display: 'flex', flexDirection: 'column', gap: isMobile ? 3 : 4,
+      boxSizing: 'border-box',
+    }}>
+      {drawing && cur
+        ? <DrawStage key={roundNo} round={cur} sfx={stageSfx}>{gridBody}</DrawStage>
+        : gridBody(staticView)}
     </div>
   )
 

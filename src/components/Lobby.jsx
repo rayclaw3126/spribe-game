@@ -13,6 +13,7 @@ import coverHalfTime from '../assets/covers/cover_halftime.png'
 import coverGoldenBoot from '../assets/covers/cover_goldenboot.png'
 import coverNumberUp from '../assets/covers/cover_numberup.png'
 import coverDerbyDay from '../assets/covers/cover_derbyday.png'
+import coverLineUp from '../assets/covers/cover_lineup.png'
 
 const GAMES = [
   { id: 'Aviator',   name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
@@ -32,8 +33,7 @@ const GAMES = [
   // TODO: 换 Codex 专属封面（暂借 Total Goals 封面占位）
   { id: 'HatTrick', name: 'Hat Trick', desc: 'Three dice — call the total!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals },
   { id: 'DerbyDay', name: 'Derby Day', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDerbyDay },
-  // TODO: 换 Codex 专属封面（暂借 Half Time 封面占位）
-  { id: 'LineUp', name: 'Line Up', desc: 'Five lines, 25 numbers — call the sums!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverHalfTime },
+  { id: 'LineUp', name: 'Line Up', desc: 'Five lines, 25 numbers — call the sums!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverLineUp },
 ]
 
 export default function Lobby({ onSelect, balance }) {
