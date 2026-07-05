@@ -1,52 +1,117 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
-import ChipQuickBet from '../components/shell/ChipQuickBet'
 import BetButton from '../components/shell/BetButton'
+import WinToast from '../components/shell/WinToast'
+import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 
-// Line Up — ATOM 5×5 数字彩（25 个 0-9 随机数排成五行，行/全局和值盘），第 17 卡。
-// 本单为纯 UI 骨架：零逻辑、零余额副作用、零随机数——开奖区/珠盘路/倒计时全部
-// 硬编码种子数据；下注按钮只显示选格数不做任何事。引擎/状态机走后续单。
-// 赔率为占位值，对照参考规则（help.sbobet.com Atom Betting Rules #4303）：
-//   普通盘/行式盘 大小·单双·主客色·高低 = 1.95；
-//   四区 = 降级区[0-95] 7.50 / 中游[96-112] 2.30 / 欧战区[113-129] 2.30 / 夺冠[130-225] 7.50
-//   （参考 Spring/Summer/Autumn/Winter 同段同赔，足球叙事换皮）。
-// 红/黑归类（参考规则原文，X2 结算用）：
+// Line Up — ATOM 5×5 数字彩（25 个 0-9 独立均匀随机数排成五行），第 17 卡。
+// X2：结算引擎 + 轮次状态机 + 赔率参数化。开奖舞台动画走后续单（静态直出）。
+// X3：投注盘 A/B 双视图（A 维度列表 / B 矩阵，42 键同源同 key，选中态互通）
+//     + 注栏两行压一行；MARKETS/结算零改动。
+// 规则对照 /tmp/atom_ref/atom_rules.txt（help.sbobet.com Atom Betting Rules #4303）原文：
 //   Red  = "drawn at 0, 2, 6, 7 and 8, which are classified as Red"   → 本作客红
 //   Black = "drawn at 1, 3, 4, 5 and 9, which are classified as Black" → 本作主蓝
-// 布局顺序（照 Derby 定案标准）：① 开奖区上 ② 盘区中 ③ 珠盘路下 ④ 注栏钉底。
+//   High/Low = 5-9 / 0-4；全局判定 ≥13 计数、行式判定 ≥3 计数
+//   段位 = Spring[0-95] 7.50 / Summer[96-112] 2.30 / Autumn[113-129] 2.30 / Winter[130-225] 7.50
+//     （足球叙事换皮：降级区/中游/欧战区/夺冠）
+// 算钱路径：confirmBets() 唯一扣注点，settleRound() 唯一赔付点（本彩种无 push 项：
+// 25/5 为奇数计数无平局，225/45 为奇数和值无中点格）。
 
-// ---------- 静态种子数据（纯展示，零随机数）----------
+// ---------- 引擎（纯函数区，禁副作用）----------
+// 归类表（参考原文映射）：客红 = Red(0,2,6,7,8)；主蓝 = Black(1,3,4,5,9)；高 = 5-9 / 低 = 0-4
+export const AWAY_DIGITS = new Set([0, 2, 6, 7, 8])
+export const HIGH_DIGITS = new Set([5, 6, 7, 8, 9])
+
+// 开奖：25 个独立均匀 0-9（可重复），rng 可注入
+export function drawGrid(rng = Math.random) {
+  return Array.from({ length: 25 }, () => Math.floor(rng() * 10))
+}
+
+// 派生：行切分/行和/总和/主客色计数/高低计数（全部结算判定只读这一份）
+const sumOf = a => a.reduce((x, y) => x + y, 0)
+export function deriveRound(cells) {
+  const rows = [0, 1, 2, 3, 4].map(i => cells.slice(i * 5, i * 5 + 5))
+  const rowSums = rows.map(sumOf)
+  const rowAway = rows.map(r => r.filter(n => AWAY_DIGITS.has(n)).length)
+  const total = sumOf(cells)
+  const awayCount = cells.filter(n => AWAY_DIGITS.has(n)).length
+  const highCount = cells.filter(n => HIGH_DIGITS.has(n)).length
+  return {
+    cells, rows, rowSums, rowAway, total,
+    awayCount, homeCount: 25 - awayCount,
+    highCount, lowCount: 25 - highCount,
+  }
+}
+
+// 赔率常量表 — 集中一处（推导注释，BigInt 精确枚举对账 scratchpad/lineup-exact.mjs）：
+//   二元盘（大小/单双/主客色/高低 + 行式全部）：真实概率精确 = 0.5 ——
+//     和值分布关于 112.5（行 22.5）对称且 225/45 为奇数无中点质量；
+//     计数盘每格恰好 5/5 数字二分、25/5 为奇数无平局 ⇒ 1.95 × 0.5 = 97.5%（带上沿）。
+//   段位盘（单据定稿 2026-07-05）：精确概率 降级/夺冠 0.118991、中游/欧战 0.381009；
+//     参考原版 7.50/2.30 → RTP 89.24%/87.63% 出带，按单调整为 8.00/2.50 →
+//     RTP 95.19% / 95.25%，进 94-97.5% 带。
+export const ODDS = { main: 1.95, edge: 8.0, mid: 2.5 }
+
+// 盘区判定表 — 数据驱动生成（12 普通盘键 + 5×6 行式键）；hit = 赢，无 push 项
+export const MARKETS = {
+  big: { odds: ODDS.main, hit: r => r.total >= 113 },
+  small: { odds: ODDS.main, hit: r => r.total <= 112 },
+  odd: { odds: ODDS.main, hit: r => r.total % 2 === 1 },
+  even: { odds: ODDS.main, hit: r => r.total % 2 === 0 },
+  'home-more': { odds: ODDS.main, hit: r => r.homeCount >= 13 },
+  'away-more': { odds: ODDS.main, hit: r => r.awayCount >= 13 },
+  high: { odds: ODDS.main, hit: r => r.highCount >= 13 },
+  low: { odds: ODDS.main, hit: r => r.lowCount >= 13 },
+  'zone-releg': { odds: ODDS.edge, hit: r => r.total <= 95 },
+  'zone-mid': { odds: ODDS.mid, hit: r => r.total >= 96 && r.total <= 112 },
+  'zone-euro': { odds: ODDS.mid, hit: r => r.total >= 113 && r.total <= 129 },
+  'zone-champ': { odds: ODDS.edge, hit: r => r.total >= 130 },
+}
+for (let i = 0; i < 5; i++) {
+  MARKETS[`L${i + 1}-big`] = { odds: ODDS.main, hit: r => r.rowSums[i] >= 23 }
+  MARKETS[`L${i + 1}-small`] = { odds: ODDS.main, hit: r => r.rowSums[i] <= 22 }
+  MARKETS[`L${i + 1}-odd`] = { odds: ODDS.main, hit: r => r.rowSums[i] % 2 === 1 }
+  MARKETS[`L${i + 1}-even`] = { odds: ODDS.main, hit: r => r.rowSums[i] % 2 === 0 }
+  MARKETS[`L${i + 1}-home`] = { odds: ODDS.main, hit: r => r.rowAway[i] <= 2 }
+  MARKETS[`L${i + 1}-away`] = { odds: ODDS.main, hit: r => r.rowAway[i] >= 3 }
+}
+const MARKET_KEYS = Object.keys(MARKETS)
+export const hitsOf = r => new Set(MARKET_KEYS.filter(k => MARKETS[k].hit(r)))
+
+const round2 = x => Math.round(x * 100) / 100
+
+// dev 测试钩子 — 对账脚本/RTP 模拟从浏览器直接调引擎；__LU_FORCE 注入固定局
+// （下一期开奖直接用注入的 25 数，一次性消费；生产构建不暴露）
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  window.__LU = { drawGrid, deriveRound, hitsOf, MARKETS, ODDS }
+}
+
+// ---------- 轮次常量（心跳 500ms/tick）----------
+const TICK_MS = 500
+const BETTING_T = 48    // 24s
+const DRAW_T = 6        // 3s 静态占位（开奖舞台动画后续单换）
+const SETTLED_T = 8     // 4s
 const VENUE = 'SAPPHIRE PARK'          // 架空场馆名（禁真实球场名）
-const ROUND_ID = 'SP20260705-088'
-// 上局开奖 5×5（取自参考规则页 ATOM 25's 实拍局）：行和 12/18/10/22/28，总和 90
-const GRID = [
-  [2, 6, 3, 1, 0],
-  [6, 0, 6, 1, 5],
-  [2, 0, 1, 7, 0],
-  [1, 6, 4, 9, 2],
-  [7, 4, 6, 6, 5],
-]
-// 归类表（参考原文映射）：客红 = Red(0,2,6,7,8)；主蓝 = Black(1,3,4,5,9)；
-// 高 = 5-9 / 低 = 0-4（参考 High/Low 原文）
-const AWAY_DIGITS = new Set([0, 2, 6, 7, 8])
-const HIGH_DIGITS = new Set([5, 6, 7, 8, 9])
+const ROUND_DATE = 'SP20260705'
+const ROAD_CAP = 120
 const ROW_LABELS = ['锋线', '前腰', '中场', '后腰', '后卫']   // L1-L5
 
-// 派生统计（种子局写死对账：行和 12/18/10/22/28，客 15 主 10，高 11 低 14，总和 90）
-const ROW_SUMS = GRID.map(r => r.reduce((a, b) => a + b, 0))
-const FLAT = GRID.flat()
-const TOTAL_SUM = FLAT.reduce((a, b) => a + b, 0)
-const AWAY_COUNT = FLAT.filter(n => AWAY_DIGITS.has(n)).length
-const HOME_COUNT = 25 - AWAY_COUNT
-const HIGH_COUNT = FLAT.filter(n => HIGH_DIGITS.has(n)).length
-const LOW_COUNT = 25 - HIGH_COUNT
+// 种子上局（取自参考规则页 ATOM 25's 实拍局：行和 12/18/10/22/28，总和 90；
+// 真开奖逐期顶掉）
+const SEED_LAST = deriveRound([
+  2, 6, 3, 1, 0,
+  6, 0, 6, 1, 5,
+  2, 0, 1, 7, 0,
+  1, 6, 4, 9, 2,
+  7, 4, 6, 6, 5,
+])
 
-// 40 期假珠盘（大小单轨，旧→新；引擎单换真历史滚动）
+// 40 期假珠盘（大小单轨，旧→新；真开奖逐期顶掉）
 const SEED_ROAD = [
   '小', '大', '大', '小', '大', '小', '小', '大', '大', '大',
   '小', '大', '小', '小', '大', '小', '大', '大', '小', '小',
@@ -54,44 +119,15 @@ const SEED_ROAD = [
   '大', '小', '大', '小', '大', '大', '小', '大', '小', '大',
 ]
 
-// 展示用假注单（静态；引擎单换 makeFeedBots 每期换血）
-const SEED_FEED = [
-  { id: 'lu1', name: 'volley', bet: 184, target: 1.9, status: 'live', payout: null },
-  { id: 'lu2', name: 'marek', bet: 52, target: 2.3, status: 'live', payout: null },
-  { id: 'lu3', name: 'nine10', bet: 305, target: 1.6, status: 'live', payout: null },
-  { id: 'lu4', name: 'crossa', bet: 118, target: 3.2, status: 'live', payout: null },
-  { id: 'lu5', name: 'palmer', bet: 466, target: 1.4, status: 'live', payout: null },
-  { id: 'lu6', name: 'zidane8', bet: 74, target: 2.8, status: 'live', payout: null },
-  { id: 'lu7', name: 'kwon', bet: 12, target: 1.7, status: 'live', payout: null },
-  { id: 'lu8', name: 'stade', bet: 88, target: 4.6, status: 'live', payout: null },
-  { id: 'lu9', name: 'ferro', bet: 264, target: 2.1, status: 'live', payout: null },
-  { id: 'lu10', name: 'lobo11', bet: 143, target: 1.5, status: 'live', payout: null },
-  { id: 'lu11', name: 'brygge', bet: 351, target: 3.7, status: 'live', payout: null },
-  { id: 'lu12', name: 'perin', bet: 66, target: 2.4, status: 'live', payout: null },
-  { id: 'lu13', name: 'talles', bet: 402, target: 1.8, status: 'live', payout: null },
-  { id: 'lu14', name: 'rondo5', bet: 29, target: 5.1, status: 'live', payout: null },
-  { id: 'lu15', name: 'vardy9', bet: 17, target: 1.3, status: 'live', payout: null },
-  { id: 'lu16', name: 'moura', bet: 195, target: 2.6, status: 'live', payout: null },
-  { id: 'lu17', name: 'keita4', bet: 228, target: 3.4, status: 'live', payout: null },
-  { id: 'lu18', name: 'brozo', bet: 49, target: 1.9, status: 'live', payout: null },
-  { id: 'lu19', name: 'winger', bet: 101, target: 4.2, status: 'live', payout: null },
-  { id: 'lu20', name: 'dybal10', bet: 137, target: 2.2, status: 'live', payout: null },
-]
-
-// ---------- 占位赔率（引擎单按真实概率标定 94–97.5% 带）----------
-const ODDS_MAIN = 1.95    // 大小 / 单双 / 主色多客色多 / 高低（普通盘 + 行式盘同档）
-const ODDS_EDGE = 7.5     // 降级区 / 夺冠（对照参考 Spring/Winter 段）
-const ODDS_MID = 2.3      // 中游 / 欧战区（对照参考 Summer/Autumn 段）
-
-// 普通盘四区（足球叙事换皮，段位照参考原文）
+// 普通盘四区（足球叙事换皮，段位照参考原文；⚠ RTP 出带待定，见 ODDS 注释）
 const ZONES = [
-  { key: 'zone-releg', name: '降级区', range: '0–95', odds: ODDS_EDGE },
-  { key: 'zone-mid', name: '中游', range: '96–112', odds: ODDS_MID },
-  { key: 'zone-euro', name: '欧战区', range: '113–129', odds: ODDS_MID },
-  { key: 'zone-champ', name: '夺冠', range: '130–225', odds: ODDS_EDGE },
+  { key: 'zone-releg', name: '降级区', range: '0–95' },
+  { key: 'zone-mid', name: '中游', range: '96–112' },
+  { key: 'zone-euro', name: '欧战区', range: '113–129' },
+  { key: 'zone-champ', name: '夺冠', range: '130–225' },
 ]
 
-export default function LineUp({ balance }) {
+export default function LineUp({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk 模式被 400px feed 收窄——1200 以下居中 DEMO 与 How-to-Play 相撞，隐藏
@@ -100,17 +136,150 @@ export default function LineUp({ balance }) {
   const [muted, setMuted] = useState(false)
   const [bet, setBet] = useState(10)
   const [picks, setPicks] = useState(() => new Set())
-  const [lineSel, setLineSel] = useState(0)   // 行式盘 L1-L5 选线器
+  const [betsPlaced, setBetsPlaced] = useState(() => new Map())
+  const [view, setView] = useState('A')       // 投注盘视图：A 列表 / B 矩阵
+  const [dim, setDim] = useState(0)           // A 视图维度：0 全局，1-5 行 L1-L5
+  const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
+
+  // ---- 轮次状态机 ----
+  // betting | drawing | settled
+  const [gamePhase, setGamePhase] = useState('betting')
+  const [countdown, setCountdown] = useState(BETTING_T)
+  const [roundNo, setRoundNo] = useState(88)
+  const [lastRound, setLastRound] = useState(SEED_LAST)
+  const [road, setRoad] = useState(SEED_ROAD)            // 珠盘路（旧→新）
+  const [result, setResult] = useState(null)             // { hits:Set, winTotal }
+  const [toasts, setToasts] = useState([])
+
+  const phaseRef = useRef('betting')
+  const cdRef = useRef(BETTING_T)
+  const picksRef = useRef(picks)
+  const betsRef = useRef(new Map())
+  const lastBetsRef = useRef(new Map())          // 上局注单快照（重复投注用）
+  const [hasLast, setHasLast] = useState(false)
+  const betRef = useRef(bet)
+  const balanceRef = useRef(balance)
+  const pendingRef = useRef(null)
+  const toastIdRef = useRef(0)
+  const timersRef = useRef([])
+
+  useEffect(() => { balanceRef.current = balance }, [balance])
+  useEffect(() => { betRef.current = bet }, [bet])
+  useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
+
+  function pushToast(label, win) {
+    const id = ++toastIdRef.current
+    setToasts(t => [...t, { id, label, win }])
+    const tm = setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
+    timersRef.current.push(tm)
+  }
+
+  // 唯一赔付点：读 pendingRef 结果，按已下注 Map 一次性入账（无 push 项）
+  function settleRound() {
+    const r = pendingRef.current
+    const hits = hitsOf(r)
+    let winTotal = 0
+    betsRef.current.forEach((stake, k) => {
+      if (hits.has(k)) winTotal = round2(winTotal + stake * MARKETS[k].odds)
+    })
+    if (winTotal > 0) {
+      setBalance(b => round2(b + winTotal))
+      pushToast('本期命中', winTotal)
+    }
+    setLastRound(r)
+    setRoad(h => [...h, r.total >= 113 ? '大' : '小'].slice(-ROAD_CAP))
+    setResult({ hits, winTotal })
+    // 假注单本期落账（展示用，结果已定后的装饰随机）
+    setFeedBets(list => list.map(b => Math.random() < 0.45
+      ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
+      : { ...b, status: 'crashed' }))
+  }
+
+  // 单 interval 驱动整台状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
+  useEffect(() => {
+    const id = setInterval(() => {
+      cdRef.current -= 1
+      if (cdRef.current > 0) { setCountdown(cdRef.current); return }
+      const ph = phaseRef.current
+      const go = (next, ticks) => {
+        phaseRef.current = next; setGamePhase(next)
+        cdRef.current = ticks; setCountdown(ticks)
+      }
+      if (ph === 'betting') {
+        // 结果此刻全定 — drawing 相（后续舞台动画）只读，不再碰随机数
+        let cells = null
+        if (import.meta.env.DEV && window.__LU_FORCE) {   // 对账注入口（一次性消费）
+          cells = window.__LU_FORCE; window.__LU_FORCE = null
+        }
+        pendingRef.current = deriveRound(cells || drawGrid())
+        go('drawing', DRAW_T)
+      } else if (ph === 'drawing') {
+        settleRound()
+        go('settled', SETTLED_T)
+      } else {
+        // 清盘前快照本局注单（空局不覆盖，重复钮始终指向最近一张有效注单）
+        if (betsRef.current.size) {
+          lastBetsRef.current = new Map(betsRef.current)
+          setHasLast(true)
+        }
+        betsRef.current = new Map(); setBetsPlaced(new Map())
+        picksRef.current = new Set(); setPicks(new Set())
+        setResult(null)
+        setFeedBets(makeFeedBots())
+        setRoundNo(n => n + 1)
+        go('betting', BETTING_T)
+      }
+    }, TICK_MS)
+    return () => clearInterval(id)
+    // 引擎全程走 refs，空依赖单心跳
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const toggleSel = key => {
+    if (phaseRef.current !== 'betting') return   // BETTING 截止后全盘锁死
     setPicks(s => {
       const n = new Set(s)
       if (n.has(key)) n.delete(key); else n.add(key)
+      picksRef.current = n
       return n
     })
   }
 
-  // ---- 样式件（选中=金框，同 Derby 惯例）----
+  // 唯一扣注点：确认/重复两个入口都走这一条（一次性扣款后入 betsRef）
+  function placeBets(entries) {
+    if (phaseRef.current !== 'betting') return false
+    let total = 0
+    entries.forEach(s => { total = round2(total + s) })
+    if (!entries.size || total <= 0 || total > balanceRef.current) return false
+    setBalance(b => round2(b - total))
+    balanceRef.current = round2(balanceRef.current - total)
+    entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
+    setBetsPlaced(new Map(betsRef.current))
+    return true
+  }
+  function confirmBets() {
+    const amount = betRef.current
+    if (amount < 1) return
+    if (placeBets(new Map([...picksRef.current].map(k => [k, amount])))) {
+      picksRef.current = new Set()
+      setPicks(new Set())
+    }
+  }
+  // 重复投注 = 复用上局注单快照原额重下
+  function repeatBets() {
+    placeBets(new Map(lastBetsRef.current))
+  }
+
+  const betting = gamePhase === 'betting'
+  const confirmTotal = round2(bet * picks.size)
+  const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
+  let lastTotal = 0
+  lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
+  const repeatOk = betting && hasLast && lastTotal > 0 && lastTotal <= balance
+  const cur = pendingRef.current
+  const shown = gamePhase === 'settled' && cur ? cur : lastRound   // 开奖区当前展示局
+
+  // ---- 样式件（选中=金框；命中=绿框绿晕，同 Derby 惯例）----
   const navPill = {
     padding: '5px 16px', borderRadius: RADIUS.pill,
     background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
@@ -118,12 +287,17 @@ export default function LineUp({ balance }) {
   }
   const cellBase = (key, bg) => {
     const sel = picks.has(key)
+    const hit = result?.hits?.has(key) && betsPlaced.has(key)
+    const placed = betsPlaced.has(key)
     return {
       flex: 1, minWidth: 0, padding: isMobile ? '6px 2px' : '6px 4px',
-      borderRadius: 10, cursor: 'pointer',
+      borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
       background: bg,
-      border: `1.5px solid ${sel ? DERBY.gold : 'rgba(255,255,255,0.16)'}`,
-      boxShadow: sel ? '0 0 10px rgba(255,213,79,0.45)' : 'inset 0 1px 0 rgba(255,255,255,0.08)',
+      border: `1.5px solid ${hit ? DERBY.sel : sel || placed ? DERBY.gold : 'rgba(255,255,255,0.16)'}`,
+      boxShadow: hit
+        ? '0 0 12px rgba(53,208,127,0.6)'
+        : sel ? '0 0 10px rgba(255,213,79,0.45)' : 'inset 0 1px 0 rgba(255,255,255,0.08)',
+      opacity: betting || hit || placed ? 1 : 0.75,
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
       transition: 'filter 0.12s, border-color 0.12s, box-shadow 0.15s',
       boxSizing: 'border-box', position: 'relative',
@@ -138,8 +312,21 @@ export default function LineUp({ balance }) {
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
     boxSizing: 'border-box',
   }
+  const stakeChip = key => betsPlaced.has(key) && (
+    <span style={{
+      position: 'absolute', top: 2, right: 3,
+      padding: '1px 5px', borderRadius: RADIUS.pill,
+      background: DERBY.sel, color: '#083a1b',
+      fontSize: 8, fontWeight: 900,
+    }}>${betsPlaced.get(key)}</span>
+  )
 
-  // ---- 场馆头行（desk 走骨架 34px 历史行位；倒计时静态占位）----
+  // ---- 场馆头行（desk 走骨架 34px 历史行位）----
+  const phaseChip = betting
+    ? { text: `⏱ 00:${String(Math.ceil(countdown / 2)).padStart(2, '0')}`, c: DERBY.sel }
+    : gamePhase === 'drawing'
+      ? { text: '开奖中…', c: DERBY.orange }
+      : { text: result && result.winTotal > 0 ? `+$${result.winTotal.toFixed(2)}` : '已开奖', c: DERBY.gold }
   const roundBar = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
@@ -152,23 +339,22 @@ export default function LineUp({ balance }) {
         color: DERBY.gold, fontSize: 12, fontWeight: 900, letterSpacing: 1.5,
         fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap',
       }}>{VENUE}</span>
-      <span style={{ color: DERBY.dim, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>#{ROUND_ID}</span>
+      <span style={{ color: DERBY.dim, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>
+        #{ROUND_DATE}-{String(roundNo).padStart(3, '0')}
+      </span>
       <span style={{
         padding: '2px 10px', borderRadius: RADIUS.pill,
-        background: 'rgba(0,0,0,0.35)', border: `1px solid ${DERBY.sel}`,
-        color: DERBY.sel, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>⏱ 00:18</span>
-      {/* 重复投注（无逻辑占位，引擎单接） */}
-      <span style={{
-        marginLeft: 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
-        background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-        color: DERBY.text, fontSize: 11, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>↻ 重复投注</span>
+        background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
+        color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
+      }}>{phaseChip.text}</span>
     </div>
   )
 
   // ---- ① 开奖区：5×5 号码牌（行标 + 行和）+ 统计带（主客计数/总和/高低）----
-  const tile = isMobile ? 30 : isDesk ? 32 : 36   // desk 收一档给盘区留高
+  // drawing 相静态压暗占位（开奖舞台动画后续单换）；settled 直出本局，其余回显上局
+  const tile = isMobile ? 30 : isDesk ? 26 : 36   // desk 收档给盘区留高
+  const drawing = gamePhase === 'drawing'
+  const zoneTitle = drawing ? '首发阵容 · 开奖中' : gamePhase === 'settled' ? '首发阵容 · 本局' : '首发阵容 · 上局'
   const drawZone = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
@@ -177,12 +363,17 @@ export default function LineUp({ balance }) {
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       display: 'flex', flexDirection: 'column', gap: isMobile ? 3 : 4,
       boxSizing: 'border-box',
+      opacity: drawing ? 0.55 : 1,
+      transition: 'opacity 0.3s',
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ color: DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>首发阵容 · 上局</span>
-        <span style={{ color: DERBY.dim, fontSize: 10, fontWeight: 800 }}>25 数 · 0-9</span>
-      </div>
-      {GRID.map((row, ri) => (
+      {/* desk 头行并入底部统计带省一行 */}
+      {!isDesk && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ color: drawing ? DERBY.orange : DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>{zoneTitle}</span>
+          <span style={{ color: DERBY.dim, fontSize: 10, fontWeight: 800 }}>25 数 · 0-9</span>
+        </div>
+      )}
+      {shown.rows.map((row, ri) => (
         <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 6, justifyContent: 'center' }}>
           {/* 行标：L 号圈 + 位置名 */}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, flex: '0 0 auto', width: isMobile ? 58 : 72 }}>
@@ -214,7 +405,7 @@ export default function LineUp({ balance }) {
             padding: '2px 6px', borderRadius: RADIUS.pill,
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.2)',
             color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900,
-          }}>{ROW_SUMS[ri]}</span>
+          }}>{shown.rowSums[ri]}</span>
         </div>
       ))}
       {/* 统计带：主/客计数 + 总和大字 + 高/低 */}
@@ -223,99 +414,170 @@ export default function LineUp({ balance }) {
         gap: isMobile ? 6 : 10, paddingTop: 2, flexWrap: 'wrap',
       }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {isDesk && (
+            <span style={{ color: drawing ? DERBY.orange : DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginRight: 8 }}>{zoneTitle}</span>
+          )}
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: DERBY.home, display: 'inline-block' }} />
-          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>主 {HOME_COUNT}</span>
+          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>主 {shown.homeCount}</span>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: DERBY.away, display: 'inline-block', marginLeft: 6 }} />
-          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>客 {AWAY_COUNT}</span>
+          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>客 {shown.awayCount}</span>
         </span>
         <span style={{
           padding: '2px 14px', borderRadius: RADIUS.pill,
           background: DERBY.gold, color: '#3a2c00',
           fontSize: isMobile ? 13 : 15, fontWeight: 900, letterSpacing: 0.5,
-        }}>SUM {TOTAL_SUM}</span>
+        }}>SUM {shown.total}</span>
         <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>
-          高 {HIGH_COUNT} <span style={{ color: DERBY.dim, fontWeight: 700 }}>/</span> 低 {LOW_COUNT}
+          高 {shown.highCount} <span style={{ color: DERBY.dim, fontWeight: 700 }}>/</span> 低 {shown.lowCount}
         </span>
       </div>
     </div>
   )
 
-  // ---- ② 盘区：普通盘（全局 25 数）+ 行式盘（L1-L5 单行 5 数）----
-  const commonPairs = [
-    [
-      { key: 'big', name: '大', range: '113–225', bg: DERBY.grey },
-      { key: 'small', name: '小', range: '0–112', bg: DERBY.grey },
-      { key: 'odd', name: '单', range: '和值单', bg: DERBY.grey },
-      { key: 'even', name: '双', range: '和值双', bg: DERBY.grey },
-    ],
-    [
-      { key: 'home-more', name: '主色多', range: '主蓝 ≥13', bg: DERBY.home },
-      { key: 'away-more', name: '客色多', range: '客红 ≥13', bg: DERBY.away },
-      { key: 'high', name: '高', range: '5-9 ≥13', bg: DERBY.grey },
-      { key: 'low', name: '低', range: '0-4 ≥13', bg: DERBY.grey },
-    ],
-  ]
-  const commonBoard = (
-    <div style={{ ...secBox, ...(isDesk ? { flex: '3 1 0', minWidth: 0 } : {}) }}>
-      <div style={secHead}>普通盘 · 全局 25 数</div>
-      {commonPairs.map((cells, i) => (
-        <div key={i} style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 6 }}>
-          {cells.map(m => (
-            <button key={m.key} type="button" className="luCell" onClick={() => toggleSel(m.key)}
-              style={cellBase(m.key, m.bg)}>
-              <span style={cellName}>{m.name}</span>
-              <span style={cellRange}>{m.range}</span>
-              <span style={cellOdds}>{ODDS_MAIN.toFixed(2)}</span>
-            </button>
-          ))}
-        </div>
-      ))}
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
-        {ZONES.map(z => (
-          <button key={z.key} type="button" className="luCell" onClick={() => toggleSel(z.key)}
-            style={cellBase(z.key, DERBY.grey)}>
-            <span style={cellName}>{z.name}</span>
-            <span style={cellRange}>{z.range}</span>
-            <span style={cellOdds}>{z.odds.toFixed(2)}</span>
-          </button>
-        ))}
-      </div>
+  // ---- ② 盘区：A 列表 / B 矩阵 双视图（42 键与 MARKETS 同源同 key，选中态互通）----
+  // 维度→键名映射：0 全局走普通盘键，1-5 走行式键；引擎无「行高低/行段位」键，禁造键
+  const keyOf = (d, slot) => d === 0
+    ? { home: 'home-more', away: 'away-more', big: 'big', small: 'small', odd: 'odd', even: 'even' }[slot]
+    : `L${d}-${slot}`
+  const DIM_CHIPS = ['全局', ...ROW_LABELS.map((l, i) => `L${i + 1}${l}`)]
+  // 键格两款：row = 单行（名称左/区间中/赔率右，照参考 Common Bets 行式）；
+  // col = 竖排三行（段位 4 键窄格用）
+  const marketCell = (key, name, range, bg, layout = 'row') => (
+    <button key={key} type="button" className="luCell" data-key={key} disabled={!betting} onClick={() => toggleSel(key)}
+      style={{
+        ...cellBase(key, bg),
+        ...(layout === 'row' ? {
+          flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+          padding: isMobile ? '6px 8px' : '5px 12px', gap: 6,
+        } : { padding: isMobile ? '4px 2px' : '4px' }),
+      }}>
+      <span style={cellName}>{name}</span>
+      <span style={layout === 'row' ? { ...cellRange, flex: 1, textAlign: 'center' } : cellRange}>{range}</span>
+      <span style={cellOdds}>{MARKETS[key].odds.toFixed(2)}</span>
+      {stakeChip(key)}
+    </button>
+  )
+  // 高低对 + 段位排（A 全局尾部 / B 矩阵下方共用同一份）
+  const hiLoPair = (
+    <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
+      {marketCell('high', '高', '5-9 ≥13', DERBY.grey)}
+      {marketCell('low', '低', '0-4 ≥13', DERBY.grey)}
     </div>
   )
-  const lineBoard = (
-    <div style={{ ...secBox, ...(isDesk ? { flex: '2 1 0', minWidth: 0 } : {}) }}>
-      <div style={secHead}>行式盘 · 单行 5 数</div>
+  const zonesRow = (
+    <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
+      {ZONES.map(z => marketCell(z.key, z.name, z.range, DERBY.grey, isMobile ? 'col' : 'row'))}
+    </div>
+  )
+  // A 视图：维度 chip + 成对两列（行序固定 主客 → 大小 → 单双 → 高低）
+  const pairRows = d => [
+    [
+      { slot: 'home', name: '主色多', range: d === 0 ? '主蓝 ≥13' : '主蓝 ≥3', bg: DERBY.home },
+      { slot: 'away', name: '客色多', range: d === 0 ? '客红 ≥13' : '客红 ≥3', bg: DERBY.away },
+    ],
+    [
+      { slot: 'big', name: '大', range: d === 0 ? '113–225' : '23–45', bg: DERBY.grey },
+      { slot: 'small', name: '小', range: d === 0 ? '0–112' : '0–22', bg: DERBY.grey },
+    ],
+    [
+      { slot: 'odd', name: '单', range: d === 0 ? '和值单' : '行和单', bg: DERBY.grey },
+      { slot: 'even', name: '双', range: d === 0 ? '和值双' : '行和双', bg: DERBY.grey },
+    ],
+  ]
+  const viewA = (
+    <>
       <div style={{ display: 'flex', gap: 4, marginBottom: isMobile ? 5 : 6, flexWrap: 'wrap' }}>
-        {ROW_LABELS.map((label, i) => (
-          <button key={i} type="button" onClick={() => setLineSel(i)} style={{
+        {DIM_CHIPS.map((label, i) => (
+          <button key={i} type="button" onClick={() => setDim(i)} style={{
             padding: '3px 9px', borderRadius: RADIUS.pill,
-            background: lineSel === i ? DERBY.sel : 'rgba(0,0,0,0.35)',
-            color: lineSel === i ? '#083a1b' : DERBY.dim,
-            border: `1px solid ${lineSel === i ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
+            background: dim === i ? DERBY.sel : 'rgba(0,0,0,0.35)',
+            color: dim === i ? '#083a1b' : DERBY.dim,
+            border: `1px solid ${dim === i ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
             fontSize: 9.5, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer', whiteSpace: 'nowrap',
-          }}>L{i + 1} {label}</button>
+          }}>{label}</button>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
-        {[
-          { k: 'big', name: '大', range: '23–45' },
-          { k: 'small', name: '小', range: '0–22' },
-          { k: 'odd', name: '单', range: '行和单' },
-          { k: 'even', name: '双', range: '行和双' },
-        ].map(m => (
-          <button key={m.k} type="button" className="luCell" onClick={() => toggleSel(`L${lineSel + 1}-${m.k}`)}
-            style={cellBase(`L${lineSel + 1}-${m.k}`, DERBY.grey)}>
-            <span style={cellName}>{m.name}</span>
-            <span style={cellRange}>{m.range}</span>
-            <span style={cellOdds}>{ODDS_MAIN.toFixed(2)}</span>
-          </button>
+      {pairRows(dim).map((pair, i) => (
+        <div key={i} style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 6 }}>
+          {pair.map(m => marketCell(keyOf(dim, m.slot), m.name, m.range, m.bg))}
+        </div>
+      ))}
+      {/* 高低 + 段位仅全局维度（行式引擎无此键） */}
+      {dim === 0 && hiLoPair}
+      {dim === 0 && zonesRow}
+    </>
+  )
+  // B 视图：6×6 矩阵（列=主客大小单双，行=全局/L1-L5，格内只赔率）+ 高低/段位排底
+  const MATRIX_COLS = [
+    { slot: 'home', name: '主', bg: DERBY.home },
+    { slot: 'away', name: '客', bg: DERBY.away },
+    { slot: 'big', name: '大', bg: DERBY.grey },
+    { slot: 'small', name: '小', bg: DERBY.grey },
+    { slot: 'odd', name: '单', bg: DERBY.grey },
+    { slot: 'even', name: '双', bg: DERBY.grey },
+  ]
+  const viewB = (
+    <>
+      <div style={{
+        display: 'grid', gridTemplateColumns: `${isMobile ? 50 : 64}px repeat(6, 1fr)`,
+        gap: 3, marginBottom: isMobile ? 5 : 6,
+      }}>
+        <span />
+        {MATRIX_COLS.map(c => (
+          <span key={c.slot} style={{
+            textAlign: 'center', fontSize: isMobile ? 10 : 11, fontWeight: 900,
+            color: c.slot === 'home' ? '#7fa8e8' : c.slot === 'away' ? '#f0938a' : DERBY.dim,
+          }}>{c.name}</span>
+        ))}
+        {[0, 1, 2, 3, 4, 5].map(d => (
+          [
+            <span key={`r${d}`} style={{
+              display: 'inline-flex', alignItems: 'center',
+              color: DERBY.text, fontSize: isMobile ? 9.5 : 10.5, fontWeight: 900, whiteSpace: 'nowrap',
+            }}>{d === 0 ? '全局' : `L${d} ${ROW_LABELS[d - 1]}`}</span>,
+            ...MATRIX_COLS.map(c => {
+              const key = keyOf(d, c.slot)
+              return (
+                <button key={key} type="button" className="luCell" data-key={key} disabled={!betting}
+                  onClick={() => toggleSel(key)}
+                  style={{ ...cellBase(key, c.bg), padding: '2px 0' }}>
+                  <span style={cellOdds}>{MARKETS[key].odds.toFixed(2)}</span>
+                  {stakeChip(key)}
+                </button>
+              )
+            }),
+          ]
         ))}
       </div>
+      {hiLoPair}
+      {zonesRow}
+    </>
+  )
+  const marketSection = (
+    <div style={secBox}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={secHead}>投注盘 · {view === 'A' ? DIM_CHIPS[dim] : '总览矩阵'}</div>
+        {/* A/B 小切换钮（右上角，选中态两视图互通） */}
+        <div style={{ display: 'flex', gap: 2, marginBottom: 4 }}>
+          {['A', 'B'].map(v => (
+            <button key={v} type="button" onClick={() => setView(v)} style={{
+              padding: '2px 8px', borderRadius: RADIUS.pill,
+              background: view === v ? DERBY.sel : 'rgba(0,0,0,0.35)',
+              color: view === v ? '#083a1b' : DERBY.dim,
+              border: `1px solid ${view === v ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
+              fontSize: 9, fontWeight: 900, cursor: 'pointer', whiteSpace: 'nowrap',
+            }}>{v === 'A' ? 'A 列表' : 'B 矩阵'}</button>
+          ))}
+        </div>
+      </div>
+      {view === 'A' ? viewA : viewB}
     </div>
   )
 
-  // ---- ③ 珠盘路（大小单轨，样式同 Half Time；静态种子）----
+  // ---- ③ 珠盘路（大小单轨，样式同 Half Time；真历史滚动，容量 120）----
   const ROAD_COLS = 20
+  const roadBead = isMobile ? 18 : 14   // 移动端珠子大一档（可辨），桌面压一档保总高（同 Derby）
+  const beads = road.slice(-ROAD_CAP)
   const beadRoad = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
@@ -335,17 +597,17 @@ export default function LineUp({ balance }) {
       }}>
         <div style={{
           display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`,
+          gridTemplateRows: `repeat(6, ${roadBead}px)`, gridTemplateColumns: `repeat(${ROAD_COLS}, ${roadBead}px)`,
           gap: 2, width: 'max-content',
         }}>
           {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const t = SEED_ROAD[i]
+            const t = beads[i]
             return (
               <span key={i} style={{
-                width: 18, height: 18, borderRadius: '50%',
+                width: roadBead, height: roadBead, borderRadius: '50%',
                 background: t ? (t === '大' ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.05)',
                 border: t ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: COLORS.white, fontSize: 9, fontWeight: 900,
+                color: COLORS.white, fontSize: roadBead / 2, fontWeight: 900,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 boxSizing: 'border-box',
               }}>{t || ''}</span>
@@ -364,7 +626,7 @@ export default function LineUp({ balance }) {
       display: 'flex', flexDirection: 'column',
       ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
     }}>
-      <style>{`.luCell:hover { filter: brightness(1.2); }`}</style>
+      <style>{`.luCell:hover:not(:disabled) { filter: brightness(1.2); }`}</style>
 
       {/* ---- top bar ---- */}
       <div style={{
@@ -413,16 +675,15 @@ export default function LineUp({ balance }) {
       {/* ① 开奖区（顶部）：5×5 号码牌 + 统计带 */}
       {drawZone}
 
-      {/* ② 盘区两组（中部；desk 并排双列压总高，空间不足内部纵滚兜底） */}
+      {/* ② 盘区（中部，单一盘区 A/B 双视图；空间不足内部纵滚兜底） */}
       <div style={{
         flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
-        display: 'flex', flexDirection: isDesk ? 'row' : 'column',
-        alignItems: isDesk ? 'stretch' : undefined,
+        display: 'flex', flexDirection: 'column',
         padding: isMobile ? '6px 12px' : '4px 18px', boxSizing: 'border-box',
-        gap: isDesk ? 8 : 4, overflowY: 'auto',
+        gap: 4, overflowY: 'auto',
       }}>
-        {commonBoard}
-        {lineBoard}
+        <WinToast toasts={toasts} />
+        {marketSection}
       </div>
 
       {/* 弹性垫片：把珠盘路推向底部贴注栏 */}
@@ -431,43 +692,74 @@ export default function LineUp({ balance }) {
       {/* ③ 珠盘路（底部，大小单轨） */}
       {beadRoad}
 
-      {/* ---- ④ bottom bet band — pinned（ChipQuickBet + BetButton 共享件直接接）---- */}
+      {/* ---- ④ bottom bet band — pinned，grid 4列×2行：
+           列1-2 面额四格（10/100 上、50/500 下）｜列3 Bet USD 上/重复钮下｜列4 下注大方钮跨两行 ---- */}
       <div style={{
         flex: '0 0 auto',
-        padding: '10px 14px',
+        padding: '6px 12px',
         background: DERBY.band,
         borderTop: '1px solid rgba(0,0,0,0.25)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
+        position: 'relative', zIndex: 1,
       }}>
         <div style={{
-          padding: '5px 18px', borderRadius: RADIUS.pill,
-          background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-          textAlign: 'center', lineHeight: 1.2,
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+          gridTemplateRows: 'repeat(2, 28px)',
+          gap: 6,
+          maxWidth: 480, margin: '0 auto',
         }}>
-          <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
-          <input
-            value={bet}
-            onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
-            style={{
-              width: 56, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-              color: COLORS.white, fontSize: 15, fontWeight: 900,
-            }}
-          />
-        </div>
-        <div style={{ width: isMobile ? 132 : 150 }}>
-          <ChipQuickBet value={bet} onSelect={setBet} />
-        </div>
-        <div style={{ width: isMobile ? 170 : 230 }}>
-          {/* 纯 UI 占位：onClick 空转，引擎单接 confirmBets */}
-          <BetButton
-            state="bet"
-            label={`下注 · ${picks.size} 格`}
-            sub={`$${(bet * picks.size).toFixed(0)}`}
-            onClick={() => {}}
-            disabled={picks.size === 0}
-            stretch
-          />
+          {[
+            { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+            { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+          ].map(({ v, col, row }) => (
+            <button key={v} type="button" className="luChip" disabled={!betting} onClick={() => setBet(v)} style={{
+              gridColumn: col, gridRow: row,
+              width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+              background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
+              border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
+              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
+              boxSizing: 'border-box',
+            }}>{v}</button>
+          ))}
+          <div style={{
+            gridColumn: 3, gridRow: 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+            borderRadius: 8, padding: '0 6px',
+            background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+          }}>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <input
+              value={bet}
+              disabled={!betting}
+              onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              style={{
+                width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
+                color: COLORS.white, fontSize: 14, fontWeight: 900,
+              }}
+            />
+          </div>
+          <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
+            gridColumn: 3, gridRow: 2,
+            width: '100%', height: '100%', borderRadius: 8,
+            fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+            color: repeatOk ? DERBY.text : DERBY.dim,
+            background: 'rgba(0,0,0,0.35)',
+            border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
+            cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+          <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+            <BetButton
+              state="bet"
+              label={betting ? `下注 ${picks.size} 格` : gamePhase === 'settled' ? '已结算' : '已锁盘'}
+              sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+              onClick={confirmBets}
+              disabled={!confirmOk}
+              stretch
+            />
+          </div>
         </div>
       </div>
     </Panel>
@@ -495,7 +787,7 @@ export default function LineUp({ balance }) {
 
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
-            <BetFeed bets={SEED_FEED} myBets={[]} online={914} fill />
+            <BetFeed bets={feedBets} myBets={[]} online={914} fill />
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
             {/* 场馆头行占骨架历史行位（34px 行惯例） */}
