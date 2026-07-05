@@ -8,6 +8,8 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import cardRedImg from '../assets/shared/card_red.png'
+import cardYellowImg from '../assets/shared/card_yellow.png'
 
 // Line Up — ATOM 5×5 数字彩（25 个 0-9 独立均匀随机数排成五行），第 17 卡。
 // X2：结算引擎 + 轮次状态机 + 赔率参数化。开奖舞台动画走后续单（静态直出）。
@@ -15,9 +17,12 @@ import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 //     + 注栏 grid 4列×2行 + 重复投注；MARKETS/结算零改动。
 // X4：drawing 相位开奖舞台（25 格乱序砸落 + 滚数快闪 + 行和/TOTAL 累加滚动
 //     + TOTAL 砸出）+ SFX（落格 tick/行满短哨/终场哨）；引擎/结算零改动。
+// X6：开奖区红黄牌皮 —— Red(0,2,6,7,8)=红牌 / Black(1,3,4,5,9)=黄牌（共享
+//     card_red/card_yellow 资产），主色/客色文案改黄牌/红牌；MARKETS key/结算零改动
+//     （home-more/away-more 等键名沿用，仅显示层换皮）。
 // 规则对照 /tmp/atom_ref/atom_rules.txt（help.sbobet.com Atom Betting Rules #4303）原文：
-//   Red  = "drawn at 0, 2, 6, 7 and 8, which are classified as Red"   → 本作客红
-//   Black = "drawn at 1, 3, 4, 5 and 9, which are classified as Black" → 本作主蓝
+//   Red  = "drawn at 0, 2, 6, 7 and 8, which are classified as Red"   → 本作红牌
+//   Black = "drawn at 1, 3, 4, 5 and 9, which are classified as Black" → 本作黄牌
 //   High/Low = 5-9 / 0-4；全局判定 ≥13 计数、行式判定 ≥3 计数
 //   段位 = Spring[0-95] 7.50 / Summer[96-112] 2.30 / Autumn[113-129] 2.30 / Winter[130-225] 7.50
 //     （足球叙事换皮：降级区/中游/欧战区/夺冠）
@@ -25,7 +30,8 @@ import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 // 25/5 为奇数计数无平局，225/45 为奇数和值无中点格）。
 
 // ---------- 引擎（纯函数区，禁副作用）----------
-// 归类表（参考原文映射）：客红 = Red(0,2,6,7,8)；主蓝 = Black(1,3,4,5,9)；高 = 5-9 / 低 = 0-4
+// 归类表（参考原文映射）：红牌 = Red(0,2,6,7,8)；黄牌 = Black(1,3,4,5,9)；高 = 5-9 / 低 = 0-4
+// （键名沿用 away=红/home=黄 的 X1 命名，显示层 X6 起走红黄牌皮）
 export const AWAY_DIGITS = new Set([0, 2, 6, 7, 8])
 export const HIGH_DIGITS = new Set([5, 6, 7, 8, 9])
 
@@ -34,7 +40,7 @@ export function drawGrid(rng = Math.random) {
   return Array.from({ length: 25 }, () => Math.floor(rng() * 10))
 }
 
-// 派生：行切分/行和/总和/主客色计数/高低计数（全部结算判定只读这一份）
+// 派生：行切分/行和/总和/红黄牌计数/高低计数（全部结算判定只读这一份）
 const sumOf = a => a.reduce((x, y) => x + y, 0)
 export function deriveRound(cells) {
   const rows = [0, 1, 2, 3, 4].map(i => cells.slice(i * 5, i * 5 + 5))
@@ -51,7 +57,7 @@ export function deriveRound(cells) {
 }
 
 // 赔率常量表 — 集中一处（推导注释，BigInt 精确枚举对账 scratchpad/lineup-exact.mjs）：
-//   二元盘（大小/单双/主客色/高低 + 行式全部）：真实概率精确 = 0.5 ——
+//   二元盘（大小/单双/红黄牌/高低 + 行式全部）：真实概率精确 = 0.5 ——
 //     和值分布关于 112.5（行 22.5）对称且 225/45 为奇数无中点质量；
 //     计数盘每格恰好 5/5 数字二分、25/5 为奇数无平局 ⇒ 1.95 × 0.5 = 97.5%（带上沿）。
 //   段位盘（单据定稿 2026-07-05）：精确概率 降级/夺冠 0.118991、中游/欧战 0.381009；
@@ -515,7 +521,9 @@ export default function LineUp({ balance, setBalance }) {
   // ---- ① 开奖区：5×5 号码牌（行标 + 行和）+ 统计带（主客计数/TOTAL/高低）----
   // drawing 相位挂开奖舞台（乱序砸落+滚数快闪+行和/TOTAL 累加）；settled 直出本局，
   // 其余回显上局。静态与舞台视图同构，网格渲染共用 gridBody
-  const tile = isMobile ? 30 : isDesk ? 26 : 36   // desk 收档给盘区留高
+  // 裁判牌尺寸（竖矩形 ≈26×34，desk 收档给盘区留高）
+  const cardW = isMobile ? 24 : isDesk ? 22 : 26
+  const cardH = isMobile ? 31 : isDesk ? 28 : 34
   const drawing = gamePhase === 'drawing'
   const zoneTitle = drawing ? '首发阵容 · 开奖中' : gamePhase === 'settled' ? '首发阵容 · 本局' : '首发阵容 · 上局'
   const staticView = {
@@ -547,31 +555,45 @@ export default function LineUp({ balance, setBalance }) {
             }}>L{ri + 1}</span>
             <span style={{ color: DERBY.text, fontSize: isMobile ? 10 : 11, fontWeight: 900, whiteSpace: 'nowrap' }}>{ROW_LABELS[ri]}</span>
           </span>
-          {/* 5 号码牌：主蓝 = Black(1,3,4,5,9) / 客红 = Red(0,2,6,7,8)；
-              舞台三态：待落=淡格 / 快闪=灰底滚数 / 已定格=队色+轻弹 */}
+          {/* 5 张裁判牌：红牌 = Red(0,2,6,7,8) / 黄牌 = Black(1,3,4,5,9)，交替 ±4° 歪斜；
+              舞台三态：待落=淡牌位 / 快闪=灰牌滚数 / 已定格=红黄牌图+轻弹（形变换皮，时间轴不动） */}
           {[0, 1, 2, 3, 4].map(ci => {
             const i = ri * 5 + ci
             const d = view.digits[i]
             const f = view.flash?.get(i)
             const pop = view.popAge?.get(i)
             const scale = pop != null ? 1.35 - 0.35 * (pop / ANIM_POP) : 1
+            const tilt = i % 2 === 0 ? -4 : 4
+            const isRed = d != null && AWAY_DIGITS.has(d)
             return (
               <span key={ci} data-cell={i} data-landed={d != null ? 1 : 0}
                 data-final={drawing && cur ? cur.cells[i] : d ?? ''}
                 style={{
-                  width: tile, height: tile, borderRadius: 8,
+                  position: 'relative',
+                  width: cardW, height: cardH, borderRadius: 4,
                   background: d != null
-                    ? (AWAY_DIGITS.has(d) ? DERBY.away : DERBY.home)
+                    ? 'none'
                     : f != null ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.08)',
-                  border: '1px solid rgba(0,0,0,0.35)',
-                  boxShadow: d != null ? 'inset 0 2px 3px rgba(255,255,255,0.25), 0 1px 3px rgba(0,0,0,0.35)' : 'none',
-                  color: d != null ? COLORS.white : 'rgba(255,255,255,0.7)',
-                  fontSize: tile * 0.5, fontWeight: 900,
+                  border: d != null ? 'none' : '1px solid rgba(0,0,0,0.35)',
+                  color: d != null ? (isRed ? COLORS.white : '#3a2c00') : 'rgba(255,255,255,0.7)',
+                  fontSize: cardH * 0.45, fontWeight: 900,
                   fontFamily: "'Space Grotesk', sans-serif",
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   boxSizing: 'border-box', flex: '0 0 auto',
-                  transform: `scale(${scale})`,
-                }}>{d ?? (f != null ? f : '')}</span>
+                  transform: `rotate(${tilt}deg) scale(${scale})`,
+                }}>
+                {d != null && (
+                  // 资产 1024² 含透明边（实牌约占 56%×76%，偏移 21%/11%）——
+                  // 按包围盒放大补偿，让实牌恰好铺满 26×34 牌位
+                  <img src={isRed ? cardRedImg : cardYellowImg} alt="" draggable={false} style={{
+                    position: 'absolute', width: '178%', height: '131%',
+                    left: '-38%', top: '-15%', maxWidth: 'none',
+                    pointerEvents: 'none',
+                    filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.35))',
+                  }} />
+                )}
+                <span style={{ position: 'relative' }}>{d ?? (f != null ? f : '')}</span>
+              </span>
             )
           })}
           {/* 行尾行和（舞台期随落格累加滚动） */}
@@ -586,16 +608,16 @@ export default function LineUp({ balance, setBalance }) {
       {/* 统计带：主/客计数 + TOTAL 大字（砸出放大一拍）+ 高/低 */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: isMobile ? 6 : 10, paddingTop: 2, flexWrap: 'wrap',
+        gap: isMobile ? 6 : 10, paddingTop: isDesk ? 0 : 2, flexWrap: 'wrap',
       }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {isDesk && (
             <span style={{ color: drawing ? DERBY.orange : DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginRight: 8 }}>{zoneTitle}</span>
           )}
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: DERBY.home, display: 'inline-block' }} />
-          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>主 {view.homeCount}</span>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: DERBY.away, display: 'inline-block', marginLeft: 6 }} />
-          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>客 {view.awayCount}</span>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: DERBY.away, display: 'inline-block' }} />
+          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>红牌 {view.awayCount}</span>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: DERBY.gold, display: 'inline-block', marginLeft: 6 }} />
+          <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>黄牌 {view.homeCount}</span>
         </span>
         <span style={{
           padding: '2px 14px', borderRadius: RADIUS.pill,
@@ -613,9 +635,9 @@ export default function LineUp({ balance, setBalance }) {
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
       margin: isMobile ? '8px 12px 0' : '6px 18px 0',
-      borderRadius: 12, padding: isMobile ? '8px 8px 6px' : '8px 12px 8px',
+      borderRadius: 12, padding: isMobile ? '8px 8px 6px' : isDesk ? '6px 12px 6px' : '8px 12px 8px',
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
-      display: 'flex', flexDirection: 'column', gap: isMobile ? 3 : 4,
+      display: 'flex', flexDirection: 'column', gap: isMobile || isDesk ? 3 : 4,
       boxSizing: 'border-box',
     }}>
       {drawing && cur
@@ -662,8 +684,9 @@ export default function LineUp({ balance, setBalance }) {
   // A 视图：维度 chip + 成对两列（行序固定 主客 → 大小 → 单双 → 高低）
   const pairRows = d => [
     [
-      { slot: 'home', name: '主色多', range: d === 0 ? '主蓝 ≥13' : '主蓝 ≥3', bg: DERBY.home },
-      { slot: 'away', name: '客色多', range: d === 0 ? '客红 ≥13' : '客红 ≥3', bg: DERBY.away },
+      // 键名沿用 home/away（data-key 不动），显示层红黄牌皮；黄键底 = 共享 amberDeep
+      { slot: 'home', name: '黄牌多', range: d === 0 ? '黄牌 ≥13' : '黄牌 ≥3', bg: COLORS.amberDeep },
+      { slot: 'away', name: '红牌多', range: d === 0 ? '红牌 ≥13' : '红牌 ≥3', bg: DERBY.away },
     ],
     [
       { slot: 'big', name: '大', range: d === 0 ? '113–225' : '23–45', bg: DERBY.grey },
@@ -699,8 +722,8 @@ export default function LineUp({ balance, setBalance }) {
   )
   // B 视图：6×6 矩阵（列=主客大小单双，行=全局/L1-L5，格内只赔率）+ 高低/段位排底
   const MATRIX_COLS = [
-    { slot: 'home', name: '主', bg: DERBY.home },
-    { slot: 'away', name: '客', bg: DERBY.away },
+    { slot: 'home', name: '黄', bg: COLORS.amberDeep },
+    { slot: 'away', name: '红', bg: DERBY.away },
     { slot: 'big', name: '大', bg: DERBY.grey },
     { slot: 'small', name: '小', bg: DERBY.grey },
     { slot: 'odd', name: '单', bg: DERBY.grey },
@@ -716,7 +739,7 @@ export default function LineUp({ balance, setBalance }) {
         {MATRIX_COLS.map(c => (
           <span key={c.slot} style={{
             textAlign: 'center', fontSize: isMobile ? 10 : 11, fontWeight: 900,
-            color: c.slot === 'home' ? '#7fa8e8' : c.slot === 'away' ? '#f0938a' : DERBY.dim,
+            color: c.slot === 'home' ? DERBY.gold : c.slot === 'away' ? '#f0938a' : DERBY.dim,
           }}>{c.name}</span>
         ))}
         {[0, 1, 2, 3, 4, 5].map(d => (
