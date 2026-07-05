@@ -3,6 +3,7 @@ import GameLayout, { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
+import BetButton from '../components/shell/BetButton'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useBgm } from '../components/shell/bgmManager'
@@ -382,6 +383,8 @@ export default function DerbyDay({ balance, setBalance }) {
   const cdRef = useRef(BETTING_T)
   const picksRef = useRef(picks)
   const betsRef = useRef(new Map())
+  const lastBetsRef = useRef(new Map())          // 上局注单快照（重复投注用，照 Line Up 接法）
+  const [hasLast, setHasLast] = useState(false)
   const betRef = useRef(bet)
   const balanceRef = useRef(balance)
   const pendingRef = useRef(null)
@@ -487,6 +490,11 @@ export default function DerbyDay({ balance, setBalance }) {
         settleRound()
         go('settled', SETTLED_T)
       } else {
+        // 清盘前快照本局注单（空局不覆盖，重复钮始终指向最近一张有效注单）
+        if (betsRef.current.size) {
+          lastBetsRef.current = new Map(betsRef.current)
+          setHasLast(true)
+        }
         betsRef.current = new Map(); setBetsPlaced(new Map())
         picksRef.current = new Set(); setPicks(new Set())
         setResult(null)
@@ -511,24 +519,37 @@ export default function DerbyDay({ balance, setBalance }) {
     })
   }
 
-  // 唯一扣注点：注额 × 选格数，一次性扣款后入 betsRef，清空待选
-  function confirmBets() {
-    if (phaseRef.current !== 'betting') return
-    const keys = [...picksRef.current]
-    const amount = betRef.current
-    const total = round2(amount * keys.length)
-    if (!keys.length || amount < 1 || total > balanceRef.current) return
+  // 唯一扣注点：确认/重复两个入口都走这一条（一次性扣款后入 betsRef，照 Line Up 接法）
+  function placeBets(entries) {
+    if (phaseRef.current !== 'betting') return false
+    let total = 0
+    entries.forEach(s => { total = round2(total + s) })
+    if (!entries.size || total <= 0 || total > balanceRef.current) return false
     setBalance(b => round2(b - total))
     balanceRef.current = round2(balanceRef.current - total)
-    keys.forEach(k => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + amount)))
+    entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
     setBetsPlaced(new Map(betsRef.current))
-    picksRef.current = new Set()
-    setPicks(new Set())
+    return true
+  }
+  function confirmBets() {
+    const amount = betRef.current
+    if (amount < 1) return
+    if (placeBets(new Map([...picksRef.current].map(k => [k, amount])))) {
+      picksRef.current = new Set()
+      setPicks(new Set())
+    }
+  }
+  // 重复投注 = 复用上局注单快照原键原额重下（结算含 push 退注路径不碰）
+  function repeatBets() {
+    placeBets(new Map(lastBetsRef.current))
   }
 
   const betting = gamePhase === 'betting'
   const confirmTotal = round2(bet * picks.size)
   const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
+  let lastTotal = 0
+  lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
+  const repeatOk = betting && hasLast && lastTotal > 0 && lastTotal <= balance
   const cur = pendingRef.current
   const htVisible = cur && (gamePhase === 'ht_shown' || gamePhase === 'ft_draw' || gamePhase === 'settled')
   const ftVisible = cur && gamePhase === 'settled'
@@ -545,7 +566,7 @@ export default function DerbyDay({ balance, setBalance }) {
     const pushed = result?.pushes?.has(key) && betsPlaced.has(key)
     const placed = betsPlaced.has(key)
     return {
-      flex: 1, minWidth: 0, padding: isMobile ? '6px 2px' : '6px 4px',
+      flex: 1, minWidth: 0, padding: isMobile ? '6px 2px' : isDesk ? '5px 4px' : '6px 4px',
       borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
       background: bg,
       border: `1.5px solid ${hit ? DERBY.sel : pushed ? 'rgba(255,255,255,0.6)' : sel || placed ? DERBY.gold : 'rgba(255,255,255,0.16)'}`,
@@ -563,7 +584,7 @@ export default function DerbyDay({ balance, setBalance }) {
   const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
   const secHead = { color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
   const secBox = {
-    flex: '0 0 auto', borderRadius: 12, padding: 4,
+    flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
     boxSizing: 'border-box',
   }
@@ -606,12 +627,6 @@ export default function DerbyDay({ balance, setBalance }) {
         background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
         color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
       }}>{phaseChip.text}</span>
-      {/* 重复投注（无逻辑占位，二期接） */}
-      <span style={{
-        marginLeft: 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
-        background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-        color: DERBY.text, fontSize: 11, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>↻ 重复投注</span>
     </div>
   )
 
@@ -897,53 +912,75 @@ export default function DerbyDay({ balance, setBalance }) {
       {/* ③ 珠盘路（底部，六页签 + 占比条） */}
       {beadRoad}
 
-      {/* ---- ④ bottom bet band — pinned ---- */}
+      {/* ---- ④ bottom bet band — pinned，grid 4列×2行（照 Line Up 定案版式）：
+           列1-2 面额四格（10/100 上、50/500 下）｜列3 Bet USD 上/重复钮下｜列4 下注大方钮跨两行 ---- */}
       <div style={{
         flex: '0 0 auto',
-        padding: '10px 14px',
+        padding: '6px 12px',
         background: DERBY.band,
         borderTop: '1px solid rgba(0,0,0,0.25)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
+        position: 'relative', zIndex: 1,
       }}>
         <div style={{
-          padding: '5px 18px', borderRadius: RADIUS.pill,
-          background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-          textAlign: 'center', lineHeight: 1.2,
-          opacity: betting ? 1 : 0.6,
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+          gridTemplateRows: 'repeat(2, 28px)',
+          gap: 6,
+          maxWidth: 480, margin: '0 auto',
         }}>
-          <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
-          <input
-            value={bet}
-            disabled={!betting}
-            onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
-            style={{
-              width: 56, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-              color: COLORS.white, fontSize: 15, fontWeight: 900,
-            }}
-          />
+          {[
+            { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+            { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+          ].map(({ v, col, row }) => (
+            <button key={v} type="button" className="ddChip" disabled={!betting} onClick={() => setBet(v)} style={{
+              gridColumn: col, gridRow: row,
+              width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+              background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
+              border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
+              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
+              boxSizing: 'border-box',
+            }}>{v}</button>
+          ))}
+          <div style={{
+            gridColumn: 3, gridRow: 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+            borderRadius: 8, padding: '0 6px',
+            background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+          }}>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <input
+              value={bet}
+              disabled={!betting}
+              onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              style={{
+                width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
+                color: COLORS.white, fontSize: 14, fontWeight: 900,
+              }}
+            />
+          </div>
+          <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
+            gridColumn: 3, gridRow: 2,
+            width: '100%', height: '100%', borderRadius: 8,
+            fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+            color: repeatOk ? DERBY.text : DERBY.dim,
+            background: 'rgba(0,0,0,0.35)',
+            border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
+            cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+          <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+            <BetButton
+              state="bet"
+              label={betting ? '▷ CONFIRM' : gamePhase === 'settled' ? '本期已结算' : '已锁盘 · 开赛中'}
+              sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+              onClick={confirmBets}
+              disabled={!confirmOk}
+              stretch
+            />
+          </div>
         </div>
-        {[10, 50, 100, 500].map(v => (
-          <button key={v} type="button" disabled={!betting} onClick={() => setBet(v)} style={{
-            minWidth: 38, padding: '0 10px', height: 30, borderRadius: RADIUS.pill,
-            fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
-            background: bet === v ? DERBY.selTint : DERBY.band,
-            border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
-            cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
-          }}>{v}</button>
-        ))}
-        <button type="button" disabled={!confirmOk} onClick={confirmBets} style={{
-          minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
-          background: DERBY.sel, color: '#083a1b',
-          border: '1px solid rgba(255,255,255,0.35)',
-          fontSize: 14, fontWeight: 900, letterSpacing: 1,
-          cursor: confirmOk ? 'pointer' : 'not-allowed',
-          opacity: confirmOk ? 1 : 0.55,
-        }}>
-          {betting
-            ? `▷ CONFIRM${picks.size > 0 ? ` $${confirmTotal.toFixed(0)}` : ''}`
-            : gamePhase === 'settled' ? '本期已结算' : '已锁盘 · 开赛中'}
-        </button>
       </div>
     </Panel>
   )
