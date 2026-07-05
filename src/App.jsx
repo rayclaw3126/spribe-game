@@ -17,8 +17,9 @@ import GoldenBoot from './games/GoldenBoot'
 import NumberUp from './games/NumberUp'
 import HatTrick from './games/HatTrick'
 import DerbyDay from './games/DerbyDay'
+import LineUp from './games/LineUp'
 
-const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum, HalfTime, GoldenBoot, NumberUp, HatTrick, DerbyDay }
+const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum, HalfTime, GoldenBoot, NumberUp, HatTrick, DerbyDay, LineUp }
 
 export default function App() {
   const [balance, setBalance] = useState(1000)

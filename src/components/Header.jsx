@@ -18,6 +18,7 @@ const GAME_NAMES = {
   NumberUp: 'Number Up',
   HatTrick: 'Hat Trick',
   DerbyDay: 'Derby Day',
+  LineUp: 'Line Up',
 }
 
 export default function Header({ balance, onHome, activeGame }) {
