@@ -5,8 +5,8 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
 
 // Hat Trick — 快3三骰彩（三骰和值 + 豹子 + 对子），第 15 卡。
 // 引擎：三骰各 1–6 独立均匀；和值/豹子/对子/大小单双全部由骰面派生。
@@ -105,6 +105,7 @@ const DIE_START = [0, 250, 500]       // 各骰抛入时刻
 const DIE_LOCK = [2600, 3500, 4500]   // 各骰定格时刻（第1骰 2.6s / 第2骰 3.5s / 第3骰 4.5s）
 const FALL_DUR = 500                  // 抛物线下坠段
 const TOTAL_LOCK = 5100               // TOTAL 大字滚动累加后定格金闪
+const VENUE = 'AMBER DOME'          // 架空场馆名（禁真实球场名）
 const ROUND_DATE = '20260705'
 const ROAD_CAP = 120
 
@@ -359,13 +360,10 @@ function DiceStage({ roll, height, shakeRef, sfx, onFinale }) {
   return <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }} aria-hidden />
 }
 
-export default function HatTrick({ balance, setBalance }) {
+export default function HatTrick({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk 模式被 400px feed 收窄——1200 以下居中 DEMO 与 How-to-Play 相撞，隐藏
-  const deskWide = useMediaQuery('(min-width: 1200px)')
-  const [bgmOn, toggleBgm] = useBgm()
-  const [muted, setMuted] = useState(false)
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -554,11 +552,6 @@ export default function HatTrick({ balance, setBalance }) {
   const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
 
   // ---- 样式件（选中=金框绿罩；命中=绿框绿晕）----
-  const navPill = {
-    padding: '5px 16px', borderRadius: RADIUS.pill,
-    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
-    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-  }
   const cellBtn = (key, { compact = false } = {}) => {
     const sel = picks.has(key)
     const hit = (result?.hits ?? preHits)?.has(key)   // 结算后 result，动画收尾先预亮
@@ -631,22 +624,15 @@ export default function HatTrick({ balance, setBalance }) {
     : gamePhase === 'rolling'
       ? { text: '掷骰中…', c: HATTRICK.orange }
       : { text: result && result.winTotal > 0 ? `+$${result.winTotal.toFixed(2)}` : '已开奖', c: HATTRICK.gold }
-  const roundBar = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isDesk ? 0 : isMobile ? '10px 12px 0' : '12px 18px 0',
-      padding: '4px 10px', borderRadius: RADIUS.pill,
-      background: HATTRICK.strip,
-      display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-    }}>
-      <span style={{ color: HATTRICK.dim, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>
-        #{ROUND_DATE}-{String(roundNo).padStart(3, '0')}
-      </span>
-      <span style={{
-        padding: '2px 10px', borderRadius: RADIUS.pill,
-        background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-        color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>{phaseChip.text}</span>
+  const phaseChipNode = (
+    <span style={{
+      padding: '2px 10px', borderRadius: RADIUS.pill,
+      background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
+    }}>{phaseChip.text}</span>
+  )
+  const subRowNode = (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0, flex: '1 1 auto' }}>
       {/* 上期三骰迷你面（CSS 点阵） */}
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
         {lastRoll.dice.map((v, i) => <DieFace key={i} v={v} size={isMobile ? 16 : 18} />)}
@@ -665,7 +651,12 @@ export default function HatTrick({ balance, setBalance }) {
         marginLeft: 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
         background: HATTRICK.gold, color: '#3a2c00', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
       }}>{lastRoll.isTriple ? `TRIPLE ${lastRoll.tripleFace}` : `TOTAL ${lastRoll.total}`}</span>
-    </div>
+    </span>
+  )
+  const topBar = (
+    <GameTopBar gameName="HAT TRICK" band={HATTRICK.band} venue={VENUE}
+      roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
+      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} />
   )
 
   // ---- 珠盘路（真历史滚动，容量 6×20）----
@@ -725,49 +716,9 @@ export default function HatTrick({ balance, setBalance }) {
     }}>
       <style>{`.htCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
 
-      {/* ---- top bar ---- */}
-      <div style={{
-        flex: '0 0 auto',
-        padding: '8px 14px',
-        background: HATTRICK.band,
-        display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
-      }}>
-        <span style={navPill}>HAT TRICK ▾</span>
-        <span style={{
-          padding: '5px 14px', borderRadius: RADIUS.pill,
-          background: HATTRICK.orange, color: COLORS.white,
-          fontSize: 12, fontWeight: 900,
-        }}>? How to Play?</span>
-        {!isMobile && (!isDesk || deskWide) && (
-          <span style={{
-            position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-            padding: '4px 18px', borderRadius: RADIUS.pill,
-            border: `1px solid ${HATTRICK.gold}`, color: HATTRICK.gold,
-            fontSize: 11, fontWeight: 900, letterSpacing: 2,
-          }}>DEMO MODE</span>
-        )}
-        <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
-          {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
-        </span>
-        <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-          width: 30, height: 30, borderRadius: RADIUS.pill,
-          background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-          color: bgmOn ? COLORS.white : COLORS.textMuted,
-          border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-          cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><MusicNoteIcon on={bgmOn} /></button>
-        <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-          width: 30, height: 30, borderRadius: RADIUS.pill,
-          background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
-          border: '1px solid rgba(255,255,255,0.25)',
-          cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><SpeakerIcon on={!muted} /></button>
-      </div>
+      {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
+      {topBar}
 
-      {/* 轮次条 — desk 在骨架历史行，卡内只在 <1024 渲染 */}
-      {!isDesk && roundBar}
 
       {/* ① 开奖舞台槽（顶部，吃弹性空间 ≤260）：BETTING 静态回显上期三骰+TOTAL，
           ROLLING/SETTLED 换舞台动画（key=期号等高替换机制不变） */}
@@ -949,10 +900,6 @@ export default function HatTrick({ balance, setBalance }) {
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
-            {/* 轮次条占骨架历史行位（34px 行惯例） */}
-            <div style={{ flex: '0 0 auto', minHeight: LAYOUT.historyH }}>
-              {roundBar}
-            </div>
             <div style={{ flex: 1, minHeight: 0 }}>
               <div ref={cardShakeRef} style={{ height: '100%' }}>
                 {gameCard}

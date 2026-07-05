@@ -6,14 +6,16 @@ import { MusicNoteIcon, SpeakerIcon } from './AudioIcons'
 
 // 游戏顶栏共享件：
 //   移动（<1024）两行 —— 上行 = 游戏名 pill ▾ + 右侧 ?/音乐/音效；
-//     下行场馆行（venue 有值才渲染）= 场馆名全字 + 期号 + 相位 chip 右靠
-//   桌面（≥1024）单行 —— 场馆行并入顶栏（游戏名后接 场馆名+期号+chip）
+//     下行场馆行（venue/subRow 有值才渲染）= 场馆名全字 + 期号 + 相位 chip
+//     + subRow 特件同行拼排（场馆名优先左；特件多时行内自换行）
+//   桌面（≥1024）单行 —— 场馆行并入顶栏（游戏名后接 场馆名+期号+chip），
+//     subRow 并入单行右侧（rightExtra 之前）
 //   ▾ 下拉：玩法说明（onHowTo）/ 演示模式标识行 / 返回大厅（onBack）
 //   右侧：? 橙圆钮直接触发 onHowTo；音乐 = useBgm；音效 = useSfxMuted（全局同步）
 // 砍掉旧内联顶栏的 余额 USD / DEMO MODE pill / 文字版 How-to-Play pill。
 // 色值全部取 tokens 现组；band 缺省 DERBY.band（绿系轮次彩通用档）。
 
-export default function GameTopBar({ gameName, venue, roundId, phaseChip, onHowTo, onBack, rightExtra, band }) {
+export default function GameTopBar({ gameName, venue, roundId, phaseChip, subRow, onHowTo, onBack, rightExtra, band }) {
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bgmOn, toggleBgm] = useBgm()
   const [muted, toggleMuted] = useSfxMuted()
@@ -114,20 +116,22 @@ export default function GameTopBar({ gameName, venue, roundId, phaseChip, onHowT
       display: 'flex', flexDirection: 'column', gap: 5,
       position: 'relative', zIndex: 5,
     }}>
-      {/* 上行（桌面 = 唯一行）：名 pill + [桌面并入场馆件+chip] + 右侧钮组 */}
+      {/* 上行（桌面 = 唯一行）：名 pill + [桌面并入场馆件+chip] + [桌面 subRow] + 右侧钮组 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {namePill}
         {isDesk && venueBits}
         {isDesk && phaseChip}
         <span style={{ marginLeft: 'auto' }} />
+        {isDesk && subRow}
         {rightBits}
       </div>
-      {/* 移动场馆行（venue 有值才渲染）：场馆名全字 + 期号，chip 右靠 */}
-      {!isDesk && venue && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* 移动场馆行（venue/subRow 有值才渲染）：场馆名优先左 + chip + subRow 同行拼排 */}
+      {!isDesk && (venue || subRow) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: subRow ? 'wrap' : undefined }}>
           {venueBits}
-          <span style={{ marginLeft: 'auto' }} />
-          {phaseChip}
+          {subRow
+            ? <>{phaseChip}{subRow}</>
+            : <><span style={{ marginLeft: 'auto' }} />{phaseChip}</>}
         </div>
       )}
       <style>{`.gtbItem:hover { background: ${COLORS.surface}; border-radius: 7px; }`}</style>

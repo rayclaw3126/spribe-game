@@ -5,8 +5,8 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
 
 // Number Up — 两位数球衣号码彩（00–99）。
 // 引擎：0–99 均匀抽一个；头位/尾位/大小单双全部由 num 派生。
@@ -65,6 +65,7 @@ const SETTLED_T = 6     // 3s
 const BOARD_RISE = 800
 const TENS_LOCK = 2500
 const ONES_LOCK = 4300
+const VENUE = 'OPAL COURT'          // 架空场馆名（禁真实球场名）
 const ROUND_DATE = '20260705'
 const ROAD_CAP = 120
 
@@ -276,14 +277,11 @@ function BoardStage({ num, height, shakeRef, sfx, onFinale }) {
   return <canvas ref={canvasRef} style={{ width: '100%', height, display: 'block' }} aria-hidden />
 }
 
-export default function NumberUp({ balance, setBalance }) {
+export default function NumberUp({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
-  // centered DEMO pill would collide with the How-to-Play pill, so hide it
-  const deskWide = useMediaQuery('(min-width: 1200px)')
-  const [bgmOn, toggleBgm] = useBgm()
-  const [muted, setMuted] = useState(false)
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -464,11 +462,6 @@ export default function NumberUp({ balance, setBalance }) {
   const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
 
   // ---- 样式件（选中=金框绿罩；命中=绿框绿晕）----
-  const navPill = {
-    padding: '5px 16px', borderRadius: RADIUS.pill,
-    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
-    color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
-  }
   const cellBtn = (key, { compact = false } = {}) => {
     const sel = picks.has(key)
     const hit = (result?.hits ?? preHits)?.has(key)   // 结算后 result，动画收尾先预亮
@@ -532,22 +525,15 @@ export default function NumberUp({ balance, setBalance }) {
     : gamePhase === 'reveal'
       ? { text: '开牌中…', c: NUMBERUP.orange }
       : { text: result && result.winTotal > 0 ? `+$${result.winTotal.toFixed(2)}` : '已开奖', c: NUMBERUP.gold }
-  const roundBar = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isDesk ? 0 : isMobile ? '10px 12px 0' : '12px 18px 0',
-      padding: '4px 10px', borderRadius: RADIUS.pill,
-      background: NUMBERUP.strip,
-      display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-    }}>
-      <span style={{ color: NUMBERUP.dim, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>
-        #{ROUND_DATE}-{String(roundNo).padStart(3, '0')}
-      </span>
-      <span style={{
-        padding: '2px 10px', borderRadius: RADIUS.pill,
-        background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-        color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>{phaseChip.text}</span>
+  const phaseChipNode = (
+    <span style={{
+      padding: '2px 10px', borderRadius: RADIUS.pill,
+      background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
+    }}>{phaseChip.text}</span>
+  )
+  const subRowNode = (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0, flex: '1 1 auto' }}>
       <NumberCard num={lastNum.num} w={isMobile ? 22 : 24} />
       {/* 近 5 期小号串（新→旧） */}
       <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -563,7 +549,12 @@ export default function NumberUp({ balance, setBalance }) {
         marginLeft: 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
         background: NUMBERUP.gold, color: '#3a2c00', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
       }}>NUMBER {pad2(lastNum.num)}</span>
-    </div>
+    </span>
+  )
+  const topBar = (
+    <GameTopBar gameName="NUMBER UP" band={NUMBERUP.band} venue={VENUE}
+      roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
+      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} />
   )
 
   // ---- 珠盘路（真历史滚动，容量 6×20）----
@@ -623,49 +614,9 @@ export default function NumberUp({ balance, setBalance }) {
     }}>
       <style>{`.nuCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
 
-      {/* ---- top bar ---- */}
-      <div style={{
-        flex: '0 0 auto',
-        padding: '8px 14px',
-        background: NUMBERUP.band,
-        display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 2,
-      }}>
-        <span style={navPill}>NUMBER UP ▾</span>
-        <span style={{
-          padding: '5px 14px', borderRadius: RADIUS.pill,
-          background: NUMBERUP.orange, color: COLORS.white,
-          fontSize: 12, fontWeight: 900,
-        }}>? How to Play?</span>
-        {!isMobile && (!isDesk || deskWide) && (
-          <span style={{
-            position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-            padding: '4px 18px', borderRadius: RADIUS.pill,
-            border: `1px solid ${NUMBERUP.gold}`, color: NUMBERUP.gold,
-            fontSize: 11, fontWeight: 900, letterSpacing: 2,
-          }}>DEMO MODE</span>
-        )}
-        <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 14, fontWeight: 900 }}>
-          {Number(balance ?? 0).toFixed(2)} <span style={{ opacity: 0.7, fontSize: 11 }}>USD</span>
-        </span>
-        <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-          width: 30, height: 30, borderRadius: RADIUS.pill,
-          background: bgmOn ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
-          color: bgmOn ? COLORS.white : COLORS.textMuted,
-          border: `1px solid rgba(255,255,255,${bgmOn ? 0.6 : 0.25})`,
-          cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><MusicNoteIcon on={bgmOn} /></button>
-        <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-          width: 30, height: 30, borderRadius: RADIUS.pill,
-          background: 'rgba(0,0,0,0.3)', color: muted ? COLORS.textMuted : COLORS.white,
-          border: '1px solid rgba(255,255,255,0.25)',
-          cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><SpeakerIcon on={!muted} /></button>
-      </div>
+      {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
+      {topBar}
 
-      {/* 轮次条 — desk 在骨架历史行，卡内只在 <1024 渲染 */}
-      {!isDesk && roundBar}
 
       {/* ---- middle zone: 盘区三行；PICK 网格空间不足时独立纵滚 ---- */}
       <div style={{
@@ -827,10 +778,6 @@ export default function NumberUp({ balance, setBalance }) {
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
-            {/* 轮次条占骨架历史行位（34px 行惯例） */}
-            <div style={{ flex: '0 0 auto', minHeight: LAYOUT.historyH }}>
-              {roundBar}
-            </div>
             <div style={{ flex: 1, minHeight: 0 }}>
               <div ref={cardShakeRef} style={{ height: '100%' }}>
                 {gameCard}
