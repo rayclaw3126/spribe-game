@@ -98,8 +98,13 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
 // ---------- 轮次常量（照 Number Up，心跳 500ms/tick）----------
 const TICK_MS = 500
 const BETTING_T = 48    // 24s
-const ROLLING_T = 6     // 3s 占位（单3 换三骰动画）
+const ROLLING_T = 14    // 7s = 三骰错峰弹入滚动 ~4.5s + TOTAL 定格金闪 ~2s
 const SETTLED_T = 6     // 3s
+// 三骰舞台时间轴（rAF 内使用，毫秒）：三骰错峰定格制造悬念
+const DIE_START = [0, 250, 500]       // 各骰抛入时刻
+const DIE_LOCK = [2600, 3500, 4500]   // 各骰定格时刻（第1骰 2.6s / 第2骰 3.5s / 第3骰 4.5s）
+const FALL_DUR = 500                  // 抛物线下坠段
+const TOTAL_LOCK = 5100               // TOTAL 大字滚动累加后定格金闪
 const ROUND_DATE = '20260705'
 const ROAD_CAP = 120
 
@@ -164,6 +169,196 @@ function beadFor(tab, dice) {
     : { t: '', c: 'rgba(255,255,255,0.14)' }
 }
 
+// ---------- 三骰舞台：单一 rAF 循环驱动（禁 CSS transition 拼接）----------
+// 三骰从上方错峰抛入草皮台面：抛物线下坠 + 落地弹跳衰减（指数衰减 |sin|）+
+// 旋转翻面（滚动中骰面快速轮换制造模糊感），各自定格到 pendingRef 骰面
+// （亮金描边一闪 + 2px/100ms 轻震）；三骰全定后 TOTAL 金色滚动累加定格，
+// 豹子期额外金光爆闪一次，onFinale 预亮命中盘区。骰面结果进场前已锁定，动画只读。
+function DiceStage({ roll, height, shakeRef, sfx, onFinale }) {
+  const canvasRef = useRef(null)
+  const cbRef = useRef({ sfx, onFinale })
+  cbRef.current = { sfx, onFinale }
+  const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  useEffect(() => {
+    if (reduced) {
+      cbRef.current.onFinale?.()
+      if (import.meta.env.DEV) window.__HAT_ANIM_LAST = roll.dice.join(',')
+      return
+    }
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (import.meta.env.DEV) window.__HAT_RAF_ACTIVE = (window.__HAT_RAF_ACTIVE || 0) + 1
+
+    const dpr = window.devicePixelRatio || 1
+    const fit = () => {
+      const r = canvas.getBoundingClientRect()
+      canvas.width = Math.max(1, Math.floor(r.width * dpr))
+      canvas.height = Math.max(1, Math.floor(r.height * dpr))
+    }
+    fit()
+    window.addEventListener('resize', fit)
+
+    const BOUNCES = 2.5                    // 落地后 2-3 次衰减弹跳
+    const locked = [false, false, false]
+    const flashAt = [0, 0, 0]
+    const knocksFired = [0, 0, 0]
+    let whooshed = false, finaleFired = false, finaleAt = 0, shakeUntil = 0
+    let raf = 0
+    const t0 = performance.now()
+    const easeOut = p => 1 - Math.pow(1 - p, 3)
+
+    // 每骰触地时刻表（landing + 弹跳过零点，knock 音量随之衰减）
+    const knockTimes = DIE_START.map((st, i) => {
+      const land = st + FALL_DUR
+      const bDur = DIE_LOCK[i] - land
+      return [land, land + (1 / BOUNCES) * bDur, land + (2 / BOUNCES) * bDur]
+    })
+
+    // canvas 重画骰面：复用 DieFace 的 3×3 宫格点位表，白面近黑点
+    const drawDie = (x, y, size, face, angle, flashA, blur) => {
+      ctx.save()
+      ctx.translate(x, y)
+      ctx.rotate(angle)
+      const h = size / 2
+      ctx.fillStyle = HATTRICK.face
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'
+      ctx.lineWidth = 1.5 * dpr
+      ctx.beginPath()
+      ctx.roundRect(-h, -h, size, size, size * 0.2)
+      ctx.fill(); ctx.stroke()
+      ctx.fillStyle = blur ? 'rgba(16,25,35,0.6)' : HATTRICK.pip
+      for (const idx of PIPS[face]) {
+        const col = idx % 3, row = Math.floor(idx / 3)
+        ctx.beginPath()
+        ctx.arc((col - 1) * size * 0.27, (row - 1) * size * 0.27, size * 0.09, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      if (flashA > 0) {   // 定格亮金描边一闪（300ms 渐隐）
+        ctx.strokeStyle = `rgba(255,213,79,${flashA})`
+        ctx.lineWidth = 3 * dpr
+        ctx.beginPath()
+        ctx.roundRect(-h, -h, size, size, size * 0.2)
+        ctx.stroke()
+      }
+      ctx.restore()
+    }
+
+    const loop = now => {
+      const t = now - t0
+      const W = canvas.width, H = canvas.height
+      if (!whooshed) { whooshed = true; cbRef.current.sfx.whoosh() }
+
+      ctx.clearRect(0, 0, W, H)
+      const size = Math.min(H * 0.34, W * 0.13)
+      const floorY = H * 0.46
+      const xs = [W * 0.32, W * 0.5, W * 0.68]
+
+      for (let i = 0; i < 3; i++) {
+        const ti = t - DIE_START[i]
+        if (ti < 0) continue   // 未抛入
+        const x = xs[i]
+        if (!locked[i] && t >= DIE_LOCK[i]) {
+          locked[i] = true; flashAt[i] = now; shakeUntil = now + 100
+          cbRef.current.sfx.snap()
+        }
+        while (knocksFired[i] < 3 && t >= knockTimes[i][knocksFired[i]]) {
+          cbRef.current.sfx.knock([0.11, 0.055, 0.028][knocksFired[i]])
+          knocksFired[i] += 1
+        }
+
+        let y, angle, face, blur = false
+        // 旋转全程一条减速曲线，总转角 = 整数圈 → 定格时自然回正
+        const spins = (3 + i) * Math.PI * 2
+        if (locked[i]) {
+          y = floorY; angle = 0; face = roll.dice[i]
+        } else {
+          angle = spins * easeOut(Math.min(1, ti / (DIE_LOCK[i] - DIE_START[i])))
+          face = ((Math.floor(ti / 85) + i * 2) % 6) + 1   // 滚动中骰面快速轮换
+          blur = true
+          if (ti < FALL_DUR) {
+            const p = ti / FALL_DUR
+            y = floorY - (1 - p * p) * H * 0.9   // 抛物线加速下坠
+          } else {
+            const u = (ti - FALL_DUR) / (DIE_LOCK[i] - DIE_START[i] - FALL_DUR)
+            y = floorY - Math.exp(-3 * u) * Math.abs(Math.sin(u * BOUNCES * Math.PI)) * H * 0.4
+          }
+        }
+        // 草皮阴影（随高度缩放变淡）
+        const hgt = Math.max(0, (floorY - y) / (H * 0.9))
+        ctx.fillStyle = `rgba(0,0,0,${0.28 * (1 - hgt * 0.8)})`
+        ctx.beginPath()
+        ctx.ellipse(x, floorY + size * 0.62, size * (0.55 - hgt * 0.25), size * 0.12, 0, 0, Math.PI * 2)
+        ctx.fill()
+        const flashA = flashAt[i] && now - flashAt[i] < 300 ? 0.9 * (1 - (now - flashAt[i]) / 300) : 0
+        drawDie(x, y, size, face, angle, flashA, blur)
+      }
+
+      // TOTAL 滚动累加 → 定格金闪；豹子期额外径向金光爆闪一次
+      if (t >= DIE_LOCK[2]) {
+        const shown = Math.round(roll.total * easeOut(Math.min(1, (t - DIE_LOCK[2]) / 500)))
+        const isLockT = t >= TOTAL_LOCK
+        if (!finaleFired && isLockT) {
+          finaleFired = true; finaleAt = now
+          cbRef.current.sfx.chime(roll.isTriple)
+          cbRef.current.onFinale?.()
+          if (import.meta.env.DEV) window.__HAT_ANIM_LAST = roll.dice.join(',')
+        }
+        if (finaleFired && roll.isTriple && now - finaleAt < 500) {
+          const a = Math.sin(((now - finaleAt) / 500) * Math.PI) * 0.35
+          const g = ctx.createRadialGradient(W / 2, H * 0.45, 0, W / 2, H * 0.45, W * 0.5)
+          g.addColorStop(0, `rgba(255,213,79,${a})`)
+          g.addColorStop(1, 'rgba(255,213,79,0)')
+          ctx.fillStyle = g
+          ctx.fillRect(0, 0, W, H)
+        }
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        if (finaleFired) {   // 金光呼吸一次（~900ms 正弦）
+          const k = Math.min(1, (now - finaleAt) / 900)
+          ctx.shadowColor = HATTRICK.gold
+          ctx.shadowBlur = Math.sin(k * Math.PI) * 22 * dpr
+        }
+        ctx.fillStyle = isLockT ? HATTRICK.gold : 'rgba(255,255,255,0.85)'
+        ctx.font = `900 ${Math.round(H * 0.2)}px 'Space Grotesk', sans-serif`
+        ctx.fillText(roll.isTriple && isLockT ? `TRIPLE ${roll.tripleFace}` : `TOTAL ${shown}`, W / 2, H * 0.85)
+        ctx.shadowBlur = 0
+      }
+
+      if (shakeRef.current) {
+        shakeRef.current.style.transform = now < shakeUntil
+          ? `translate(${Math.sin(now / 7) * 2}px, ${Math.cos(now / 5) * 1.5}px)`
+          : ''
+      }
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', fit)
+      if (shakeRef.current) shakeRef.current.style.transform = ''
+      if (import.meta.env.DEV) window.__HAT_RAF_ACTIVE -= 1
+    }
+    // 舞台一次挂载跑完整条时间轴；roll 由 key=期号换新保证重挂载
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 绝对定位铺满舞台槽：内容不参与 flex 高度分配，槽高各相位一致（由 min/max 定）
+  if (reduced) {   // 减动效：静态直出三骰 + TOTAL
+    return (
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+        {roll.dice.map((v, i) => <DieFace key={i} v={v} size={34} />)}
+        <span style={{ color: HATTRICK.gold, fontSize: 18, fontWeight: 900 }}>
+          {roll.isTriple ? `TRIPLE ${roll.tripleFace}` : `TOTAL ${roll.total}`}
+        </span>
+      </div>
+    )
+  }
+  return <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }} aria-hidden />
+}
+
 export default function HatTrick({ balance, setBalance }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
@@ -185,6 +380,7 @@ export default function HatTrick({ balance, setBalance }) {
   const [recent, setRecent] = useState(SEED_RECENT)       // 近 5 期和值（新→旧）
   const [history, setHistory] = useState(SEED_HISTORY)    // 珠盘路（旧→新）
   const [result, setResult] = useState(null)              // { hits:Set, winTotal }
+  const [preHits, setPreHits] = useState(null)            // 掷骰动画收尾的命中预亮
   const [toasts, setToasts] = useState([])
 
   const phaseRef = useRef('betting')
@@ -196,10 +392,77 @@ export default function HatTrick({ balance, setBalance }) {
   const pendingRef = useRef(null)
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
+  const audioRef = useRef({ ctx: null, muted: false })
+  const cardShakeRef = useRef(null)
 
   useEffect(() => { balanceRef.current = balance }, [balance])
   useEffect(() => { betRef.current = bet }, [bet])
+  useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
+
+  // ---------- SFX（WebAudio 合成器，muted 门控；全部在结果已定后触发）----------
+  function ensureAudio() {
+    if (audioRef.current.ctx) return audioRef.current.ctx
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
+    audioRef.current.ctx = ctx; return ctx
+  }
+  function sfxWhoosh() {   // 抛骰：噪声上扫
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const nb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.4), ctx.sampleRate)
+    const d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length)
+    const ns = ctx.createBufferSource(); ns.buffer = nb
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.2
+    bp.frequency.setValueAtTime(400, t); bp.frequency.exponentialRampToValueAtTime(2000, t + 0.35)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4)
+    ns.connect(bp); bp.connect(g); g.connect(ctx.destination); ns.start(t); ns.stop(t + 0.4)
+  }
+  function sfxKnock(vol) {   // 落地/弹跳：低频闷敲 + 木感 click（音量随弹跳衰减）
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); o.type = 'sine'
+    o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(70, t + 0.08)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.1)
+    const len = Math.floor(ctx.sampleRate * 0.02)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len)
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const g2 = ctx.createGain(); g2.gain.value = vol * 0.6
+    src.connect(g2); g2.connect(ctx.destination); src.start(t); src.stop(t + 0.02)
+  }
+  function sfxSnap() {   // 每骰定格：短促咔 + 低敲
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const len = Math.floor(ctx.sampleRate * 0.03)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2)
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2400; bp.Q.value = 1.2
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.09, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04)
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination); src.start(t); src.stop(t + 0.035)
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = 190
+    const og = ctx.createGain()
+    og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.06, t + 0.004); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.06)
+    o.connect(og); og.connect(ctx.destination); o.start(t); o.stop(t + 0.07)
+  }
+  function sfxChime(strong) {   // TOTAL 定格：上扬三连音；豹子期加一阶强化
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const notes = strong ? [660, 880, 1170, 1560] : [660, 880, 1170]
+    notes.forEach((f, i) => {
+      const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f
+      const s = t + i * 0.08
+      g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(strong ? 0.13 : 0.1, s + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.28)
+      o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.3)
+    })
+  }
+  const stageSfx = { whoosh: sfxWhoosh, knock: sfxKnock, snap: sfxSnap, chime: sfxChime }
 
   function pushToast(win) {
     const id = ++toastIdRef.current
@@ -249,6 +512,7 @@ export default function HatTrick({ balance, setBalance }) {
         betsRef.current = new Map(); setBetsPlaced(new Map())
         picksRef.current = new Set(); setPicks(new Set())
         setResult(null)
+        setPreHits(null)
         setFeedBets(makeFeedBots())
         setRoundNo(n => n + 1)
         phaseRef.current = 'betting'; setGamePhase('betting')
@@ -297,10 +561,10 @@ export default function HatTrick({ balance, setBalance }) {
   }
   const cellBtn = (key, { compact = false } = {}) => {
     const sel = picks.has(key)
-    const hit = result?.hits?.has(key)
+    const hit = (result?.hits ?? preHits)?.has(key)   // 结算后 result，动画收尾先预亮
     const placed = betsPlaced.has(key)
     return {
-      flex: 1, minWidth: 0, padding: compact ? '5px 2px' : '8px 4px',
+      flex: 1, minWidth: 0, padding: compact ? '4px 2px' : '7px 4px',
       borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
       background: sel
         ? HATTRICK.selTint
@@ -318,9 +582,9 @@ export default function HatTrick({ balance, setBalance }) {
   const cellName = { color: HATTRICK.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
   const cellRange = { color: HATTRICK.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
   const cellOdds = { color: HATTRICK.gold, fontSize: isMobile ? 10.5 : 12.5, fontWeight: 900 }
-  const secHead = { color: HATTRICK.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 6 }
+  const secHead = { color: HATTRICK.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
   const secBox = {
-    flex: '0 0 auto', borderRadius: 12, padding: isMobile ? 6 : 8,
+    flex: '0 0 auto', borderRadius: 12, padding: 5,
     background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
     boxSizing: 'border-box',
   }
@@ -337,11 +601,11 @@ export default function HatTrick({ balance, setBalance }) {
   const totalCell = s => {
     const key = `t-${s}`
     const sel = picks.has(key)
-    const hit = result?.hits?.has(key)
+    const hit = (result?.hits ?? preHits)?.has(key)
     const placed = betsPlaced.has(key)
     return (
       <button key={key} type="button" className="htCell" disabled={!betting} onClick={() => toggleSel(key)} style={{
-        minWidth: 0, padding: '4px 0',
+        minWidth: 0, padding: '3px 0',
         borderRadius: 8, cursor: betting ? 'pointer' : 'not-allowed',
         background: hit ? HATTRICK.sel : sel ? HATTRICK.selTint : `linear-gradient(180deg, ${HATTRICK.ctrl}, ${HATTRICK.band})`,
         border: `1px solid ${hit ? HATTRICK.sel : sel || placed ? HATTRICK.gold : 'rgba(255,255,255,0.14)'}`,
@@ -410,9 +674,9 @@ export default function HatTrick({ balance, setBalance }) {
   const beadRoad = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '0 12px 10px' : '0 18px 10px',
+      margin: isMobile ? '0 12px 8px' : '0 18px 8px',
     }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
         {ROAD_TABS.map(t => (
           <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
             padding: '3px 12px', borderRadius: RADIUS.pill,
@@ -425,22 +689,22 @@ export default function HatTrick({ balance, setBalance }) {
       </div>
       <div style={{
         overflowX: 'auto', borderRadius: 10,
-        background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
+        background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 5,
       }}>
         <div style={{
           display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`,
+          gridTemplateRows: 'repeat(6, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`,
           gap: 2, width: 'max-content',
         }}>
           {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
             const b = beads[i]
             return (
               <span key={i} style={{
-                width: 18, height: 18, borderRadius: '50%',
+                width: 15, height: 15, borderRadius: '50%',
                 background: b ? b.c : 'rgba(255,255,255,0.05)',
                 border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
                 color: b?.dark ? '#3a2c00' : COLORS.white,
-                fontSize: b && b.t.length > 1 ? 7 : 9, fontWeight: 900,
+                fontSize: b && b.t.length > 1 ? 6.5 : 8.5, fontWeight: 900,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 boxSizing: 'border-box',
               }}>{b ? b.t : ''}</span>
@@ -505,12 +769,40 @@ export default function HatTrick({ balance, setBalance }) {
       {/* 轮次条 — desk 在骨架历史行，卡内只在 <1024 渲染 */}
       {!isDesk && roundBar}
 
-      {/* ---- middle zone: 盘区三行 ---- */}
+      {/* ① 开奖舞台槽（顶部，吃弹性空间 ≤260）：BETTING 静态回显上期三骰+TOTAL，
+          ROLLING/SETTLED 换舞台动画（key=期号等高替换机制不变） */}
       <div style={{
-        flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
-        display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        padding: isMobile ? '10px 12px' : '10px 18px', boxSizing: 'border-box',
-        gap: isMobile ? 8 : 8, overflowY: 'auto',
+        flex: '1 1 auto', minHeight: isMobile ? 150 : 140, maxHeight: 260,
+        position: 'relative', zIndex: 1,
+        margin: isMobile ? '8px 12px 0' : '8px 18px 0',
+        background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box',
+      }}>
+        {gamePhase !== 'betting' && pendingRef.current ? (
+          <DiceStage key={roundNo} roll={pendingRef.current}
+            height="100%"
+            shakeRef={cardShakeRef} sfx={stageSfx}
+            onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
+        ) : (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            <span style={{ color: HATTRICK.dim, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>上期</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {lastRoll.dice.map((v, i) => <DieFace key={i} v={v} size={isMobile ? 30 : 36} />)}
+            </span>
+            <span style={{
+              color: HATTRICK.gold, fontSize: isMobile ? 16 : 20, fontWeight: 900,
+              fontFamily: "'Space Grotesk', sans-serif",
+            }}>{lastRoll.isTriple ? `TRIPLE ${lastRoll.tripleFace}` : `TOTAL ${lastRoll.total}`}</span>
+          </div>
+        )}
+      </div>
+
+      {/* ② 投注盘区三行（中部；空间不足内部纵滚兜底） */}
+      <div style={{
+        flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
+        display: 'flex', flexDirection: 'column',
+        padding: isMobile ? '6px 12px' : '6px 18px', boxSizing: 'border-box',
+        gap: 5, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
         {/* 行① TOTAL：4–17 十四小格 + 大小单双四大格（豹子通杀） */}
@@ -519,7 +811,7 @@ export default function HatTrick({ balance, setBalance }) {
           <div style={{
             display: 'grid',
             gridTemplateColumns: isMobile ? 'repeat(7, 1fr)' : 'repeat(14, 1fr)',
-            gap: isMobile ? 3 : 4, marginBottom: isMobile ? 6 : 8,
+            gap: isMobile ? 3 : 4, marginBottom: 6,
           }}>
             {Array.from({ length: 14 }, (_, i) => totalCell(i + 4))}
           </div>
@@ -578,10 +870,10 @@ export default function HatTrick({ balance, setBalance }) {
         </div>
       </div>
 
-      {/* ---- 珠盘路 ---- */}
+      {/* ③ 珠盘路（底部，三页签） */}
       {beadRoad}
 
-      {/* ---- bottom bet band — pinned ---- */}
+      {/* ---- ④ bottom bet band — pinned ---- */}
       <div style={{
         flex: '0 0 auto',
         padding: '12px 14px',
@@ -662,7 +954,9 @@ export default function HatTrick({ balance, setBalance }) {
               {roundBar}
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
-              {gameCard}
+              <div ref={cardShakeRef} style={{ height: '100%' }}>
+                {gameCard}
+              </div>
             </div>
           </div>
         </div>
@@ -673,7 +967,9 @@ export default function HatTrick({ balance, setBalance }) {
   // ---- stacked layout (<1024) ----
   return (
     <GameLayout title="Hat Trick" color={HATTRICK.sel}>
-      {gameCard}
+      <div ref={cardShakeRef}>
+        {gameCard}
+      </div>
     </GameLayout>
   )
 }
