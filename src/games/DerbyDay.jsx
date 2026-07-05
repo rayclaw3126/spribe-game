@@ -580,9 +580,12 @@ export default function DerbyDay({ balance, setBalance }) {
   function confirmBets() {
     const amount = betRef.current
     if (amount < 1) return
-    if (placeBets(new Map([...picksRef.current].map(k => [k, amount])))) {
-      picksRef.current = new Set()
-      setPicks(new Set())
+    // 只下已定价键；未定价键（半全场占位）留在待选态提示未生效，零扣款
+    const priced = [...picksRef.current].filter(k => MARKETS[k])
+    if (placeBets(new Map(priced.map(k => [k, amount])))) {
+      const rest = new Set([...picksRef.current].filter(k => !MARKETS[k]))
+      picksRef.current = rest
+      setPicks(rest)
     }
   }
   // 重复投注 = 复用上局注单快照原键原额重下（结算含 push 退注路径不碰）
@@ -591,8 +594,10 @@ export default function DerbyDay({ balance, setBalance }) {
   }
 
   const betting = gamePhase === 'betting'
-  const confirmTotal = round2(bet * picks.size)
-  const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
+  // 未定价键（半全场四键，D3 枚举定价前）不进任何扣款路径：金额/可点/下单全按已定价键算
+  const pricedOf = set => [...set].filter(k => MARKETS[k])
+  const confirmTotal = round2(bet * pricedOf(picks).length)
+  const confirmOk = betting && pricedOf(picks).length > 0 && bet >= 1 && confirmTotal <= balance
   let lastTotal = 0
   lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
   const repeatOk = betting && hasLast && lastTotal > 0 && lastTotal <= balance
@@ -781,7 +786,7 @@ export default function DerbyDay({ balance, setBalance }) {
     { key: 'ft', label: '实况 · 全场', big: '1621–1920', small: '1322–1620' },
   ]
   const marketGroup = g => (
-    <div key={g.key} style={secBox}>
+    <div key={g.key} style={{ ...secBox, ...(isDesk ? { flex: '1 1 0', minWidth: 0 } : {}) }}>
       <div style={secHead}>{g.label}</div>
       <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 6 }}>
         <button type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-home`)}
@@ -812,6 +817,43 @@ export default function DerbyDay({ balance, setBalance }) {
             {stakeChip(`${g.key}-${m.k}`)}
           </button>
         ))}
+      </div>
+    </div>
+  )
+
+  // ---- ②b 半全场组合盘（纯 UI 占位：赔率 D3 枚举后填，未定价不进扣款路径）----
+  const HTFT = [
+    { key: 'ht-ft-hh', a: '主', b: '主' },
+    { key: 'ht-ft-ha', a: '主', b: '客' },
+    { key: 'ht-ft-ah', a: '客', b: '主' },
+    { key: 'ht-ft-aa', a: '客', b: '客' },
+  ]
+  const htftCell = m => (
+    <button key={m.key} type="button" className="ddCell" data-key={m.key} disabled={!betting}
+      onClick={() => toggleSel(m.key)} style={cellBase(m.key, DERBY.grey)}>
+      <span style={cellName}>
+        <span style={{ color: m.a === '主' ? DERBY.home : DERBY.away }}>{m.a}</span>
+        <span style={{ color: DERBY.dim, padding: '0 3px' }}>/</span>
+        <span style={{ color: m.b === '主' ? DERBY.home : DERBY.away }}>{m.b}</span>
+      </span>
+      <span style={cellOdds}>--</span>
+    </button>
+  )
+  const htftGroup = (
+    <div style={secBox}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={secHead}>半全场 · 半场胜方 / 全场胜方</div>
+        <span style={{
+          padding: '1px 8px', borderRadius: RADIUS.pill, marginBottom: 4,
+          border: `1px solid ${DERBY.orange}`, color: DERBY.orange,
+          fontSize: 9, fontWeight: 900, whiteSpace: 'nowrap',
+        }}>即将开放</span>
+      </div>
+      <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 6 }}>
+        {HTFT.slice(0, 2).map(htftCell)}
+      </div>
+      <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
+        {HTFT.slice(2).map(htftCell)}
       </div>
     </div>
   )
@@ -941,7 +983,7 @@ export default function DerbyDay({ balance, setBalance }) {
       {/* ① 开奖区（顶部）：全场块 + 半场块（按相位亮真珠） */}
       {drawZone}
 
-      {/* ② 盘区两组（中部；空间不足内部纵滚兜底） */}
+      {/* ② 盘区：半场/全场两组（desk 并排压总高）+ 半全场占位组（中部；空间不足内部纵滚兜底） */}
       <div style={{
         flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column',
@@ -949,7 +991,10 @@ export default function DerbyDay({ balance, setBalance }) {
         gap: 4, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
-        {GROUPS.map(marketGroup)}
+        <div style={{ display: 'flex', flexDirection: isDesk ? 'row' : 'column', gap: isDesk ? 8 : 4, alignItems: isDesk ? 'stretch' : undefined }}>
+          {GROUPS.map(marketGroup)}
+        </div>
+        {htftGroup}
       </div>
 
       {/* 弹性垫片：把珠盘路推向底部贴注栏 */}
