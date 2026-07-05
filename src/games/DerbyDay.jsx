@@ -100,6 +100,17 @@ const BALL_T0 = 400      // 首珠弹出时刻
 const BALL_GAP = 300     // 出珠间隔（20 珠 ~6.4s 出完）
 const BALL_FLIGHT = 280  // 单珠飞行时长（短抛物线）
 const STAGE_FREEZE = 6600   // 和值对比定格（放大一拍 + 领先方 trophy 闪现）
+// 关键球慢放：每阶段末 3 球间隔 ×1.75（相对压缩后前段 ≈×2.04），前 16 段等比
+// 压缩补偿——gap 总和不变，末球弹出仍 6100ms、定格仍 6600ms，阶段/心跳表总长零改动
+const SLOW_N = 3
+const SLOW_X = 1.75
+const BALL_LAUNCHES = (() => {
+  const slow = BALL_GAP * SLOW_X
+  const fast = (19 * BALL_GAP - SLOW_N * slow) / (19 - SLOW_N)
+  const ls = [BALL_T0]
+  for (let k = 1; k < 20; k++) ls.push(ls[k - 1] + (k > 19 - SLOW_N ? slow : fast))
+  return ls
+})()
 const VENUE = 'EMERALD ARENA'   // 架空场馆名（禁真实球场名）
 const ROUND_DATE = 'EA20260705'
 const ROAD_CAP = 120
@@ -201,10 +212,13 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
     trophy.src = trophyImg
 
     const landed = new Array(20).fill(false)
+    const launched = new Array(20).fill(false)   // 心跳音事件沿（慢放段）
     const lastPos = new Array(20).fill(null)   // 1 帧拖影
+    let barP = 0.5                             // 拉锯条显示比例（rAF 缓动）
     let whistled = false, finaled = false
     let raf = 0
     const t0 = performance.now()
+    if (import.meta.env.DEV) window.__DD_LAUNCHES = BALL_LAUNCHES
 
     const loop = now => {
       const t = now - t0
@@ -231,8 +245,13 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
       for (let k = 0; k < 20; k++) {
         const team = k % 2                 // 0 主 1 客（主1客1主2客2…交替）
         const idx = Math.floor(k / 2)
-        const launch = BALL_T0 + k * BALL_GAP
+        const launch = BALL_LAUNCHES[k]    // 慢放时间轴（末 3 球拉长，前段压缩补偿）
         const v = team ? awayBalls[idx] : homeBalls[idx]
+        // 关键球心跳：末 3 球弹出沿触发（结果已锁，只读）
+        if (t >= launch && !launched[k]) {
+          launched[k] = true
+          if (k >= 20 - SLOW_N && !frozen) cbRef.current.sfx.heart()
+        }
         if (t >= launch + BALL_FLIGHT || frozen) {
           if (!landed[k]) { landed[k] = true; cbRef.current.sfx.pop(team) }
           if (team) curAway += v; else curHome += v
@@ -266,7 +285,7 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
         const s = slot(team, idx)
         const color = team ? DERBY.away : DERBY.home
         const v = team ? awayBalls[idx] : homeBalls[idx]
-        const launch = BALL_T0 + k * BALL_GAP
+        const launch = BALL_LAUNCHES[k]
         if (landed[k]) {
           // 落位轻弹（120ms 半径回落）
           const since = t - (launch + BALL_FLIGHT)
@@ -285,6 +304,18 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
           }
         }
       }
+
+      // —— 拉锯条：主客和值对比随出珠实时过渡（rAF 内宽度缓动，禁 CSS transition 拼接）——
+      const barTarget = curHome + curAway > 0 ? curHome / (curHome + curAway) : 0.5
+      barP += (barTarget - barP) * 0.1
+      const barX = x0, barW = xa + gridW - x0
+      const barY = gridH + 2 * dpr, barH = 3 * dpr
+      ctx.fillStyle = DERBY.home
+      ctx.fillRect(barX, barY, barW * barP, barH)
+      ctx.fillStyle = DERBY.away
+      ctx.fillRect(barX + barW * barP, barY, barW * (1 - barP), barH)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(barX + barW * barP - 1 * dpr, barY - 1 * dpr, 2 * dpr, barH + 2 * dpr)
 
       // —— 中央标题 + TOTAL 滚动 ——
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
@@ -437,7 +468,18 @@ export default function DerbyDay({ balance, setBalance }) {
       o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.3)
     })
   }
-  const stageSfx = { pop: sfxPop, whistle: sfxWhistle, chime: sfxChime }
+  function sfxHeart() {   // 关键球心跳：低频双搏 lub-dub（慢放段每球一次）
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    ;[0, 0.14].forEach((off, i) => {
+      const o = ctx.createOscillator(); o.type = 'sine'
+      o.frequency.setValueAtTime(i ? 78 : 95, t + off)
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(0.0001, t + off); g.gain.exponentialRampToValueAtTime(0.09, t + off + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + off + 0.16)
+      o.connect(g); g.connect(ctx.destination); o.start(t + off); o.stop(t + off + 0.18)
+    })
+  }
+  const stageSfx = { pop: sfxPop, whistle: sfxWhistle, chime: sfxChime, heart: sfxHeart }
 
   function pushToast(label, win) {
     const id = ++toastIdRef.current
@@ -480,7 +522,11 @@ export default function DerbyDay({ balance, setBalance }) {
       }
       if (ph === 'betting') {
         // 双阶段结果此刻全定 — 后续各相（单3 动画）只读，不再碰确定性随机数
-        pendingRef.current = deriveMatch(drawMatch())
+        let forced = null
+        if (import.meta.env.DEV && window.__DD_FORCE) {   // 对账注入口（一次性消费，照 __LU_FORCE 先例）
+          forced = window.__DD_FORCE; window.__DD_FORCE = null
+        }
+        pendingRef.current = deriveMatch(forced || drawMatch())
         go('ht_draw', HT_DRAW_T)
       } else if (ph === 'ht_draw') {
         go('ht_shown', HT_SHOWN_T)
