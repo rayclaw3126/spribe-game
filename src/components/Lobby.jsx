@@ -14,6 +14,7 @@ import coverGoldenBoot from '../assets/covers/cover_goldenboot.png'
 import coverNumberUp from '../assets/covers/cover_numberup.png'
 import coverDerbyDay from '../assets/covers/cover_derbyday.png'
 import coverLineUp from '../assets/covers/cover_lineup.png'
+import coverSpeedGrid from '../assets/covers/cover_speedgrid.png'
 
 const GAMES = [
   { id: 'Aviator',   name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
@@ -34,8 +35,7 @@ const GAMES = [
   { id: 'HatTrick', name: 'Hat Trick', desc: 'Three dice — call the total!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals },
   { id: 'DerbyDay', name: 'Derby Day', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDerbyDay },
   { id: 'LineUp', name: 'Line Up', desc: 'Five lines, 25 numbers — call the sums!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverLineUp },
-  // TODO: 换 Codex 专属封面（暂借 Golden Boot 封面占位）
-  { id: 'SpeedGrid', name: 'Speed Grid', desc: '24 cars, one champion — call it!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverGoldenBoot },
+  { id: 'SpeedGrid', name: 'Speed Grid', desc: '24 cars, one champion — call it!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverSpeedGrid },
 ]
 
 export default function Lobby({ onSelect, balance }) {
