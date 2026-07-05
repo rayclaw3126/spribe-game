@@ -302,6 +302,26 @@ export const HALFTIME = {
   orange: '#f28c17',
 }
 
+// Hat Trick — 快3三骰彩：绿系四键取 KENO 终态；骰面白取共享 COLORS.white、
+// 骰点近黑取共享 COLORS.panel；金/绿/红/蓝/橙取共享。纯新增零删改
+export const HATTRICK = {
+  bgOuter: '#0d4a20',   // = KENO.bgOuter（球场绿边缘）
+  bgCenter: '#28814a',  // = KENO.bgCenter（球场绿中央）
+  band: '#0b3d1c',      // = KENO.band（顶栏/注栏）
+  ctrl: '#11582a',      // = KENO.ctrl（chrome 控件底）
+  strip: 'rgba(0,0,0,0.32)',
+  face: '#ffffff',      // 骰面白（= COLORS.white）
+  pip: '#101923',       // 骰点近黑（= COLORS.panel）
+  gold: '#ffd54f',      // 共享金 — 选中金框/赔率字
+  sel: '#35d07f',       // 确认绿（共享）
+  selTint: 'rgba(53,208,127,0.16)',
+  text: '#e8f5ec',
+  dim: 'rgba(255,255,255,0.55)',
+  big: '#e2564a',       // BIG/大珠（共享 crash red）
+  small: '#2f6fe0',     // SMALL/小珠（共享 blue）
+  orange: '#f28c17',
+}
+
 // Avatar chips pick a stable color by username hash.
 export const AVATAR_COLORS = [
   '#7C3AED', '#2563EB', '#0891B2', '#16A34A',

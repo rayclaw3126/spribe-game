@@ -16,6 +16,7 @@ const GAME_NAMES = {
   HalfTime: 'Half Time',
   GoldenBoot: 'Golden Boot',
   NumberUp: 'Number Up',
+  HatTrick: 'Hat Trick',
 }
 
 export default function Header({ balance, onHome, activeGame }) {
