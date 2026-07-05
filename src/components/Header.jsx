@@ -19,6 +19,7 @@ const GAME_NAMES = {
   HatTrick: 'Hat Trick',
   DerbyDay: 'Derby Day',
   LineUp: 'Line Up',
+  SpeedGrid: 'Speed Grid',
 }
 
 export default function Header({ balance, onHome, activeGame }) {
