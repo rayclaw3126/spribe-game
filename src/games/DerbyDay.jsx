@@ -228,7 +228,11 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
     const launched = new Array(20).fill(false)   // 心跳音事件沿（慢放段）
     const lastPos = new Array(20).fill(null)   // 1 帧拖影
     let barP = 0.5                             // 拉锯条显示比例（rAF 缓动）
-    let whistled = false, finaled = false
+    let whistled = false, finaled = false, cheered = false
+    if (import.meta.env.DEV) {
+      if (!half) window.__DD_CELEB = null            // 每场全场舞台重置（平局保持 null）
+      window[half ? '__DD_CONF_HT' : '__DD_CONF_FT'] = null   // 彩带几何记录重置（平局保持 null）
+    }
     let raf = 0
     const t0 = performance.now()
     if (import.meta.env.DEV) window.__DD_LAUNCHES = BALL_LAUNCHES
@@ -365,6 +369,70 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
         ctx.globalAlpha = 1
       }
 
+      // —— 彩带雨（落区 = 胜方半场组框实际几何界 [x0,+gridW]/[xa,+gridW]，禁写死像素）——
+      // HT 定格 = 短版（30 粒 ~1s，无字卡无欢呼）；FT 定格 = 正式版（70 粒 ~2s）；
+      // 平局不出。参数全由粒序黄金比散列派生（零随机数），越界钳回半区
+      if (frozen && !isTie) {
+        const tc = t - STAGE_FREEZE
+        const zoneX = homeLead ? x0 : xa
+        const zoneW = gridW
+        const conf = half
+          ? { n: 30, fall: 800, g: 10, s: 20 }
+          : { n: 70, fall: 1400, g: 20, s: 28 }
+        const teamColor = homeLead ? DERBY.home : DERBY.away
+        for (let i = 0; i < conf.n; i++) {
+          const delay = (i % conf.g) * conf.s
+          const ti = tc - delay
+          if (ti < 0 || ti > conf.fall) continue
+          const p = ti / conf.fall
+          let x = zoneX + ((i * 0.618034 + 0.137) % 1) * zoneW + Math.sin(ti / 260 + i) * 14 * dpr
+          x = Math.max(zoneX, Math.min(zoneX + zoneW, x))
+          const y = -16 * dpr + p * (H + 32 * dpr)
+          const sz = (2.6 + (i % 3) * 1.1) * dpr
+          ctx.globalAlpha = (0.5 + (i % 4) * 0.15) * (p > 0.82 ? (1 - p) / 0.18 : 1)
+          ctx.fillStyle = i % 6 === 0 ? DERBY.gold : i % 6 === 3 ? COLORS.white : teamColor
+          ctx.save(); ctx.translate(x, y); ctx.rotate(ti / 180 + i)
+          ctx.fillRect(-sz / 2, -sz, sz, sz * 2)
+          ctx.restore()
+          if (import.meta.env.DEV) {
+            const kk = half ? '__DD_CONF_HT' : '__DD_CONF_FT'
+            const rec = window[kk] || (window[kk] = { side: homeLead ? 'home' : 'away', minX: Infinity, maxX: -Infinity, zone: null, W: 0, n: 0 })
+            rec.zone = [zoneX, zoneX + zoneW]; rec.W = W
+            rec.minX = Math.min(rec.minX, x); rec.maxX = Math.max(rec.maxX, x); rec.n++
+          }
+        }
+        ctx.globalAlpha = 1
+      }
+
+      // —— 字卡 + 欢呼（仅全场 & 非平局；并入本 rAF 单循环，禁二环）——
+      if (frozen && !half && !isTie) {
+        const tc = t - STAGE_FREEZE
+        if (!cheered) {
+          cheered = true
+          cbRef.current.sfx.cheer?.()
+          if (import.meta.env.DEV) window.__DD_CELEB = homeLead ? 'home' : 'away'
+        }
+        const teamColor = homeLead ? DERBY.home : DERBY.away
+        // 字卡弹簧：160ms 线性入 → 指数衰减余弦回弹
+        const base = Math.min(1, tc / 160)
+        const spring = tc <= 160 ? 1.35 : 1 + 0.35 * Math.exp(-(tc - 160) / 240) * Math.cos((tc - 160) / 110)
+        const label = homeLead ? '主队 WINS' : '客队 WINS'
+        ctx.save()
+        ctx.translate(W / 2, H - 11 * dpr); ctx.scale(base * spring, base * spring)
+        ctx.font = `900 ${11 * dpr}px 'Space Grotesk', sans-serif`
+        const lw = ctx.measureText(label).width
+        const pw = lw + 22 * dpr, ph = 18 * dpr
+        ctx.fillStyle = teamColor
+        ctx.beginPath()
+        if (ctx.roundRect) ctx.roundRect(-pw / 2, -ph / 2, pw, ph, 9 * dpr); else ctx.rect(-pw / 2, -ph / 2, pw, ph)
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1 * dpr; ctx.stroke()
+        ctx.fillStyle = COLORS.white
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.fillText(label, 0, 0.5 * dpr)
+        ctx.restore()
+      }
+
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
@@ -492,7 +560,20 @@ export default function DerbyDay({ balance, setBalance }) {
       o.connect(g); g.connect(ctx.destination); o.start(t + off); o.stop(t + off + 0.18)
     })
   }
-  const stageSfx = { pop: sfxPop, whistle: sfxWhistle, chime: sfxChime, heart: sfxHeart }
+  function sfxCheer() {   // 胜方欢呼声浪：带通白噪声 swell ~1.6s（结果已定后的装饰随机）
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const len = 1.6
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * len), ctx.sampleRate)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.8
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.35); g.gain.exponentialRampToValueAtTime(0.0001, t + len)
+    src.connect(f); f.connect(g); g.connect(ctx.destination); src.start(t); src.stop(t + len)
+  }
+  const stageSfx = { pop: sfxPop, whistle: sfxWhistle, chime: sfxChime, heart: sfxHeart, cheer: sfxCheer }
 
   function pushToast(label, win) {
     const id = ++toastIdRef.current
@@ -624,11 +705,27 @@ export default function DerbyDay({ balance, setBalance }) {
     background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
     color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 0.5,
   }
+  // 三件套之三 · 胜侧泛光（settled，FT 平局整套不出）：胜方 H/A 键队色呼吸光、
+  // 败方压暗；灯色由 DERBY.home/away 现组 hexA 派生，键集仅四个 H/A 键
+  const hexA = (hex, a) => {
+    const n = parseInt(hex.slice(1), 16)
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
+  }
+  const ftWinner = cur && cur.ftHome !== cur.ftAway ? (cur.ftHome > cur.ftAway ? 'home' : 'away') : null
+  const sideWins = result && cur && ftWinner
+    ? {
+        ...(cur.htHome !== cur.htAway
+          ? { 'ht-home': cur.htHome > cur.htAway, 'ht-away': cur.htAway > cur.htHome }
+          : {}),
+        'ft-home': ftWinner === 'home', 'ft-away': ftWinner === 'away',
+      }
+    : null
   const cellBase = (key, bg) => {
     const sel = picks.has(key)
     const hit = (result?.hits ?? preHits)?.has(key)   // 结算后 result，FT 定格先预亮
     const pushed = result?.pushes?.has(key) && betsPlaced.has(key)
     const placed = betsPlaced.has(key)
+    const sideWin = sideWins && Object.prototype.hasOwnProperty.call(sideWins, key) ? sideWins[key] : undefined
     return {
       flex: 1, minWidth: 0, padding: isMobile ? '6px 2px' : isDesk ? '5px 4px' : '6px 4px',
       borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
@@ -641,6 +738,10 @@ export default function DerbyDay({ balance, setBalance }) {
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
       transition: 'filter 0.12s, border-color 0.12s, box-shadow 0.15s',
       boxSizing: 'border-box', position: 'relative',
+      // 胜侧呼吸光 / 败侧压暗（覆盖在基础分层之上）
+      ...(sideWin === true
+        ? { animation: `${key.endsWith('home') ? 'ddWinBreathH' : 'ddWinBreathA'} 1.3s ease-in-out infinite` }
+        : sideWin === false ? { opacity: 0.45 } : {}),
     }
   }
   const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
@@ -771,7 +872,9 @@ export default function DerbyDay({ balance, setBalance }) {
     : drawBlock(htVisible
       ? { title: '半场', homeBalls: cur.home20.slice(0, 10), awayBalls: cur.away20.slice(0, 10), homeSum: cur.htHome, awaySum: cur.htAway, total: cur.htTotal, lit: true }
       : { title: '半场 · 下期', homeBalls: [], awayBalls: [], lit: false, dimmed: true })
-  const fullBlock = gamePhase === 'ft_draw' && cur
+  // 全场舞台延挂到 settled：定格帧 + 彩带/字卡在结算期继续展示（单 rAF 贯穿，
+  // 下一期 betting 换静态上局块时卸载归零）
+  const fullBlock = (gamePhase === 'ft_draw' || gamePhase === 'settled') && cur
     ? stageShell(
         <DrawStage key={`${roundNo}-ft`} stage="ft" roll={cur}
           beadSize={beadSize} isMobile={isMobile} sfx={stageSfx}
@@ -941,7 +1044,17 @@ export default function DerbyDay({ balance, setBalance }) {
       display: 'flex', flexDirection: 'column',
       ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
     }}>
-      <style>{`.ddCell:hover:not(:disabled) { filter: brightness(1.2); }`}</style>
+      <style>{`
+        .ddCell:hover:not(:disabled) { filter: brightness(1.2); }
+        @keyframes ddWinBreathH {
+          0%, 100% { box-shadow: 0 0 8px ${hexA(DERBY.home, 0.45)}; }
+          50% { box-shadow: 0 0 18px ${hexA(DERBY.home, 0.8)}, 0 0 30px ${hexA(DERBY.home, 0.4)}; }
+        }
+        @keyframes ddWinBreathA {
+          0%, 100% { box-shadow: 0 0 8px ${hexA(DERBY.away, 0.45)}; }
+          50% { box-shadow: 0 0 18px ${hexA(DERBY.away, 0.8)}, 0 0 30px ${hexA(DERBY.away, 0.4)}; }
+        }
+      `}</style>
 
       {/* ---- top bar ---- */}
       <div style={{
