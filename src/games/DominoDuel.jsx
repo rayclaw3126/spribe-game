@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
@@ -6,6 +6,7 @@ import BetFeed from '../components/shell/BetFeed'
 import BetButton from '../components/shell/BetButton'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
+import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 
 // Domino Duel — 骨牌版主客对决（闲庄→主蓝客红），第 21 卡。
@@ -87,8 +88,12 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
 // ---------- 轮次常量（心跳 500ms/tick）----------
 const TICK_MS = 500
 const BETTING_T = 24   // 12s 押注
-const DRAW_T = 4       // 2s 开牌（静态占位，翻牌动画走 X3）
+const DRAW_T = 14      // 7s 开牌（四张骨牌错峰翻开 + 决胜张慢镜）
 const SETTLED_T = 8    // 4s 结算展示
+// 翻牌错峰时间轴（秒）：主1→客1→主2→客2，第4张（决胜）慢镜
+const FLIP_DELAY = [0, 0.55, 1.1, 1.75]
+const FLIP_DUR = [0.55, 0.55, 0.55, 1.4]
+const FLIP_END = 1.75 + 1.4   // 末张翻完 ≈ 3.15s
 const ROAD_CAP = 120
 
 const VENUE = 'ONYX ARENA'
@@ -133,7 +138,8 @@ const CORRECT = [
 ]
 
 // 单张多米诺（竖向：上半 / 分隔线 / 下半，各半画 pip 点）
-function DominoTile({ a, b, size = 34 }) {
+// flip：drawing 相位 3D 翻牌（背面队色 → 正面点数），delay/dur 错峰 + 决胜张慢镜
+function DominoTile({ a, b, size = 34, flip = false, delay = 0, dur = 0.55, backColor = DERBY.home }) {
   const half = (v, key) => (
     <div key={key} style={{
       width: size, height: size, position: 'relative',
@@ -149,16 +155,34 @@ function DominoTile({ a, b, size = 34 }) {
       ))}
     </div>
   )
-  return (
+  const face = (
     <div style={{
-      display: 'flex', flexDirection: 'column',
+      display: 'flex', flexDirection: 'column', width: size, height: size * 2 + 2,
       background: '#f4f6fb', borderRadius: size * 0.16,
       border: '1px solid rgba(0,0,0,0.35)', boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
-      overflow: 'hidden',
+      overflow: 'hidden', boxSizing: 'border-box',
     }}>
       {half(a, 'a')}
       <div style={{ height: 2, background: 'rgba(0,0,0,0.35)' }} />
       {half(b, 'b')}
+    </div>
+  )
+  if (!flip) return face
+  return (
+    <div style={{ perspective: 700, width: size, height: size * 2 + 2 }}>
+      <div className="ddFlipInner" style={{
+        position: 'relative', width: '100%', height: '100%', transformStyle: 'preserve-3d',
+        animation: `ddFlip ${dur}s cubic-bezier(0.4,0.75,0.3,1) ${delay}s both`,
+      }}>
+        <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden' }}>{face}</div>
+        <div style={{
+          position: 'absolute', inset: 0, backfaceVisibility: 'hidden', transform: 'rotateY(180deg)',
+          borderRadius: size * 0.16, border: '1px solid rgba(0,0,0,0.4)', boxSizing: 'border-box',
+          background: `linear-gradient(135deg, ${backColor}, rgba(0,0,0,0.45))`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'rgba(255,255,255,0.85)', fontSize: size * 0.55, fontWeight: 900,
+        }}>⬦</div>
+      </div>
     </div>
   )
 }
@@ -190,9 +214,101 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
 
+  const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
+  const audioRef = useRef({ ctx: null, muted: false })
+
   useEffect(() => { balanceRef.current = balance }, [balance])
   useEffect(() => { betRef.current = bet }, [bet])
+  useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
+
+  // ---------- 声景（WebAudio 合成，抄 Hat Trick 足球语义；muted 门控）----------
+  function ensureAudio() {
+    if (audioRef.current.ctx) return audioRef.current.ctx
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
+    audioRef.current.ctx = ctx; return ctx
+  }
+  function sfxWhoosh() {   // 翻牌/射门：低频重击 + 破空短扫
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); o.type = 'sine'
+    o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.14)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.11, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.2)
+    const nb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.16), ctx.sampleRate)
+    const d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length)
+    const ns = ctx.createBufferSource(); ns.buffer = nb
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.8
+    bp.frequency.setValueAtTime(900, t); bp.frequency.exponentialRampToValueAtTime(2400, t + 0.14)
+    const g2 = ctx.createGain()
+    g2.gain.setValueAtTime(0.0001, t); g2.gain.exponentialRampToValueAtTime(0.045, t + 0.02); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.16)
+    ns.connect(bp); bp.connect(g2); g2.connect(ctx.destination); ns.start(t); ns.stop(t + 0.16)
+  }
+  function sfxSnap() {   // 骨牌定格/入网：软噪声刷过
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const len = Math.floor(ctx.sampleRate * 0.15)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1)
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.9
+    bp.frequency.setValueAtTime(3200, t); bp.frequency.exponentialRampToValueAtTime(1400, t + 0.15)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15)
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination); src.start(t); src.stop(t + 0.15)
+  }
+  function sfxCheer(win) {   // 定格欢呼：宽带噪声起伏 + 亮音 + 进球哨
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const dur = win ? 1.5 : 0.9, peak = win ? 0.14 : 0.08
+    const len = Math.floor(ctx.sampleRate * dur)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.sin((i / len) * Math.PI)
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1050; bp.Q.value = 0.5
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + dur * 0.35); g.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination); src.start(t); src.stop(t + dur)
+    if (win) {
+      [660, 990, 1320].forEach((f, i) => {
+        const o = ctx.createOscillator(); const og = ctx.createGain(); o.type = 'sine'; o.frequency.value = f
+        const s = t + i * 0.09
+        og.gain.setValueAtTime(0.0001, s); og.gain.exponentialRampToValueAtTime(0.07, s + 0.02); og.gain.exponentialRampToValueAtTime(0.0001, s + 0.3)
+        o.connect(og); og.connect(ctx.destination); o.start(s); o.stop(s + 0.32)
+      })
+      // 进球哨（两短高哨带颤）
+      ;[0, 0.2].forEach((off, i) => {
+        const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = 2300 + i * 120
+        const lfo = ctx.createOscillator(); lfo.frequency.value = 26
+        const lg = ctx.createGain(); lg.gain.value = 55
+        lfo.connect(lg); lg.connect(o.frequency)
+        const og = ctx.createGain(); const s = t + 0.5 + off
+        og.gain.setValueAtTime(0.0001, s); og.gain.exponentialRampToValueAtTime(0.05, s + 0.01); og.gain.exponentialRampToValueAtTime(0.0001, s + (i ? 0.24 : 0.14))
+        o.connect(og); og.connect(ctx.destination); o.start(s); o.stop(s + 0.26); lfo.start(s); lfo.stop(s + 0.26)
+      })
+    }
+  }
+
+  // 翻牌声景：进入 drawing 按错峰排「翻牌 whoosh + 落定 snap」
+  useEffect(() => {
+    if (gamePhase !== 'drawing' || reduced) return
+    FLIP_DELAY.forEach((d, i) => {
+      timersRef.current.push(setTimeout(sfxWhoosh, d * 1000))
+      timersRef.current.push(setTimeout(sfxSnap, (d + FLIP_DUR[i]) * 1000))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamePhase])
+  // 结算欢呼：进入 settled，有中注则强化欢呼+哨
+  useEffect(() => {
+    if (gamePhase !== 'settled') return
+    if (!reduced) sfxCheer(result?.winTotal > 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamePhase])
 
   function pushToast(label, win) {
     const id = ++toastIdRef.current
@@ -379,26 +495,42 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
       phaseChip={phaseChipNode} onBack={onBack} />
   )
 
-  // ---- ① 对决区：主(蓝) VS 客(红)，各两张骨牌 + 比分 ----
+  // ---- ① 对决区：主(蓝) VS 客(红)，各两张骨牌 + 比分（drawing 翻牌演出）----
   const tileSz = isMobile ? 28 : 32
-  const teamBlock = (name, tiles, score, color) => (
+  const flipping = gamePhase === 'drawing' && !reduced   // 翻牌相位（动画只读 pendingRef）
+  const teamBlock = (name, tiles, score, color, side) => (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
       <span style={{
         padding: '2px 12px', borderRadius: RADIUS.pill, background: color,
         color: COLORS.white, fontSize: isMobile ? 11 : 12, fontWeight: 900, letterSpacing: 0.5,
       }}>{name}</span>
       <div style={{ display: 'flex', gap: 6 }}>
-        {tiles.map((t, i) => <DominoTile key={i} a={t[0]} b={t[1]} size={tileSz} />)}
+        {tiles.map((t, i) => {
+          const slot = side === 'h' ? i * 2 : i * 2 + 1   // 全局翻序 主1→客1→主2→客2
+          return <DominoTile key={i} a={t[0]} b={t[1]} size={tileSz}
+            flip={flipping} delay={FLIP_DELAY[slot]} dur={FLIP_DUR[slot]} backColor={color} />
+        })}
       </div>
       <span style={{
         color: COLORS.white, fontSize: isMobile ? 22 : 26, fontWeight: 900,
         fontFamily: "'Space Grotesk', sans-serif", textShadow: `0 0 10px ${color}`,
+        ...(flipping ? { animation: `ddScoreIn 0.4s ease ${FLIP_END}s both` } : {}),   // 翻完再揭比分（不剧透）
       }}>{score}</span>
     </div>
   )
-  const outcomeTag = gamePhase !== 'betting' && shown
+  // 结果只在 settled 揭示（drawing 不剧透胜负）
+  const outcomeTag = gamePhase === 'settled' && shown
     ? (shown.hs > shown.as ? { t: '主队胜', c: DERBY.home } : shown.as > shown.hs ? { t: '客队胜', c: DERBY.away } : { t: '平局', c: DERBY.gold })
     : null
+  // 赢队半场彩带（主胜落左半 / 客胜落右半 / 平局全场）
+  const winSide = shown ? (shown.hs > shown.as ? 'home' : shown.as > shown.hs ? 'away' : 'tie') : 'tie'
+  const confetti = useMemo(() => Array.from({ length: 42 }, (_, i) => ({
+    left: Math.random() * 100, delay: Math.random() * 0.5, dur: 1.1 + Math.random() * 1.3,
+    rot: (Math.random() * 2 - 1) * 540,
+    color: [DERBY.gold, '#35d07f', '#ffffff', DERBY.home, DERBY.away][i % 5], size: 4 + Math.random() * 4,
+    // roundNo 作重生成键：每局换一批彩带位置（body 不直接引用，禁 lint 误报）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  })), [roundNo])
   const duelZone = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
@@ -406,10 +538,24 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
       borderRadius: 12, padding: isMobile ? '10px 8px' : '10px 18px',
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      gap: isMobile ? 14 : 30, boxSizing: 'border-box', flexWrap: 'wrap',
+      gap: isMobile ? 14 : 30, boxSizing: 'border-box', flexWrap: 'wrap', overflow: 'hidden',
     }}>
-      {teamBlock('主队', shown.homeTiles, shown.hs, DERBY.home)}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flex: '0 0 auto' }}>
+      {gamePhase === 'settled' && !reduced && (
+        <div style={{
+          position: 'absolute', top: 0, bottom: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 3,
+          left: winSide === 'away' ? '50%' : 0, right: winSide === 'home' ? '50%' : 0,
+        }}>
+          {confetti.map((p, i) => (
+            <span key={i} style={{
+              position: 'absolute', top: -12, left: `${p.left}%`, width: p.size, height: p.size * 0.55,
+              background: p.color, borderRadius: 1, '--rot': `${p.rot}deg`,
+              animation: `ddConfFall ${p.dur}s linear ${p.delay}s both`,
+            }} />
+          ))}
+        </div>
+      )}
+      {teamBlock('主队', shown.homeTiles, shown.hs, DERBY.home, 'h')}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flex: '0 0 auto', zIndex: 4 }}>
         <span style={{ color: DERBY.gold, fontSize: isMobile ? 16 : 20, fontWeight: 900, fontFamily: "'Space Grotesk', sans-serif" }}>VS</span>
         {outcomeTag && (
           <span style={{
@@ -418,7 +564,7 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
           }}>{outcomeTag.t}</span>
         )}
       </div>
-      {teamBlock('客队', shown.awayTiles, shown.as, DERBY.away)}
+      {teamBlock('客队', shown.awayTiles, shown.as, DERBY.away, 'a')}
     </div>
   )
 
@@ -499,7 +645,16 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
       display: 'flex', flexDirection: 'column',
       ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
     }}>
-      <style>{`.ddCell:hover:not(:disabled) { filter: brightness(1.2); }`}</style>
+      <style>{`
+        .ddCell:hover:not(:disabled) { filter: brightness(1.2); }
+        @keyframes ddFlip { from { transform: rotateY(180deg); } to { transform: rotateY(0deg); } }
+        @keyframes ddScoreIn { 0% { opacity: 0; transform: scale(0.5); } 60% { opacity: 1; transform: scale(1.18); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes ddConfFall {
+          0% { transform: translateY(-12px) rotate(0deg); opacity: 0; }
+          12% { opacity: 1; }
+          100% { transform: translateY(230px) rotate(var(--rot)); opacity: 0; }
+        }
+      `}</style>
       {topBar}
       {duelZone}
       <div style={{
