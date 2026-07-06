@@ -11,7 +11,7 @@ import coverStreakRoll from '../assets/covers/cover-streak-roll.png'
 import coverTeamRoulette from '../assets/covers/cover_miniroulette.png'
 import coverMomentum from '../assets/covers/cover_momentum.png'
 import coverHalfTime from '../assets/covers/cover_halftime.png'
-import coverGoldenBoot from '../assets/covers/cover_goldenboot.png'
+import coverPk10 from '../assets/covers/cover-pk10.png'
 import coverNumberUp from '../assets/covers/cover_numberup.png'
 import coverDerbyDay from '../assets/covers/cover_derbyday.png'
 import coverLineUp from '../assets/covers/cover_lineup.png'
@@ -34,7 +34,7 @@ const GAMES = [
   { id: 'MiniRoulette', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette, cat: 'instant' },
   { id: 'Momentum', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum, cat: 'instant' },
   { id: 'HalfTime', name: 'Half Time', desc: 'Call the keno sum — over, under, zones!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverHalfTime, cat: 'lottery' },
-  { id: 'GoldenBoot', name: 'PK10 Speedy', desc: 'Ten strikers sprint — call the podium!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverGoldenBoot, cat: 'lottery' },
+  { id: 'GoldenBoot', name: 'PK10 Speedy', desc: 'Ten cars, one finish line — call the order!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverPk10, cat: 'lottery' },
   { id: 'NumberUp', name: 'Number Up', desc: 'Pick the shirt number — 00 to 99!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverNumberUp, cat: 'lottery' },
   // TODO: 换 Codex 专属封面（暂借 Total Goals 封面占位）
   { id: 'HatTrick', name: 'Hat Trick', desc: 'Three dice — call the total!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals, cat: 'lottery' },
@@ -47,8 +47,8 @@ const GAMES = [
 ]
 
 const TOP_IDS = ['RollingBall', 'WuXing', 'SpeedGrid', 'LineUp', 'DerbyDay']
-const HOT_IDS = ['DerbyDay', 'LineUp', 'SpeedGrid', 'WuXing', 'RollingBall']
-const NEW_IDS = ['LineUp', 'SpeedGrid', 'WuXing', 'RollingBall']
+const HOT_IDS = ['DerbyDay', 'LineUp', 'SpeedGrid', 'WuXing', 'RollingBall', 'GoldenBoot']
+const NEW_IDS = ['LineUp', 'SpeedGrid', 'WuXing', 'RollingBall', 'GoldenBoot']
 
 const TABS = [
   { k: 'all', label: '全部' },
