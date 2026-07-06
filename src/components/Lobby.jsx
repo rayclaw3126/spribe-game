@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import coverBreakaway from '../assets/covers/cover-breakaway.png'
 import coverDribble from '../assets/covers/cover-dribble.png'
 import coverFreeKick from '../assets/covers/cover-free-kick.png'
@@ -17,34 +18,40 @@ import coverLineUp from '../assets/covers/cover_lineup.png'
 import coverSpeedGrid from '../assets/covers/cover_speedgrid.png'
 import coverWuXing from '../assets/covers/cover_wuxing.png'
 import coverRollingBall from '../assets/covers/cover_rollingball.png'
+import { useIsMobile } from '../hooks/useMediaQuery'
 
 const GAMES = [
-  { id: 'Aviator',   name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
-  { id: 'Dice',      name: 'Total Goals',     desc: 'Over or under? Call the score.',   color: '#2563EB', bg: 'linear-gradient(135deg, #DBEAFE, #BFDBFE)', cover: coverTotalGoals },
-  { id: 'Plinko',    name: 'Free Kick',   desc: 'Curl it into the zone!',         color: '#D97706', bg: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', cover: coverFreeKick },
-  { id: 'Goal',      name: 'Goal',     desc: 'Score past the goalkeeper!',      color: '#059669', bg: 'linear-gradient(135deg, #D1FAE5, #A7F3D0)', cover: coverGoal },
-  { id: 'HiLo',      name: 'Rating Hi-Lo',    desc: 'Higher or lower rating?',    color: '#DC2626', bg: 'linear-gradient(135deg, #FEE2E2, #FECACA)', cover: coverRatingHiLo },
-  { id: 'Mines',     name: 'Dribble',    desc: 'Beat defenders, avoid tackles.', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverDribble },
-  { id: 'Keno',      name: 'Team Keno', desc: 'Pick the winning teams!',        color: '#DB2777', bg: 'linear-gradient(135deg, #FCE7F3, #FBCFE8)', cover: coverTeamKeno },
-  { id: 'Limbo',     name: 'Odds Climb', desc: 'Set target odds, kick off to climb!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverOddsClimb },
-  { id: 'StreakRoll', name: 'Streak Roll', desc: 'Roll the strip, stop on a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll },
-  { id: 'MiniRoulette', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette },
-  { id: 'Momentum', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum },
-  { id: 'HalfTime', name: 'Half Time', desc: 'Call the keno sum — over, under, zones!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverHalfTime },
-  { id: 'GoldenBoot', name: 'Golden Boot', desc: 'Ten strikers sprint — call the podium!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverGoldenBoot },
-  { id: 'NumberUp', name: 'Number Up', desc: 'Pick the shirt number — 00 to 99!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverNumberUp },
+  { id: 'Aviator',   name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway, cat: 'instant' },
+  { id: 'Dice',      name: 'Total Goals',     desc: 'Over or under? Call the score.',   color: '#2563EB', bg: 'linear-gradient(135deg, #DBEAFE, #BFDBFE)', cover: coverTotalGoals, cat: 'instant' },
+  { id: 'Plinko',    name: 'Free Kick',   desc: 'Curl it into the zone!',         color: '#D97706', bg: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', cover: coverFreeKick, cat: 'instant' },
+  { id: 'Goal',      name: 'Goal',     desc: 'Score past the goalkeeper!',      color: '#059669', bg: 'linear-gradient(135deg, #D1FAE5, #A7F3D0)', cover: coverGoal, cat: 'instant' },
+  { id: 'HiLo',      name: 'Rating Hi-Lo',    desc: 'Higher or lower rating?',    color: '#DC2626', bg: 'linear-gradient(135deg, #FEE2E2, #FECACA)', cover: coverRatingHiLo, cat: 'instant' },
+  { id: 'Mines',     name: 'Dribble',    desc: 'Beat defenders, avoid tackles.', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverDribble, cat: 'instant' },
+  { id: 'Keno',      name: 'Team Keno', desc: 'Pick the winning teams!',        color: '#DB2777', bg: 'linear-gradient(135deg, #FCE7F3, #FBCFE8)', cover: coverTeamKeno, cat: 'instant' },
+  { id: 'Limbo',     name: 'Odds Climb', desc: 'Set target odds, kick off to climb!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverOddsClimb, cat: 'instant' },
+  { id: 'StreakRoll', name: 'Streak Roll', desc: 'Roll the strip, stop on a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll, cat: 'instant' },
+  { id: 'MiniRoulette', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette, cat: 'instant' },
+  { id: 'Momentum', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum, cat: 'instant' },
+  { id: 'HalfTime', name: 'Half Time', desc: 'Call the keno sum — over, under, zones!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverHalfTime, cat: 'lottery' },
+  { id: 'GoldenBoot', name: 'Golden Boot', desc: 'Ten strikers sprint — call the podium!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverGoldenBoot, cat: 'lottery' },
+  { id: 'NumberUp', name: 'Number Up', desc: 'Pick the shirt number — 00 to 99!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverNumberUp, cat: 'lottery' },
   // TODO: 换 Codex 专属封面（暂借 Total Goals 封面占位）
-  { id: 'HatTrick', name: 'Hat Trick', desc: 'Three dice — call the total!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals },
-  { id: 'DerbyDay', name: 'Derby Day', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDerbyDay },
-  { id: 'LineUp', name: 'Line Up', desc: 'Five lines, 25 numbers — call the sums!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverLineUp },
-  { id: 'SpeedGrid', name: 'Speed Grid', desc: '24 cars, one champion — call it!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverSpeedGrid },
-  { id: 'WuXing', name: 'Wu Xing', desc: 'Twenty balls, five elements!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverWuXing },
-  { id: 'RollingBall', name: 'Rolling Ball', desc: 'Three balls roll — call each one!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverRollingBall },
+  { id: 'HatTrick', name: 'Hat Trick', desc: 'Three dice — call the total!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals, cat: 'lottery' },
+  { id: 'DerbyDay', name: 'Derby Day', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDerbyDay, cat: 'lottery' },
+  { id: 'LineUp', name: 'Line Up', desc: 'Five lines, 25 numbers — call the sums!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverLineUp, cat: 'lottery' },
+  { id: 'SpeedGrid', name: 'Speed Grid', desc: '24 cars, one champion — call it!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverSpeedGrid, cat: 'lottery' },
+  { id: 'WuXing', name: 'Wu Xing', desc: 'Twenty balls, five elements!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverWuXing, cat: 'lottery' },
+  { id: 'RollingBall', name: 'Rolling Ball', desc: 'Three balls roll — call each one!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverRollingBall, cat: 'lottery' },
 ]
 
+const TABS = [{ k: 'all', label: '全部' }, { k: 'instant', label: '即时街机' }, { k: 'lottery', label: '轮次开奖' }]
+
 export default function Lobby({ onSelect, balance }) {
+  const isMobile = useIsMobile()
+  const [tab, setTab] = useState('all')
+  const shown = tab === 'all' ? GAMES : GAMES.filter(g => g.cat === tab)
   return (
-    <div style={{ maxWidth: 1120, margin: '0 auto', padding: '32px 24px 40px', color: '#e8edf2' }}>
+    <div style={{ maxWidth: 1120, margin: '0 auto', padding: isMobile ? '16px 12px 32px' : '32px 24px 40px', color: '#e8edf2' }}>
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -68,10 +75,10 @@ export default function Lobby({ onSelect, balance }) {
         </h1>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {['热门', '全部', '新游'].map((chip, index) => {
-            const active = index === 0
+          {TABS.map(t => {
+            const active = tab === t.k
             return (
-              <button key={chip} type="button" style={{
+              <button key={t.k} type="button" onClick={() => setTab(t.k)} style={{
                 background: active ? '#16c784' : '#1a2230',
                 color: active ? '#06251a' : '#8a97a6',
                 border: `1px solid ${active ? '#16c784' : '#232c39'}`,
@@ -79,8 +86,9 @@ export default function Lobby({ onSelect, balance }) {
                 padding: '8px 14px',
                 fontSize: 13,
                 fontWeight: 800,
+                cursor: 'pointer',
               }}>
-                {chip}
+                {t.label}
               </button>
             )
           })}
@@ -89,11 +97,11 @@ export default function Lobby({ onSelect, balance }) {
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-        gap: 16,
+        gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(auto-fill, minmax(240px, 1fr))',
+        gap: isMobile ? 10 : 16,
       }}>
-        {GAMES.map((g, i) => (
-          <GameCard key={g.id} game={g} index={i} onSelect={onSelect} />
+        {shown.map((g, i) => (
+          <GameCard key={g.id} game={g} index={i} onSelect={onSelect} isMobile={isMobile} />
         ))}
       </div>
 
@@ -105,7 +113,7 @@ export default function Lobby({ onSelect, balance }) {
   )
 }
 
-function GameCard({ game, index, onSelect }) {
+function GameCard({ game, index, onSelect, isMobile }) {
   return (
     <button
       onClick={() => onSelect(game.id)}
@@ -113,11 +121,12 @@ function GameCard({ game, index, onSelect }) {
         background: '#1a2230',
         border: '1px solid #232c39',
         borderRadius: 12,
-        padding: 18,
+        padding: isMobile ? 0 : 18,
+        overflow: isMobile ? 'hidden' : undefined,
         textAlign: 'left', cursor: 'pointer',
         transition: 'transform 0.2s, border-color 0.2s, background 0.2s',
         animation: `fadeIn 0.5s ease ${index * 0.06}s both`,
-        minHeight: 178,
+        minHeight: isMobile ? 'auto' : 178,
       }}
       onMouseEnter={e => {
         e.currentTarget.style.transform = 'translateY(-3px)'
@@ -132,7 +141,7 @@ function GameCard({ game, index, onSelect }) {
     >
       {game.cover ? (
         <div style={{
-          margin: '-18px -18px 16px', height: 120, overflow: 'hidden',
+          margin: isMobile ? 0 : '-18px -18px 16px', height: isMobile ? 78 : 120, overflow: 'hidden',
           borderRadius: '12px 12px 0 0',
         }}>
           <img src={game.cover} alt={game.name} style={{
@@ -152,20 +161,26 @@ function GameCard({ game, index, onSelect }) {
           marginBottom: 16,
         }} />
       )}
-      <div style={{ fontWeight: 800, fontSize: 17, color: '#e8edf2', marginBottom: 6 }}>
+      <div style={isMobile
+        ? { fontWeight: 800, fontSize: 13, color: '#e8edf2', padding: '6px 8px 8px' }
+        : { fontWeight: 800, fontSize: 17, color: '#e8edf2', marginBottom: 6 }}>
         {game.name}
       </div>
-      <div style={{ fontSize: 13, color: '#8a97a6', lineHeight: 1.5, minHeight: 40 }}>
-        {game.desc}
-      </div>
-      <div style={{
-        marginTop: 16,
-        color: '#16c784',
-        fontWeight: 800,
-        fontSize: 13,
-      }}>
-        进入 →
-      </div>
+      {!isMobile && (
+        <>
+          <div style={{ fontSize: 13, color: '#8a97a6', lineHeight: 1.5, minHeight: 40 }}>
+            {game.desc}
+          </div>
+          <div style={{
+            marginTop: 16,
+            color: '#16c784',
+            fontWeight: 800,
+            fontSize: 13,
+          }}>
+            进入 →
+          </div>
+        </>
+      )}
     </button>
   )
 }
