@@ -657,9 +657,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
     return {
       flex: 1, minWidth: 0, padding: compact ? '5px 2px' : '8px 4px',
       borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
-      background: sel
-        ? GOLDENBOOT.selTint
-        : `linear-gradient(180deg, ${GOLDENBOOT.ctrl}, ${GOLDENBOOT.band})`,
+      background: sel ? GOLDENBOOT.selTint : GOLDENBOOT.grey,
       border: `1px solid ${hit ? GOLDENBOOT.sel : sel ? GOLDENBOOT.gold : placed ? GOLDENBOOT.gold : 'rgba(255,255,255,0.16)'}`,
       boxShadow: hit
         ? `0 0 12px ${GOLDENBOOT.selTint.replace('0.16', '0.6')}`

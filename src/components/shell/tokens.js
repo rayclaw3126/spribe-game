@@ -119,6 +119,7 @@ export const GOLDENBOOT = {
   band: '#0b3d1c',      // = KENO.band（顶栏/注栏）
   ctrl: '#11582a',      // = KENO.ctrl（chrome 控件底）
   strip: 'rgba(0,0,0,0.32)',
+  grey: '#1a2230',      // = DERBY.grey，暗灰格底（下注格底）
   gold: '#ffd54f',      // 金靴主金（共享 gold）— 赔率字/选中金框
   fire: '#ffb300',      // 金珠渐变中段（= HOTLINE.fire）
   goldDeep: '#f28c17',  // 金渐变收底（共享 orange）
