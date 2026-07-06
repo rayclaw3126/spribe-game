@@ -99,6 +99,7 @@ export const NUMBERUP = {
   band: '#0b3d1c',      // = KENO.band（顶栏/注栏）
   ctrl: '#11582a',      // = KENO.ctrl（chrome 控件底）
   strip: 'rgba(0,0,0,0.32)',
+  grey: '#1a2230',      // = DERBY.grey，暗灰格底（下注格底）
   jersey: '#14803c',    // HiLo 球衣实心绿 — 号码卡小图
   gold: '#ffd54f',      // 共享金 — 选中金框/赔率字
   sel: '#35d07f',       // 确认绿（共享）

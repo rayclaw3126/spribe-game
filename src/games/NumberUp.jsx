@@ -487,9 +487,7 @@ export default function NumberUp({ balance, setBalance, onBack }) {
     return {
       flex: 1, minWidth: 0, padding: compact ? '5px 2px' : '8px 4px',
       borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
-      background: sel
-        ? NUMBERUP.selTint
-        : `linear-gradient(180deg, ${NUMBERUP.ctrl}, ${NUMBERUP.band})`,
+      background: sel ? NUMBERUP.selTint : NUMBERUP.grey,
       border: `1px solid ${hit ? NUMBERUP.sel : sel || placed ? NUMBERUP.gold : 'rgba(255,255,255,0.16)'}`,
       boxShadow: hit
         ? `0 0 12px ${NUMBERUP.selTint.replace('0.16', '0.6')}`
@@ -524,7 +522,7 @@ export default function NumberUp({ balance, setBalance, onBack }) {
       <button key={key} type="button" className="nuCell" disabled={!betting} onClick={() => toggleSel(key)} style={{
         height: isMobile ? 28 : 22, minWidth: 0, padding: 0,
         borderRadius: 6, cursor: betting ? 'pointer' : 'not-allowed',
-        background: hit ? NUMBERUP.sel : sel ? NUMBERUP.gold : `linear-gradient(180deg, ${NUMBERUP.ctrl}, ${NUMBERUP.band})`,
+        background: hit ? NUMBERUP.sel : sel ? NUMBERUP.gold : NUMBERUP.grey,
         border: `1px solid ${hit ? NUMBERUP.sel : sel || placed ? NUMBERUP.gold : 'rgba(255,255,255,0.14)'}`,
         boxShadow: hit ? '0 0 10px rgba(53,208,127,0.7)' : sel ? '0 0 8px rgba(255,213,79,0.5)' : 'none',
         color: hit || sel ? '#083a1b' : NUMBERUP.text,
