@@ -9,38 +9,37 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import BetButton from '../components/shell/BetButton'
 
-// Number Up — 两位数球衣号码彩（00–99）。
-// 引擎：0–99 均匀抽一个；头位/尾位/大小单双全部由 num 派生。
+// Number Up — 两位数球衣号码彩（00–49）。
+// 引擎：0–49 均匀抽一个；头位/尾位/大小单双全部由 num 派生。
 // 轮次：BETTING(24s) → REVEAL(3s 占位，单3 换换人牌动画) → SETTLED(3s) → 下一期。
 // 算钱路径：confirmBets() 唯一扣注点，settleRound() 唯一赔付点。
 
 const pad2 = n => String(n).padStart(2, '0')
 
 // ---------- 引擎（纯函数区，禁副作用）----------
-// 0–99 均匀抽一个；rng 可注入（对账/模拟用）
+// 0–49 均匀抽一个；rng 可注入（对账/模拟用）
 export function drawNumber(rng = Math.random) {
-  return Math.floor(rng() * 100)
+  return Math.floor(rng() * 50)
 }
 
-// 派生：头位 / 尾位 / 大小 / 单双（单双按尾数奇偶 = num 本身奇偶）
+// 派生：头位(0–4) / 尾位(0–9) / 大小(分界 25：LOW 00–24 / HIGH 25–49) / 单双(num 奇偶)
 export function deriveNum(num) {
-  return { num, first: Math.floor(num / 10), last: num % 10, high: num >= 50, odd: num % 2 === 1 }
+  return { num, first: Math.floor(num / 10), last: num % 10, high: num >= 25, odd: num % 2 === 1 }
 }
 
-// 赔率配置表（均匀分布下全部精确可算，无需模拟标定）：
-//   直选  95.00 × P=1/100 → RTP 95.0% 精确
-//   头/尾位 9.50 × P=1/10 → RTP 95.0% 精确
-//   HIGH/LOW/ODD/EVEN 1.91 × P=1/2 → RTP 95.5% 精确
-export const ODDS = { pick: 95, digit: 9.5, side: 1.91 }
+// 赔率配置表（0–49 均匀分布，全部精确可算 + 1e6 蒙特卡洛双验，全键 94–97.5%）：
+//   直选   47.50 × P=1/50 → RTP 95.0% 精确（池 00–49 共 50 值）
+//   首位   4.75  × P=1/5  → RTP 95.0% 精确（首位 0–4 共 5 值，各覆盖 10 号）
+//   尾位   9.50  × P=1/10 → RTP 95.0% 精确（尾位 0–9 共 10 值，各覆盖 5 号）
+//   HIGH/LOW/ODD/EVEN 1.91 × P=1/2 → RTP 95.5% 精确（各 25 值均分）
+export const ODDS = { pick: 47.5, firstDigit: 4.75, lastDigit: 9.5, side: 1.91 }
 
-// 盘区判定表 — 数据驱动生成（124 键），settle/珠盘路/RTP 模拟共用，零散落 if
+// 盘区判定表 — 数据驱动生成（69 键：直选 50 + 首位 5 + 尾位 10 + 大小单双 4），settle/珠盘路/RTP 模拟共用
 export const MARKETS = (() => {
   const m = {}
-  for (let n = 0; n < 100; n++) m[`n-${pad2(n)}`] = { odds: ODDS.pick, hit: r => r.num === n }
-  for (let d = 0; d <= 9; d++) {
-    m[`fd-${d}`] = { odds: ODDS.digit, hit: r => r.first === d }
-    m[`ld-${d}`] = { odds: ODDS.digit, hit: r => r.last === d }
-  }
+  for (let n = 0; n < 50; n++) m[`n-${pad2(n)}`] = { odds: ODDS.pick, hit: r => r.num === n }
+  for (let d = 0; d <= 4; d++) m[`fd-${d}`] = { odds: ODDS.firstDigit, hit: r => r.first === d }   // 首位 0–4
+  for (let d = 0; d <= 9; d++) m[`ld-${d}`] = { odds: ODDS.lastDigit, hit: r => r.last === d }      // 尾位 0–9
   m['s-high'] = { odds: ODDS.side, hit: r => r.high }
   m['s-low']  = { odds: ODDS.side, hit: r => !r.high }
   m['s-odd']  = { odds: ODDS.side, hit: r => r.odd }
@@ -70,27 +69,27 @@ const VENUE = 'OPAL COURT'          // 架空场馆名（禁真实球场名）
 const ROUND_DATE = '20260705'
 const ROAD_CAP = 120
 
-// 种子上期 + 种子历史（真开奖逐期顶掉）
-const SEED_LAST = deriveNum(88)
-const SEED_RECENT = [88, 7, 42, 91, 15]
+// 种子上期 + 种子历史（值域 0–49，真开奖逐期顶掉）
+const SEED_LAST = deriveNum(38)
+const SEED_RECENT = [38, 7, 42, 15, 29]
 const SEED_HISTORY = [
-  88, 7, 42, 91, 15, 63, 20, 55, 78, 4,
-  31, 96, 12, 49, 70, 27, 84, 9, 58, 36,
-  61, 3, 95, 18, 44, 72, 29, 87, 50, 6,
+  38, 7, 42, 15, 29, 3, 20, 44, 8, 31,
+  12, 49, 17, 26, 0, 45, 9, 33, 21, 6,
+  40, 13, 25, 2, 48, 19, 36, 10, 47, 4,
 ]
 
 const SIDES = [
-  { key: 's-high', name: 'HIGH', range: '50–99' },
-  { key: 's-low',  name: 'LOW',  range: '00–49' },
+  { key: 's-high', name: 'HIGH', range: '25–49' },
+  { key: 's-low',  name: 'LOW',  range: '00–24' },
   { key: 's-odd',  name: 'ODD',  range: '尾数单' },
   { key: 's-even', name: 'EVEN', range: '尾数双' },
 ]
 
 const ROAD_TABS = ['NUMBER', 'DIGIT', 'H-L']
 function beadFor(tab, n) {
-  if (tab === 'NUMBER') return { t: pad2(n), c: n >= 50 ? NUMBERUP.hi : NUMBERUP.lo }
+  if (tab === 'NUMBER') return { t: pad2(n), c: n >= 25 ? NUMBERUP.hi : NUMBERUP.lo }
   if (tab === 'DIGIT') { const d = n % 10; return { t: String(d), c: d % 2 ? NUMBERUP.hi : NUMBERUP.lo } }
-  return n >= 50 ? { t: 'H', c: NUMBERUP.hi } : { t: 'L', c: NUMBERUP.lo }
+  return n >= 25 ? { t: 'H', c: NUMBERUP.hi } : { t: 'L', c: NUMBERUP.lo }
 }
 
 // 球衣号码小卡 — 白底圆角卡 + HiLo 同款球衣轮廓 + 两位数号码
@@ -208,7 +207,7 @@ function BoardStage({ num, height, shakeRef, sfx, onFinale }) {
       const winW = bw * 0.38, winH = bh * 0.76
       const winY = -winH / 2
       const digitFont = `900 ${Math.round(winH * 0.72)}px 'Space Grotesk', sans-serif`
-      const drawWindow = (wx, locked, finalDigit, flashAt) => {
+      const drawWindow = (wx, locked, finalDigit, flashAt, digits = 10) => {
         ctx.fillStyle = NUMBERUP.jersey
         ctx.strokeStyle = 'rgba(0,0,0,0.4)'
         ctx.lineWidth = 1.5 * dpr
@@ -234,20 +233,20 @@ function BoardStage({ num, height, shakeRef, sfx, onFinale }) {
           ctx.fillStyle = '#ffffff'
           ctx.fillText(locked ? String(finalDigit) : '–', dx, 1 * dpr)
         } else {
-          // 滚动列：当前/下一位按小数偏移上滚 + 残影模糊感
+          // 滚动列：当前/下一位按小数偏移上滚 + 残影模糊感（digits 位循环：十位 5、个位 10）
           const roll = t / 55
-          const cur = Math.floor(roll) % 10
+          const cur = Math.floor(roll) % digits
           const frac = roll - Math.floor(roll)
           ctx.fillStyle = 'rgba(255,255,255,0.9)'
           ctx.fillText(String(cur), dx, -frac * winH * 0.9 + 1 * dpr)
-          ctx.fillText(String((cur + 1) % 10), dx, (1 - frac) * winH * 0.9 + 1 * dpr)
+          ctx.fillText(String((cur + 1) % digits), dx, (1 - frac) * winH * 0.9 + 1 * dpr)
           ctx.fillStyle = 'rgba(255,255,255,0.22)'
-          ctx.fillText(String((cur + 9) % 10), dx, -frac * winH * 0.9 - winH * 0.9 + 1 * dpr)
+          ctx.fillText(String((cur + digits - 1) % digits), dx, -frac * winH * 0.9 - winH * 0.9 + 1 * dpr)
         }
         ctx.restore()
       }
-      drawWindow(-winW - bw * 0.03, tensLocked, tens, tensFlash)
-      drawWindow(bw * 0.03, onesLocked, ones, onesFlash)
+      drawWindow(-winW - bw * 0.03, tensLocked, tens, tensFlash, 5)   // 十位牌只到 4
+      drawWindow(bw * 0.03, onesLocked, ones, onesFlash, 10)
       ctx.restore()
 
       raf = requestAnimationFrame(loop)
@@ -559,7 +558,7 @@ export default function NumberUp({ balance, setBalance, onBack }) {
         {recent.map((n, i) => (
           <span key={`${n}-${i}`} style={{
             padding: '1px 7px', borderRadius: RADIUS.pill,
-            background: n >= 50 ? NUMBERUP.hi : NUMBERUP.lo, color: COLORS.white,
+            background: n >= 25 ? NUMBERUP.hi : NUMBERUP.lo, color: COLORS.white,
             fontSize: 9.5, fontWeight: 900, opacity: i === 0 ? 1 : 0.75,
           }}>{pad2(n)}</span>
         ))}
@@ -645,19 +644,19 @@ export default function NumberUp({ balance, setBalance, onBack }) {
         gap: isMobile ? 8 : 8,
       }}>
         <WinToast toasts={toasts} />
-        {/* 行① PICK 00–99 网格（flex 可收缩 + 内部纵滚兜底） */}
+        {/* 行① PICK 00–49 网格（flex 可收缩 + 内部纵滚兜底） */}
         <div style={{
           flex: '0 1 auto', minHeight: 130, overflowY: 'auto',
           borderRadius: 12, padding: isMobile ? 6 : 8,
           background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)',
           boxSizing: 'border-box',
         }}>
-          <div style={secHead}>PICK 00–99 · 直选 · 赔率 {ODDS.pick.toFixed(2)}</div>
+          <div style={secHead}>PICK 00–49 · 直选 · 赔率 {ODDS.pick.toFixed(2)}</div>
           <div style={{
             display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)',
             gap: isMobile ? 3 : 3,
           }}>
-            {Array.from({ length: 100 }, (_, i) => gridCell(i))}
+            {Array.from({ length: 50 }, (_, i) => gridCell(i))}
           </div>
         </div>
 
@@ -670,13 +669,13 @@ export default function NumberUp({ balance, setBalance, onBack }) {
           flexDirection: isMobile ? 'column' : 'row',
         }}>
           {[
-            { pre: 'fd', label: `FIRST DIGIT · 首位 · ${ODDS.digit.toFixed(2)}` },
-            { pre: 'ld', label: `LAST DIGIT · 尾数 · ${ODDS.digit.toFixed(2)}` },
+            { pre: 'fd', label: `FIRST DIGIT · 首位 · ${ODDS.firstDigit.toFixed(2)}`, count: 5 },
+            { pre: 'ld', label: `LAST DIGIT · 尾数 · ${ODDS.lastDigit.toFixed(2)}`, count: 10 },
           ].map(g => (
             <div key={g.pre} style={{ flex: 1, minWidth: 0 }}>
               <div style={secHead}>{g.label}</div>
               <div style={{ display: 'flex', gap: isMobile ? 3 : 4 }}>
-                {Array.from({ length: 10 }, (_, d) => (
+                {Array.from({ length: g.count }, (_, d) => (
                   <button key={d} type="button" className="nuCell" disabled={!betting} onClick={() => toggleSel(`${g.pre}-${d}`)}
                     style={{ ...cellBtn(`${g.pre}-${d}`, { compact: true }), padding: '4px 0' }}>
                     <span style={{ ...cellName, fontSize: isMobile ? 11 : 12 }}>{d}</span>
