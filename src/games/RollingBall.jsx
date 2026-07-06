@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
 // X2：连开 3 球引擎 + 剩余池动态赔率 + 逐球结算状态机（前 19 卡无此结构）。
@@ -105,7 +106,35 @@ const SETTLE_T = 6     // 3s 结算展示
 const ROAD_CAP = 120
 
 // ---------- 静态种子数据 ----------
-const VENUE = 'SPINEL STADIUM'         // 架空球场名（禁真实球场名）
+const VENUE = '尖晶石球场'              // 架空球场名（禁真实球场名）
+
+// 玩法说明文案（中文；盘口数字/号码范围照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每期连续开出 3 个球，号码 1–75，同一期内不重复。开球前有押注窗口，你可以对多个盘口下注。每个球独立揭示、独立结算，押中即按下注时锁定的赔率赔付。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 大 / 小：大[38-75] / 小[1-37]，约 1.9 倍。\n· 单 / 双 / 红 / 蓝：按球号判定，约 1.9 倍。\n· 组合：大单 / 小单 / 大双 / 小双，约 3.8 倍。\n· 单号直选：押中开出的确切号码（1–75），约 70 倍。同一期内已开出的号码不能再押。\n· 行注：>1行[1-5] / >3行[6-20] / >5行[21-45]，押中该区间内任一号即中，赔率随覆盖范围递减（约 14 / 5 / 3 倍）。\n· 列注：按号码所在列押注，约 5 倍。',
+  },
+  {
+    icon: '⚡', title: '动态赔率（本游戏特色）',
+    body: '赔率不是固定的，会随每球开出而变化。剩余可开的号码越少，命中盘口的赔率越高。已经开出的号码会从池中移除，其单号盘口锁定不可再押。这让每一球的押注都有新的机会和赔率。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '每球开出后立即结算该球的盘口，赔付按你下注那一刻锁定的赔率计算（不受后续球影响）。3 球全部开完本期结束，每期独立。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。每个球都有独立的押注窗口，确认后一次扣款。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双红蓝，中奖率约一半；想搏大赔押单号或组合。\n· 越到后面的球，剩余池越小、赔率越高，可留意后续球的机会。\n· 本游戏理论返还率约 95%，属娱乐性质，理性游戏。',
+  },
+]
 const ROUND_DATE = 'SS20260706'
 const SEED_LAST = [21, 44, 7]          // 上局回顾种子（真开奖逐期顶掉）
 const SEED_ROAD = [
@@ -254,6 +283,7 @@ export default function RollingBall({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
@@ -601,9 +631,9 @@ export default function RollingBall({ balance, setBalance, onBack }) {
     </span>
   )
   const topBar = (
-    <GameTopBar gameName="ROLLING BALL" venue={VENUE}
+    <GameTopBar gameName="滚球" venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} onBack={onBack} />
+      phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
   )
 
   // ---- ① 开奖区：当前球大字 + 3 球槽 + 上局回顾 ----
@@ -903,7 +933,7 @@ export default function RollingBall({ balance, setBalance, onBack }) {
             borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
           </div>
@@ -922,6 +952,8 @@ export default function RollingBall({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="滚球 玩法说明" sections={RULES} />
     </Panel>
   )
 
