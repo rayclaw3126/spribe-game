@@ -7,8 +7,22 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import car01 from '../assets/goldenboot/car_01.png'
+import car02 from '../assets/goldenboot/car_02.png'
+import car03 from '../assets/goldenboot/car_03.png'
+import car04 from '../assets/goldenboot/car_04.png'
+import car05 from '../assets/goldenboot/car_05.png'
+import car06 from '../assets/goldenboot/car_06.png'
+import car07 from '../assets/goldenboot/car_07.png'
+import car08 from '../assets/goldenboot/car_08.png'
+import car09 from '../assets/goldenboot/car_09.png'
+import car10 from '../assets/goldenboot/car_10.png'
+import trafficLightImg from '../assets/goldenboot/traffic_light.png'
 
-// Golden Boot — 10 球员冲刺排名彩（足球皮）。
+// 赛车图按号索引（car_0X = 车号 X）
+const CAR_SRC = { 1: car01, 2: car02, 3: car03, 4: car04, 5: car05, 6: car06, 7: car07, 8: car08, 9: car09, 10: car10 }
+
+// Golden Boot — 10 辆赛车冲刺排名彩（PK10 赛车皮）。
 // 引擎：1–10 全排列（Fisher-Yates），index = 名次；冠亚和 3–19。
 // 轮次：BETTING(24s) → RACING(3s 占位，单3 换冲刺动画) → SETTLED(3s) → 下一期。
 // 算钱路径：confirmBets() 唯一扣注点，settleRound() 唯一赔付点。
@@ -117,6 +131,24 @@ function JerseyBead({ num, size = 16, dim = false }) {
   )
 }
 
+// 冠军直选盘口图标：Codex 真车图（car_0X，跟舞台同款）+ 左上角号码 badge
+function CarImgBead({ num, size = 30 }) {
+  return (
+    <div style={{ position: 'relative', width: size * 1.7, height: size }}>
+      <img src={CAR_SRC[num]} alt={`car ${num}`}
+        style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+      <span style={{
+        position: 'absolute', top: -2, left: -2,
+        width: size * 0.52, height: size * 0.52, borderRadius: '50%',
+        background: 'rgba(0,0,0,0.75)', border: `1px solid ${GOLDENBOOT.gold}`,
+        color: GOLDENBOOT.gold, fontSize: size * 0.32, fontWeight: 900, lineHeight: 1,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: "'Space Grotesk', sans-serif", boxSizing: 'border-box',
+      }}>{num}</span>
+    </div>
+  )
+}
+
 // ---------- 冲刺舞台：单一 rAF 循环驱动全部物理（禁 CSS transition 拼接）----------
 // 10 泳道横向冲刺；每人速度曲线按注入名次反推（基线到达时刻=名次序，叠加
 // base·(1-base) 包络的正弦摆动 → 中途超车交错、冲线时刻不变，结局恒等于注入名次）。
@@ -143,7 +175,10 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
     fit()
     window.addEventListener('resize', fit)
 
-    const jersey = new Path2D(JERSEY_PATH)   // 100×90 原空间，绘制时缩放
+    // 预载赛车 + 红绿灯图（未 load 完用色块占位防闪白）
+    const carImgs = {}
+    for (let n = 1; n <= 10; n++) { const im = new Image(); im.src = CAR_SRC[n]; carImgs[n] = im }
+    const trafficImg = new Image(); trafficImg.src = trafficLightImg
     // 装饰性随机（结果早已定，只抖中段轨迹，不碰确定性随机数流的位置）
     const runners = race.order.map((num, i) => ({
       num, rank: i + 1,
@@ -157,23 +192,40 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
     const finishedList = []
     let raf = 0, whistled = false, finaleFired = false
     let lastStep = 0, shakeUntil = 0, flashUntil = 0
+    let prevLeadP = 0, engFreq = 70   // 引擎快慢感：领跑车速度 → 频率
     const t0 = performance.now()
 
-    const drawBead = (x, y, s, num, big = false) => {
-      ctx.save()
-      ctx.translate(x - s / 2, y - s * 0.45)
-      ctx.scale(s / 100, s / 100)
-      ctx.fillStyle = big ? GOLDENBOOT.gold : GOLDENBOOT.fire
-      ctx.strokeStyle = 'rgba(0,0,0,0.4)'
-      ctx.lineWidth = 4
-      ctx.fill(jersey)
-      ctx.stroke(jersey)
-      ctx.restore()
-      ctx.fillStyle = '#3a2c00'
-      ctx.font = `900 ${Math.round(s * 0.42)}px 'Space Grotesk', sans-serif`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(String(num), x, y + s * 0.12)
+    // 赛车 sprite（drawImage 按号选车、朝右、保宽高比；尾焰=左侧渐变三角；小号码徽标）
+    const drawCar = (x, y, s, num, opts = {}) => {
+      const { big = false, flame = false, noBadge = false } = opts
+      if (flame) {
+        const fw = s * 1.0
+        const g = ctx.createLinearGradient(x - s * 0.75 - fw, y, x - s * 0.75, y)
+        g.addColorStop(0, 'rgba(255,110,20,0)')
+        g.addColorStop(1, 'rgba(255,185,50,0.6)')
+        ctx.fillStyle = g
+        ctx.beginPath()
+        ctx.moveTo(x - s * 0.75, y - s * 0.2); ctx.lineTo(x - s * 0.75 - fw, y); ctx.lineTo(x - s * 0.75, y + s * 0.2)
+        ctx.closePath(); ctx.fill()
+      }
+      const img = carImgs[num]
+      if (img && img.complete && img.naturalWidth > 0) {
+        const asp = img.naturalWidth / img.naturalHeight
+        const h = s * (big ? 1.35 : 1.1), w = h * asp
+        ctx.drawImage(img, x - w / 2, y - h / 2, w, h)
+      } else {   // 占位色块（防闪白）
+        ctx.fillStyle = big ? GOLDENBOOT.gold : GOLDENBOOT.fire
+        ctx.beginPath(); ctx.roundRect(x - s * 0.75, y - s * 0.42, s * 1.5, s * 0.84, s * 0.16); ctx.fill()
+      }
+      if (!big && !noBadge) {   // 号码小徽标（保识别）
+        const bs = s * 0.44
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'
+        ctx.beginPath(); ctx.arc(x, y - s * 0.6, bs * 0.62, 0, Math.PI * 2); ctx.fill()
+        ctx.fillStyle = GOLDENBOOT.gold
+        ctx.font = `900 ${Math.round(bs * 0.72)}px 'Space Grotesk', sans-serif`
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.fillText(String(num), x, y - s * 0.58)
+      }
     }
 
     const loop = now => {
@@ -184,7 +236,7 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
       const bead = Math.min(laneH * 0.92, 22 * dpr)
 
       // —— 时序/物理 ——
-      if (!whistled && t >= RACE_START) { whistled = true; cbRef.current.sfx.whistle() }
+      if (!whistled && t >= RACE_START) { whistled = true; cbRef.current.sfx.whistle(); cbRef.current.sfx.engineStart?.() }
       if (whistled && finishedList.length < 10 && now - lastStep > 170) {
         lastStep = now
         cbRef.current.sfx.step()
@@ -206,6 +258,7 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
       }
       if (!finaleFired && t >= lastFin + 120) {
         finaleFired = true
+        cbRef.current.sfx.engineStop?.()
         cbRef.current.sfx.chime()
         cbRef.current.onFinale?.()
         if (import.meta.env.DEV) window.__GB_ANIM_LAST = race.order.join(',')
@@ -218,12 +271,18 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
 
       // —— 绘制 ——
       ctx.clearRect(0, 0, W, H)
-      // 泳道分隔线 + 起点/终点线
-      ctx.strokeStyle = 'rgba(255,255,255,0.14)'
+      // 赛道皮肤：深灰沥青渐变
+      const track = ctx.createLinearGradient(0, 0, 0, H)
+      track.addColorStop(0, '#252932'); track.addColorStop(1, '#15181f')
+      ctx.fillStyle = track; ctx.fillRect(0, 0, W, H)
+      // 泳道分隔线（白虚线）+ 起点/终点线
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)'
       ctx.lineWidth = 1 * dpr
+      ctx.setLineDash([10 * dpr, 8 * dpr])
       for (let i = 1; i < 10; i++) {
         ctx.beginPath(); ctx.moveTo(0, i * laneH); ctx.lineTo(W * 0.88, i * laneH); ctx.stroke()
       }
+      ctx.setLineDash([])
       ctx.strokeStyle = 'rgba(255,255,255,0.45)'
       ctx.lineWidth = 2 * dpr
       ctx.beginPath(); ctx.moveTo(x0 - bead, 0); ctx.lineTo(x0 - bead, H); ctx.stroke()
@@ -240,6 +299,14 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
       // 领先者拖影（2 帧）
       let leader = null
       for (const r of runners) if (!leader || r.p > leader.p) leader = r
+      // 引擎快慢感：领跑车帧间 Δp → 归一速度 → 平滑映射频率（70 慢 ~210 快）
+      if (whistled && !finaleFired && leader) {
+        const inst = Math.max(0, leader.p - prevLeadP)
+        prevLeadP = leader.p
+        const spd = Math.min(1, inst / 0.004)   // 稳态 Δp≈0.002-0.004（含 wobble 起伏）
+        engFreq += (70 + spd * 140 - engFreq) * 0.12
+        cbRef.current.sfx.engineRev?.(engFreq)
+      }
       // 选手
       byLane.forEach((r, i) => {
         const y = i * laneH + laneH / 2
@@ -249,33 +316,57 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
           if (r.trail.length > 2) r.trail.shift()
           r.trail.forEach((tx, ti) => {
             ctx.globalAlpha = [0.12, 0.25][ti] ?? 0.1
-            drawBead(tx - bead * 0.5, y, bead, r.num)
+            drawCar(tx - bead * 0.5, y, bead, r.num)
           })
           ctx.globalAlpha = 1
         } else {
           r.trail.length = 0
         }
-        drawBead(x, y, bead, r.num)
+        drawCar(x, y, bead, r.num, { flame: whistled && !r.finished })
       })
+      // 起跑红绿灯：红(0-200)→黄(200-350)→绿(350-500) 状态色辉 + 绿灯 GO!
+      if (t < RACE_START + 250) {
+        const lit = t < 200 ? [255, 60, 40] : t < 350 ? [255, 200, 40] : [60, 220, 90]
+        if (trafficImg.complete && trafficImg.naturalWidth > 0) {
+          const lh = H * 0.62, lw = lh * (trafficImg.naturalWidth / trafficImg.naturalHeight)
+          ctx.drawImage(trafficImg, W / 2 - lw / 2, H * 0.16, lw, lh)
+        }
+        const gg = ctx.createRadialGradient(W / 2, H * 0.5, 0, W / 2, H * 0.5, W * 0.42)
+        gg.addColorStop(0, `rgba(${lit[0]},${lit[1]},${lit[2]},0.3)`)
+        gg.addColorStop(1, 'transparent')
+        ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H)
+      }
+      if (t >= 350 && t < 900) {   // 绿灯 GO! 金字（渐隐，不改物理）
+        const k = t < 520 ? 1 : Math.max(0, 1 - (t - 520) / 380)
+        ctx.fillStyle = `rgba(255,213,79,${k})`
+        ctx.font = `900 ${Math.round(H * 0.34)}px 'Space Grotesk', sans-serif`
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 8 * dpr
+        ctx.fillText('GO!', W / 2, H / 2)
+        ctx.shadowBlur = 0
+      }
       // 名次侧栏 — 撞线依次落位
       const slotH = H / 10
       ctx.textAlign = 'left'
       finishedList.forEach((r, idx) => {
         const sy = idx * slotH + slotH / 2
-        const sx = W * 0.955
+        const sx = W * 0.93
         ctx.fillStyle = idx === 0 ? GOLDENBOOT.gold : 'rgba(255,255,255,0.55)'
         ctx.font = `900 ${Math.round(9 * dpr)}px 'Space Grotesk', sans-serif`
         ctx.textAlign = 'right'
-        ctx.fillText(String(idx + 1), sx - bead * 0.62, sy + 3 * dpr)
-        drawBead(sx, sy, Math.min(slotH * 0.9, 15 * dpr), r.num)
+        ctx.fillText(String(idx + 1), sx - Math.min(slotH * 0.78, 13 * dpr) * 0.78, sy + 3 * dpr)
+        drawCar(sx, sy, Math.min(slotH * 0.78, 13 * dpr), r.num, { noBadge: true })
       })
-      // 收尾：冠军大珠金框定格
+      // 收尾：冠亚军金框定格（上下两格，车图与文字分列不重叠）
       if (finaleFired) {
         const cx = (x0 + x1) / 2, cy = H / 2
-        const s = Math.min(H * 0.5, 52 * dpr)
-        ctx.fillStyle = 'rgba(0,0,0,0.45)'
+        const s = Math.min(H * 0.36, 42 * dpr)
+        const bh = Math.min(s * 1.85, H * 0.6)   // ≤60% 高，上下各留 ~20% 边距
+        const bw = s * 2.8
+        const bx = cx - bw / 2, by = cy - bh / 2
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'
         ctx.beginPath()
-        ctx.roundRect(cx - s * 1.7, cy - s * 0.8, s * 3.4, s * 1.6, 12 * dpr)
+        ctx.roundRect(bx, by, bw, bh, 12 * dpr)
         ctx.fill()
         ctx.strokeStyle = GOLDENBOOT.gold
         ctx.lineWidth = 2 * dpr
@@ -283,11 +374,21 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
         ctx.shadowBlur = 14 * dpr
         ctx.stroke()
         ctx.shadowBlur = 0
-        drawBead(cx - s * 0.85, cy, s, race.winner, true)
-        ctx.fillStyle = GOLDENBOOT.gold
-        ctx.font = `900 ${Math.round(s * 0.4)}px 'Space Grotesk', sans-serif`
-        ctx.textAlign = 'left'
-        ctx.fillText(`WINNER #${race.winner}`, cx - s * 0.3, cy + s * 0.14)
+        // 中缝分隔线
+        ctx.strokeStyle = 'rgba(255,213,79,0.35)'
+        ctx.lineWidth = 1 * dpr
+        ctx.beginPath(); ctx.moveTo(bx + bw * 0.1, cy); ctx.lineTo(bx + bw * 0.9, cy); ctx.stroke()
+        const carS = bh * 0.27   // 约格高 54%，四周留白
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+        ;[
+          { label: '1st', num: race.winner, ry: by + bh * 0.29, c: GOLDENBOOT.gold },
+          { label: '2nd', num: race.runnerUp, ry: by + bh * 0.71, c: 'rgba(255,255,255,0.9)' },
+        ].forEach(row => {
+          drawCar(bx + bw * 0.27, row.ry, carS, row.num, { noBadge: true })
+          ctx.fillStyle = row.c
+          ctx.font = `900 ${Math.round(carS * 0.6)}px 'Space Grotesk', sans-serif`
+          ctx.fillText(`${row.label}  #${row.num}`, bx + bw * 0.47, row.ry)
+        })
       }
 
       raf = requestAnimationFrame(loop)
@@ -297,6 +398,7 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', fit)
+      cbRef.current.sfx.engineStop?.()   // 卸载停引擎轰鸣（防泄漏/跨局残响）
       if (shakeRef.current) shakeRef.current.style.transform = ''
       if (import.meta.env.DEV) window.__GB_RAF_ACTIVE -= 1
     }
@@ -312,12 +414,12 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
         background: GOLDENBOOT.strip, borderRadius: 12,
       }}>
         {race.order.map((n, i) => (
-          <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+          <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, opacity: i > 2 ? 0.6 : 1 }}>
             <span style={{ color: GOLDENBOOT.dim, fontSize: 10, fontWeight: 900 }}>{i + 1}.</span>
-            <JerseyBead num={n} size={18} dim={i > 2} />
+            <img src={CAR_SRC[n]} alt={`car ${n}`} style={{ height: 22, width: 'auto', display: 'block' }} />
           </span>
         ))}
-        <span style={{ color: GOLDENBOOT.gold, fontSize: 16, fontWeight: 900, marginLeft: 8 }}>WINNER #{race.winner}</span>
+        <span style={{ color: GOLDENBOOT.gold, fontSize: 14, fontWeight: 900, marginLeft: 8 }}>1st #{race.winner} · 2nd #{race.runnerUp}</span>
       </div>
     )
   }
@@ -355,6 +457,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
   const audioRef = useRef({ ctx: null, muted: false })
+  const engineRef = useRef(null)   // 冲刺持续引擎轰鸣（whistle 起、finale/卸载停）
   const cardShakeRef = useRef(null)
 
   useEffect(() => { balanceRef.current = balance }, [balance])
@@ -370,35 +473,81 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
     const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
     audioRef.current.ctx = ctx; return ctx
   }
-  function sfxWhistle() {   // 起跑哨：短高频颤音
+  function sfxWhistle() {   // 发车音：引擎猛轰上扬 rev
     const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
     const t = ctx.currentTime
-    const o = ctx.createOscillator(); o.type = 'square'
-    o.frequency.setValueAtTime(2100, t); o.frequency.setValueAtTime(1900, t + 0.09); o.frequency.setValueAtTime(2100, t + 0.14)
+    const o = ctx.createOscillator(); o.type = 'sawtooth'
+    o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(320, t + 0.28)
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(400, t); lp.frequency.exponentialRampToValueAtTime(1200, t + 0.28)
     const g = ctx.createGain()
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.07, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28)
-    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.3)
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.09, t + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34)
+    o.connect(lp); lp.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.36)
   }
-  function sfxStep() {   // 冲刺脚步：低频短击（rAF 每 ~170ms 触发成节奏簇）
+  function sfxStep() {   // 引擎加速脉冲（rAF 每 ~170ms 触发成节奏簇 = 排气声）
     const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
     const t = ctx.currentTime
-    const o = ctx.createOscillator(); o.type = 'sine'
-    o.frequency.setValueAtTime(105, t); o.frequency.exponentialRampToValueAtTime(58, t + 0.05)
+    const o = ctx.createOscillator(); o.type = 'sawtooth'
+    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(80, t + 0.05)
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600
     const g = ctx.createGain()
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.045, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06)
-    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.07)
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.04, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07)
+    o.connect(lp); lp.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.08)
   }
-  function sfxCheer() {   // 撞线欢呼：带通噪声上扬浪涌
+  // 冲刺持续引擎轰鸣：低频锯齿 + rumble LFO 调频（起跑起、finale/卸载停；muted 门控）
+  function sfxEngineStart() {
+    sfxEngineStop()
     const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
     const t = ctx.currentTime
+    const osc = ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = 72
+    const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 24
+    const lfoG = ctx.createGain(); lfoG.gain.value = 16
+    lfo.connect(lfoG); lfoG.connect(osc.frequency)
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 300
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05, t + 0.4)
+    osc.connect(lp); lp.connect(g); g.connect(ctx.destination)
+    osc.start(t); lfo.start(t)
+    engineRef.current = { osc, lfo, g }
+  }
+  // 引擎快慢感：按冲刺速度平滑更新振荡频率（70Hz 慢 → 210Hz 快）
+  function sfxEngineRev(freq) {
+    const e = engineRef.current; if (!e) return
+    const ctx = audioRef.current.ctx; if (!ctx) return
+    try { e.osc.frequency.setTargetAtTime(freq, ctx.currentTime, 0.05) } catch { /* 已停 */ }
+  }
+  function sfxEngineStop() {
+    const e = engineRef.current; if (!e) return
+    engineRef.current = null
+    const ctx = audioRef.current.ctx; if (!ctx) return
+    const t = ctx.currentTime
+    try {
+      e.g.gain.cancelScheduledValues(t)
+      e.g.gain.setValueAtTime(Math.max(0.0001, e.g.gain.value), t)
+      e.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25)
+      e.osc.stop(t + 0.3); e.lfo.stop(t + 0.3)
+    } catch { /* 已停 */ }
+  }
+  function sfxCheer() {   // 冲线：轮胎 screech + 观众欢呼浪涌
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    // 轮胎尖啸（高频窄带噪声速降）
+    const sb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.3), ctx.sampleRate)
+    const sd = sb.getChannelData(0); for (let i = 0; i < sd.length; i++) sd[i] = (Math.random() * 2 - 1)
+    const ss = ctx.createBufferSource(); ss.buffer = sb
+    const sbp = ctx.createBiquadFilter(); sbp.type = 'bandpass'; sbp.Q.value = 6
+    sbp.frequency.setValueAtTime(2600, t); sbp.frequency.exponentialRampToValueAtTime(1200, t + 0.28)
+    const sg = ctx.createGain()
+    sg.gain.setValueAtTime(0.0001, t); sg.gain.exponentialRampToValueAtTime(0.06, t + 0.02); sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.3)
+    ss.connect(sbp); sbp.connect(sg); sg.connect(ctx.destination); ss.start(t); ss.stop(t + 0.3)
+    // 观众欢呼浪涌
     const nb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.8), ctx.sampleRate)
     const d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1)
     const ns = ctx.createBufferSource(); ns.buffer = nb
     const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.8
     bp.frequency.setValueAtTime(420, t); bp.frequency.exponentialRampToValueAtTime(1500, t + 0.5)
     const g = ctx.createGain()
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.1, t + 0.18); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.78)
-    ns.connect(bp); bp.connect(g); g.connect(ctx.destination); ns.start(t); ns.stop(t + 0.8)
+    g.gain.setValueAtTime(0.0001, t + 0.1); g.gain.exponentialRampToValueAtTime(0.1, t + 0.28); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.88)
+    ns.connect(bp); bp.connect(g); g.connect(ctx.destination); ns.start(t + 0.1); ns.stop(t + 0.9)
   }
   function sfxChime() {   // 收尾定格：上扬三连音
     const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
@@ -410,7 +559,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
       o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.3)
     })
   }
-  const stageSfx = { whistle: sfxWhistle, step: sfxStep, cheer: sfxCheer, chime: sfxChime }
+  const stageSfx = { whistle: sfxWhistle, step: sfxStep, cheer: sfxCheer, chime: sfxChime, engineStart: sfxEngineStart, engineStop: sfxEngineStop, engineRev: sfxEngineRev }
 
   function pushToast(win) {
     const id = ++toastIdRef.current
@@ -635,26 +784,34 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
           shakeRef={cardShakeRef} sfx={stageSfx}
           onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
       ) : (
+        // BETTING 待命：赛车停起跑线（与冲刺舞台同套赛车视觉）+ 红绿灯红灯待发
         <div style={{
-          height: stageH, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: 10, padding: 10, boxSizing: 'border-box',
+          height: stageH, position: 'relative', overflow: 'hidden', boxSizing: 'border-box',
+          background: 'linear-gradient(180deg, #252932, #15181f)',
         }}>
-          <span style={{ color: GOLDENBOOT.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>上期名次 · 待命中</span>
-          <div style={{ display: 'flex', gap: isMobile ? 4 : 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-            {lastRace.order.map((n, i) => (
-              <div key={`${n}-${i}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                <span style={{ color: i === 0 ? GOLDENBOOT.gold : GOLDENBOOT.dim, fontSize: 8, fontWeight: 800 }}>{i + 1}</span>
-                <JerseyBead num={n} size={isMobile ? 22 : 28} dim={i > 2} />
-              </div>
-            ))}
-          </div>
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            padding: '2px 12px 2px 6px', borderRadius: RADIUS.pill,
-            background: GOLDENBOOT.gold, color: '#3a2c00', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
+          {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+            <div key={n} style={{
+              position: 'absolute', left: 0, right: 0, top: `${(n - 1) * 10}%`, height: '10%',
+              borderBottom: n < 10 ? '1px dashed rgba(255,255,255,0.15)' : 'none',
+              display: 'flex', alignItems: 'center', gap: 5, paddingLeft: isMobile ? 8 : 14,
+            }}>
+              <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 900, width: 9, textAlign: 'right' }}>{n}</span>
+              <img src={CAR_SRC[n]} alt={`car ${n}`} style={{ height: `${stageH / 10 * 0.82}px`, width: 'auto', display: 'block' }} />
+            </div>
+          ))}
+          {/* 起跑线 */}
+          <div style={{ position: 'absolute', top: 0, bottom: 0, left: isMobile ? 30 : 40, width: 2, background: 'rgba(255,255,255,0.45)' }} />
+          {/* 红绿灯（红灯待发，居中）*/}
+          <div style={{
+            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none',
           }}>
-            <JerseyBead num={lastRace.winner} size={20} /> WINNER #{lastRace.winner}
-          </span>
+            <img src={trafficLightImg} alt="traffic light" style={{
+              height: stageH * 0.58, width: 'auto', display: 'block',
+              filter: 'drop-shadow(0 0 10px rgba(255,60,40,0.75))',
+            }} />
+            <span style={{ color: GOLDENBOOT.dim, fontSize: 9, fontWeight: 900, letterSpacing: 1 }}>起跑线待命</span>
+          </div>
         </div>
       )}
     </div>
@@ -694,7 +851,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
             {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
               <button key={n} type="button" className="gbCell" disabled={!betting} onClick={() => toggleSel(`w-${n}`)}
                 style={{ ...cellBtn(`w-${n}`), flexBasis: isMobile ? '17%' : 0 }}>
-                <JerseyBead num={n} size={isMobile ? 20 : 26} />
+                <CarImgBead num={n} size={isMobile ? 24 : 30} />
                 <span style={cellOdds}>{ODDS.winner.toFixed(2)}</span>
                 {stakeChip(`w-${n}`)}
               </button>
