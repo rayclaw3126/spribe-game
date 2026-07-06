@@ -36,6 +36,8 @@ const GAMES = [
   { id: 'DerbyDay', name: 'Derby Day', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDerbyDay },
   { id: 'LineUp', name: 'Line Up', desc: 'Five lines, 25 numbers — call the sums!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverLineUp },
   { id: 'SpeedGrid', name: 'Speed Grid', desc: '24 cars, one champion — call it!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverSpeedGrid },
+  // TODO: 换 Codex 专属封面（暂借 Team Keno 封面占位）
+  { id: 'WuXing', name: 'Wu Xing', desc: 'Twenty balls, five elements!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamKeno },
 ]
 
 export default function Lobby({ onSelect, balance }) {

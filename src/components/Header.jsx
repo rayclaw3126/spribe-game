@@ -20,6 +20,7 @@ const GAME_NAMES = {
   DerbyDay: 'Derby Day',
   LineUp: 'Line Up',
   SpeedGrid: 'Speed Grid',
+  WuXing: 'Wu Xing',
 }
 
 export default function Header({ balance, onHome, activeGame }) {
