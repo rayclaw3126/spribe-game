@@ -9,19 +9,11 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 
 // Golden Boot — 10 球员冲刺排名彩（足球皮）。
-// 引擎：1–10 全排列（Fisher-Yates），index = 名次；冠亚和 3–19；龙虎五对。
+// 引擎：1–10 全排列（Fisher-Yates），index = 名次；冠亚和 3–19。
 // 轮次：BETTING(24s) → RACING(3s 占位，单3 换冲刺动画) → SETTLED(3s) → 下一期。
 // 算钱路径：confirmBets() 唯一扣注点，settleRound() 唯一赔付点。
 
 // ---------- 引擎（纯函数区，禁副作用）----------
-const DUEL_DEFS = [
-  { key: 'd1', label: '1 v 10', d: 1, t: 10 },
-  { key: 'd2', label: '2 v 9',  d: 2, t: 9 },
-  { key: 'd3', label: '3 v 8',  d: 3, t: 8 },
-  { key: 'd4', label: '4 v 7',  d: 4, t: 7 },
-  { key: 'd5', label: '5 v 6',  d: 5, t: 6 },
-]
-
 // Fisher-Yates 全洗 1–10，返回按名次排的球员号（order[0] = 冠军）；rng 可注入
 export function drawRace(rng = Math.random) {
   const order = Array.from({ length: 10 }, (_, i) => i + 1)
@@ -32,15 +24,14 @@ export function drawRace(rng = Math.random) {
   return order
 }
 
-// 派生：冠军 / 亚军 / 冠亚和 / 名次映射 / 龙虎五对（低号名次靠前 = DRAGON）
+// 派生：冠军 / 亚军 / 冠亚和 / 名次映射
 export function deriveRace(order) {
   const winner = order[0]
   const runnerUp = order[1]
   const sprintSum = winner + runnerUp
   const rank = {}
   order.forEach((n, i) => { rank[n] = i + 1 })
-  const duels = DUEL_DEFS.map(p => (rank[p.d] < rank[p.t] ? 'D' : 'T'))
-  return { order, winner, runnerUp, sprintSum, rank, duels }
+  return { order, winner, runnerUp, sprintSum, rank }
 }
 
 // 赔率配置表（推导注记；1e6 模拟实测见单3 报告，出带列只报不改）：
@@ -50,14 +41,12 @@ export function deriveRace(order) {
 //     P(s) = n(s)/45；赔率 = 0.955 × 45 / n(s)（构造性 RTP≈95.5%）
 //   BIG 12–19：n 合计 20/45 → 2.15 × .4444 = 95.6%；SMALL 3–11：25/45 → 1.72 × .5556 = 95.6%
 //   ODD 和为单（一奇一偶 50/90 = 25/45）→ 1.72 → 95.6%；EVEN 20/45 → 2.15 → 95.6%
-//   DUELS：对称 P = 1/2 精确 → 1.95 → 97.5% 压线
 const SUM_N = { 3: 1, 4: 1, 5: 2, 6: 2, 7: 3, 8: 3, 9: 4, 10: 4, 11: 5, 12: 4, 13: 4, 14: 3, 15: 3, 16: 2, 17: 2, 18: 1, 19: 1 }
 const sumOdds = s => Math.round((0.955 * 45 / SUM_N[s]) * 100) / 100   // 42.98/21.49/14.33/10.74/8.60
 export const ODDS = {
   winner: 9.6,
   sum: Object.fromEntries(Object.keys(SUM_N).map(s => [s, sumOdds(+s)])),
   big: 2.15, small: 1.72, odd: 1.72, even: 2.15,
-  duel: 1.95,
 }
 
 // 盘区判定表 — 数据驱动生成（settle/珠盘路/RTP 模拟共用），零散落 if
@@ -69,10 +58,6 @@ export const MARKETS = (() => {
   m['s-small'] = { odds: ODDS.small, hit: r => r.sprintSum <= 11 }
   m['s-odd']   = { odds: ODDS.odd,   hit: r => r.sprintSum % 2 === 1 }
   m['s-even']  = { odds: ODDS.even,  hit: r => r.sprintSum % 2 === 0 }
-  DUEL_DEFS.forEach((p, i) => {
-    m[`${p.key}-d`] = { odds: ODDS.duel, hit: r => r.duels[i] === 'D' }
-    m[`${p.key}-t`] = { odds: ODDS.duel, hit: r => r.duels[i] === 'T' }
-  })
   return m
 })()
 const MARKET_KEYS = Object.keys(MARKETS)
@@ -103,14 +88,12 @@ const ROAD_CAP = 120
 const SEED_LAST = deriveRace([3, 7, 1, 9, 2, 10, 5, 8, 4, 6])
 const SEED_WINNERS = [3, 7, 1, 9, 2, 10, 5, 8, 4, 6, 2, 8, 1, 4, 10, 6, 3, 9, 7, 5, 1, 6, 4, 2, 9, 3, 10, 8, 5, 7]
 const SEED_SUMS = [10, 9, 4, 13, 12, 16, 8, 14, 7, 11, 5, 15, 3, 9, 17, 10, 6, 12, 19, 8, 11, 7, 13, 5, 16, 9, 4, 18, 12, 10]
-const SEED_DUEL = 'DTDDTTDTDTDDTTDTDDTTDDTTDDTTDT'.split('')
-const SEED_HISTORY = SEED_WINNERS.map((w, i) => ({ winner: w, sum: SEED_SUMS[i], duel: SEED_DUEL[i] }))
+const SEED_HISTORY = SEED_WINNERS.map((w, i) => ({ winner: w, sum: SEED_SUMS[i] }))
 
-const ROAD_TABS = ['WINNER', 'SUM', 'DUELS']
+const ROAD_TABS = ['WINNER', 'SUM']
 function beadFor(tab, h) {
   if (tab === 'WINNER') return { t: String(h.winner), c: h.winner <= 5 ? GOLDENBOOT.dragon : GOLDENBOOT.tiger }
-  if (tab === 'SUM') return h.sum >= 12 ? { t: 'B', c: GOLDENBOOT.dragon } : { t: 'S', c: GOLDENBOOT.tiger }
-  return { t: h.duel, c: h.duel === 'D' ? GOLDENBOOT.dragon : GOLDENBOOT.tiger }
+  return h.sum >= 12 ? { t: 'B', c: GOLDENBOOT.dragon } : { t: 'S', c: GOLDENBOOT.tiger }
 }
 
 // 金靴球衣珠 — 迷你球衣轮廓 + 号码（金渐变，共享 gold/fire/goldDeep）
@@ -449,7 +432,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
       pushToast(winTotal)
     }
     setLastRace(r)
-    setHistory(h => [...h, { winner: r.winner, sum: r.sprintSum, duel: r.duels[0] }].slice(-ROAD_CAP))
+    setHistory(h => [...h, { winner: r.winner, sum: r.sprintSum }].slice(-ROAD_CAP))
     setResult({ hits, winTotal })
     // 假注单本期落账（展示用，结果已定后的装饰随机）
     setFeedBets(list => list.map(b => Math.random() < 0.45
@@ -710,39 +693,6 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
           </div>
         </div>
 
-        {/* 族③ DUELS 龙虎五对 */}
-        <div style={{
-          borderRadius: 12, padding: isMobile ? 6 : 8,
-          background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)',
-        }}>
-          <div style={{ color: GOLDENBOOT.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 6 }}>DUELS · 龙虎对决</div>
-          <div style={{ display: 'flex', gap: isMobile ? 5 : 8, flexWrap: 'wrap' }}>
-            {DUEL_DEFS.map(p => (
-              <div key={p.key} style={{
-                flex: 1, minWidth: isMobile ? '30%' : 0,
-                display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'stretch',
-              }}>
-                <span style={{ textAlign: 'center', color: GOLDENBOOT.dim, fontSize: 9.5, fontWeight: 800 }}>{p.label}</span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button type="button" className="gbCell" disabled={!betting} onClick={() => toggleSel(`${p.key}-d`)}
-                    style={{ ...cellBtn(`${p.key}-d`, { compact: true }) }}>
-                    <span style={{ ...cellName, color: GOLDENBOOT.dragon, fontSize: 9.5 }}>DRAGON</span>
-                    <span style={cellRange}>#{p.d}</span>
-                    <span style={{ ...cellOdds, fontSize: 10.5 }}>{ODDS.duel.toFixed(2)}</span>
-                    {stakeChip(`${p.key}-d`)}
-                  </button>
-                  <button type="button" className="gbCell" disabled={!betting} onClick={() => toggleSel(`${p.key}-t`)}
-                    style={{ ...cellBtn(`${p.key}-t`, { compact: true }) }}>
-                    <span style={{ ...cellName, color: GOLDENBOOT.tiger, fontSize: 9.5 }}>TIGER</span>
-                    <span style={cellRange}>#{p.t}</span>
-                    <span style={{ ...cellOdds, fontSize: 10.5 }}>{ODDS.duel.toFixed(2)}</span>
-                    {stakeChip(`${p.key}-t`)}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* ---- 冲刺舞台占珠盘路位：RACING 表演 / SETTLED 定格，回 BETTING 换回珠盘路
