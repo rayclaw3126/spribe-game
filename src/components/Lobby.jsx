@@ -34,7 +34,7 @@ const GAMES = [
   { id: 'MiniRoulette', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette, cat: 'instant' },
   { id: 'Momentum', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum, cat: 'instant' },
   { id: 'HalfTime', name: 'Half Time', desc: 'Call the keno sum — over, under, zones!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverHalfTime, cat: 'lottery' },
-  { id: 'GoldenBoot', name: 'Golden Boot', desc: 'Ten strikers sprint — call the podium!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverGoldenBoot, cat: 'lottery' },
+  { id: 'GoldenBoot', name: 'PK10 Speedy', desc: 'Ten strikers sprint — call the podium!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverGoldenBoot, cat: 'lottery' },
   { id: 'NumberUp', name: 'Number Up', desc: 'Pick the shirt number — 00 to 99!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverNumberUp, cat: 'lottery' },
   // TODO: 换 Codex 专属封面（暂借 Total Goals 封面占位）
   { id: 'HatTrick', name: 'Hat Trick', desc: 'Three dice — call the total!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals, cat: 'lottery' },

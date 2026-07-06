@@ -14,7 +14,7 @@ const GAME_NAMES = {
   Limbo: 'Odds Climb',
   StreakRoll: 'Streak Roll',
   HalfTime: 'Half Time',
-  GoldenBoot: 'Golden Boot',
+  GoldenBoot: 'PK10 Speedy',
   NumberUp: 'Number Up',
   HatTrick: 'Hat Trick',
   DerbyDay: 'Derby Day',

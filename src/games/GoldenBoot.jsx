@@ -6,6 +6,7 @@ import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
+import BetButton from '../components/shell/BetButton'
 import GameTopBar from '../components/shell/GameTopBar'
 import car01 from '../assets/goldenboot/car_01.png'
 import car02 from '../assets/goldenboot/car_02.png'
@@ -94,7 +95,7 @@ const SETTLED_T = 6     // 3s
 const RACE_START = 500
 const SPRINT_BASE = 4800
 const RANK_GAP = 160
-const VENUE = 'RUBY FIELD'          // 架空场馆名（禁真实球场名）
+const VENUE = 'RUBY SPEEDWAY'        // 架空赛道名（禁真实场地名）
 const ROUND_DATE = '20260705'
 const ROAD_CAP = 120
 
@@ -111,25 +112,6 @@ function beadFor(tab, h) {
 }
 
 // 金靴球衣珠 — 迷你球衣轮廓 + 号码（金渐变，共享 gold/fire/goldDeep）
-const JERSEY_PATH = 'M35 6 L20 14 L6 30 L16 42 L26 34 L26 84 L74 84 L74 34 L84 42 L94 30 L80 14 L65 6 C 55 16, 45 16, 35 6 Z'
-function JerseyBead({ num, size = 16, dim = false }) {
-  return (
-    <svg width={size} height={size * 0.9} viewBox="0 0 100 90" style={{ display: 'block', opacity: dim ? 0.75 : 1 }} aria-hidden="true">
-      <defs>
-        <linearGradient id="gbJersey" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={GOLDENBOOT.gold} />
-          <stop offset="55%" stopColor={GOLDENBOOT.fire} />
-          <stop offset="100%" stopColor={GOLDENBOOT.goldDeep} />
-        </linearGradient>
-      </defs>
-      <path d={JERSEY_PATH} fill="url(#gbJersey)" stroke="rgba(0,0,0,0.35)" strokeWidth="2" strokeLinejoin="round" />
-      {num != null && (
-        <text x="50" y="64" textAnchor="middle" fontSize="38" fontWeight="900"
-          fill="#3a2c00" fontFamily="'Space Grotesk', sans-serif">{num}</text>
-      )}
-    </svg>
-  )
-}
 
 // 冠军直选盘口图标：Codex 真车图（car_0X，跟舞台同款）+ 左上角号码 badge
 function CarImgBead({ num, size = 30 }) {
@@ -446,11 +428,13 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
   const [result, setResult] = useState(null)   // { hits:Set, winTotal }
   const [preHits, setPreHits] = useState(null) // 冲刺动画收尾的命中预亮（结算前）
   const [toasts, setToasts] = useState([])
+  const [hasLast, setHasLast] = useState(false)   // 是否有上局注单快照（重复钮亮灭）
 
   const phaseRef = useRef('betting')
   const cdRef = useRef(BETTING_T)
   const picksRef = useRef(picks)
   const betsRef = useRef(new Map())
+  const lastBetsRef = useRef(new Map())   // 上局注单快照（重复投注用）
   const betRef = useRef(bet)
   const balanceRef = useRef(balance)
   const pendingRef = useRef(null)
@@ -605,6 +589,11 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
         phaseRef.current = 'settled'; setGamePhase('settled')
         cdRef.current = SETTLED_T; setCountdown(SETTLED_T)
       } else {
+        // 清盘前快照本局注单（空局不覆盖，重复钮始终指向最近一张有效注单）
+        if (betsRef.current.size) {
+          lastBetsRef.current = new Map(betsRef.current)
+          setHasLast(true)
+        }
         betsRef.current = new Map(); setBetsPlaced(new Map())
         picksRef.current = new Set(); setPicks(new Set())
         setResult(null)
@@ -630,24 +619,35 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
     })
   }
 
-  // 唯一扣注点：注额 × 选格数，一次性扣款后入 betsRef，清空待选
-  function confirmBets() {
-    if (phaseRef.current !== 'betting') return
-    const keys = [...picksRef.current]
-    const amount = betRef.current
-    const total = round2(amount * keys.length)
-    if (!keys.length || amount < 1 || total > balanceRef.current) return
+  // 唯一扣注点：确认/重复两个入口都走这一条（一次性扣款后入 betsRef）
+  function placeBets(entries) {
+    if (phaseRef.current !== 'betting') return false
+    let total = 0
+    entries.forEach(s => { total = round2(total + s) })
+    if (!entries.size || total <= 0 || total > balanceRef.current) return false
     setBalance(b => round2(b - total))
     balanceRef.current = round2(balanceRef.current - total)
-    keys.forEach(k => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + amount)))
+    entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
     setBetsPlaced(new Map(betsRef.current))
-    picksRef.current = new Set()
-    setPicks(new Set())
+    return true
   }
+  function confirmBets() {
+    const amount = betRef.current
+    if (amount < 1) return
+    if (placeBets(new Map([...picksRef.current].map(k => [k, amount])))) {
+      picksRef.current = new Set()
+      setPicks(new Set())
+    }
+  }
+  // 重复投注 = 复用上局注单快照原额重下
+  function repeatBets() { placeBets(new Map(lastBetsRef.current)) }
 
   const betting = gamePhase === 'betting'
   const confirmTotal = round2(bet * picks.size)
   const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
+  let lastTotal = 0
+  lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
+  const repeatOk = betting && hasLast && lastTotal > 0 && lastTotal <= balance
 
   // ---- 样式件（选中=金框绿罩；命中=绿框绿晕）----
   const cellBtn = (key, { compact = false } = {}) => {
@@ -697,27 +697,23 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
     }}>{phaseChip.text}</span>
   )
   const subRowNode = (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0, flex: '1 1 auto' }}>
-      {/* 上期名次串 — 名次序（冠军最左），珠上是球员号 */}
-      <span style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', minWidth: 0 }}>
-        {lastRace.order.map((n, i) => (
-          <span key={`${n}-${i}`} style={{ display: 'inline-flex', alignItems: 'center' }} title={`第${i + 1}名`}>
-            <JerseyBead num={n} size={isMobile ? 15 : 18} dim={i > 2} />
+    <span style={{ display: 'flex', alignItems: 'center', minWidth: 0, flex: '1 1 auto' }}>
+      {/* 上期名次串 — 只显前 3 名（冠/亚/季），删 WINNER 标后放大占满整行 */}
+      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', flex: 1, minWidth: 0, gap: isMobile ? 6 : 12 }}>
+        {lastRace.order.slice(0, 3).map((n, i) => (
+          <span key={`${n}-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} title={`第${i + 1}名`}>
+            <span style={{
+              color: ['#ffd54f', '#cfd6de', '#d9873f'][i], fontSize: isMobile ? 10 : 12, fontWeight: 900,
+              fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap',
+            }}>{['1st', '2nd', '3rd'][i]}</span>
+            <CarImgBead num={n} size={isMobile ? 38 : 48} />
           </span>
         ))}
-      </span>
-      <span style={{
-        marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5,
-        padding: '2px 12px 2px 6px', borderRadius: RADIUS.pill,
-        background: GOLDENBOOT.gold, color: '#3a2c00', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>
-        <JerseyBead num={lastRace.winner} size={20} />
-        WINNER #{lastRace.winner}
       </span>
     </span>
   )
   const topBar = (
-    <GameTopBar gameName="GOLDEN BOOT" band={GOLDENBOOT.band} venue={VENUE}
+    <GameTopBar gameName="PK10 Speedy" band={GOLDENBOOT.band} venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
       phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} />
   )
@@ -899,53 +895,55 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
       {/* ---- ③ 珠盘路（常驻底部）---- */}
       {beadRoad}
 
-      {/* ---- ④ bottom bet band — pinned ---- */}
+      {/* ---- ④ bottom bet band — pinned，grid 4列×2行（抄 LineUp/DominoDuel）---- */}
       <div style={{
-        flex: '0 0 auto',
-        padding: '12px 14px',
-        background: GOLDENBOOT.band,
-        borderTop: '1px solid rgba(0,0,0,0.25)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
+        flex: '0 0 auto', padding: '6px 12px', background: GOLDENBOOT.band,
+        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
       }}>
         <div style={{
-          padding: '5px 18px', borderRadius: RADIUS.pill,
-          background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-          textAlign: 'center', lineHeight: 1.2,
-          opacity: betting ? 1 : 0.6,
+          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
         }}>
-          <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
-          <input
-            value={bet}
-            disabled={!betting}
-            onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
-            style={{
-              width: 56, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-              color: COLORS.white, fontSize: 15, fontWeight: 900,
-            }}
-          />
+          {[
+            { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+            { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+          ].map(({ v, col, row }) => (
+            <button key={v} type="button" className="gbChip" disabled={!betting} onClick={() => setBet(v)} style={{
+              gridColumn: col, gridRow: row, width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+              background: bet === v ? GOLDENBOOT.selTint : 'rgba(0,0,0,0.35)',
+              border: `1px solid ${bet === v ? GOLDENBOOT.sel : 'rgba(255,255,255,0.35)'}`,
+              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
+            }}>{v}</button>
+          ))}
+          <div style={{
+            gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+            borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+          }}>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
+          </div>
+          <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
+            gridColumn: 3, gridRow: 2, width: '100%', height: '100%', borderRadius: 8,
+            fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+            color: repeatOk ? COLORS.white : GOLDENBOOT.dim, background: 'rgba(0,0,0,0.35)',
+            border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
+            cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+          <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+            <BetButton
+              state="bet"
+              label={betting ? `下注 ${picks.size} 格` : gamePhase === 'racing' ? '冲刺中…' : '本期已结算'}
+              sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+              onClick={confirmBets}
+              disabled={!confirmOk}
+              stretch
+            />
+          </div>
         </div>
-        {[10, 50, 100, 500].map(v => (
-          <button key={v} type="button" disabled={!betting} onClick={() => setBet(v)} style={{
-            minWidth: 38, padding: '0 10px', height: 30, borderRadius: RADIUS.pill,
-            fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
-            background: bet === v ? GOLDENBOOT.selTint : GOLDENBOOT.band,
-            border: `1px solid ${bet === v ? GOLDENBOOT.sel : 'rgba(255,255,255,0.35)'}`,
-            cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
-          }}>{v}</button>
-        ))}
-        <button type="button" disabled={!confirmOk} onClick={confirmBets} style={{
-          minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
-          background: GOLDENBOOT.sel, color: '#083a1b',
-          border: '1px solid rgba(255,255,255,0.35)',
-          fontSize: 14, fontWeight: 900, letterSpacing: 1,
-          cursor: confirmOk ? 'pointer' : 'not-allowed',
-          opacity: confirmOk ? 1 : 0.55,
-        }}>
-          {betting
-            ? `▷ CONFIRM${picks.size > 0 ? ` $${confirmTotal.toFixed(0)}` : ''}`
-            : gamePhase === 'racing' ? '冲刺中…' : '本期已结算'}
-        </button>
       </div>
     </Panel>
   )
@@ -964,7 +962,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
           padding: '0 16px', background: COLORS.panel,
           borderBottom: `1px solid ${COLORS.border}`,
         }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Golden Boot</strong>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>PK10 Speedy</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
@@ -988,7 +986,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="Golden Boot" color={GOLDENBOOT.gold}>
+    <GameLayout title="PK10 Speedy" color={GOLDENBOOT.gold}>
       <div ref={cardShakeRef}>
         {gameCard}
       </div>
