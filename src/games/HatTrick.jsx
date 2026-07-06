@@ -175,10 +175,10 @@ function beadFor(tab, dice) {
 // 旋转翻面（滚动中骰面快速轮换制造模糊感），各自定格到 pendingRef 骰面
 // （亮金描边一闪 + 2px/100ms 轻震）；三骰全定后 TOTAL 金色滚动累加定格，
 // 豹子期额外金光爆闪一次，onFinale 预亮命中盘区。骰面结果进场前已锁定，动画只读。
-function DiceStage({ roll, height, shakeRef, sfx, onFinale }) {
+function DiceStage({ roll, height, shakeRef, sfx, onFinale, onLastSuspense }) {
   const canvasRef = useRef(null)
-  const cbRef = useRef({ sfx, onFinale })
-  cbRef.current = { sfx, onFinale }
+  const cbRef = useRef({ sfx, onFinale, onLastSuspense })
+  cbRef.current = { sfx, onFinale, onLastSuspense }
   const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
   useEffect(() => {
@@ -205,7 +205,7 @@ function DiceStage({ roll, height, shakeRef, sfx, onFinale }) {
     const locked = [false, false, false]
     const flashAt = [0, 0, 0]
     const knocksFired = [0, 0, 0]
-    let whooshed = false, finaleFired = false, finaleAt = 0, shakeUntil = 0
+    let whooshed = false, finaleFired = false, finaleAt = 0, shakeUntil = 0, suspenseFired = false
     let raf = 0
     const t0 = performance.now()
     const easeOut = p => 1 - Math.pow(1 - p, 3)
@@ -296,6 +296,12 @@ function DiceStage({ roll, height, shakeRef, sfx, onFinale }) {
         drawDie(x, y, size, face, angle, flashA, blur)
       }
 
+      // 第二颗定格后、第三颗定格前的悬念窗：揪心钩子只触发一次
+      if (!suspenseFired && t >= DIE_LOCK[1] && t < DIE_LOCK[2]) {
+        suspenseFired = true
+        cbRef.current.onLastSuspense?.()
+      }
+
       // TOTAL 滚动累加 → 定格金闪；豹子期额外径向金光爆闪一次
       if (t >= DIE_LOCK[2]) {
         const shown = Math.round(roll.total * easeOut(Math.min(1, (t - DIE_LOCK[2]) / 500)))
@@ -381,6 +387,8 @@ export default function HatTrick({ balance, setBalance, onBack }) {
   const [preHits, setPreHits] = useState(null)            // 掷骰动画收尾的命中预亮
   const [toasts, setToasts] = useState([])
   const [settleFx, setSettleFx] = useState(false)         // 结算演出开关（飞金 + 命中/未中标签动画）
+  const [suspense, setSuspense] = useState(null)          // 块A：{ keys:Set, msg } 最后一颗揪心窗
+  const [nearMiss, setNearMiss] = useState(() => new Set()) // 块B：就差1点的未中注 key 集合
 
   const phaseRef = useRef('betting')
   const cdRef = useRef(BETTING_T)
@@ -461,6 +469,25 @@ export default function HatTrick({ balance, setBalance, onBack }) {
       o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.3)
     })
   }
+  function sfxHeartbeat() {   // 揪心心跳：低频 lub-dub 双击
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const thump = (start, freq, peak) => {
+      const o = ctx.createOscillator(); o.type = 'sine'
+      o.frequency.setValueAtTime(freq, start); o.frequency.exponentialRampToValueAtTime(freq * 0.55, start + 0.12)
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(0.0001, start); g.gain.exponentialRampToValueAtTime(peak, start + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, start + 0.16)
+      o.connect(g); g.connect(ctx.destination); o.start(start); o.stop(start + 0.18)
+    }
+    thump(t, 90, 0.11)          // lub
+    thump(t + 0.14, 68, 0.08)   // dub
+  }
+  // 悬念窗内以递减间隔调度加速心跳（约 1s 内 5 击）
+  function startHeartbeat() {
+    ;[0, 300, 550, 760, 930].forEach(ms => {
+      timersRef.current.push(setTimeout(sfxHeartbeat, ms))
+    })
+  }
   const stageSfx = { whoosh: sfxWhoosh, knock: sfxKnock, snap: sfxSnap, chime: sfxChime }
 
   function pushToast(win) {
@@ -487,10 +514,61 @@ export default function HatTrick({ balance, setBalance, onBack }) {
     setHistory(h => [...h, r.dice].slice(-ROAD_CAP))
     setResult({ hits, winTotal })
     setSettleFx(true)   // 开结算演出：命中飞金 / 未中碎裂
+    setSuspense(null)   // 悬念窗收束（保底：正常应已在第三颗定格时清）
+    // 块B：就差1点 —— 大实开10 / 小实开11 / 和值N实开N±1 的未中注（仅大/小/和值直选）
+    const nm = new Set()
+    betsRef.current.forEach((_, k) => {
+      if (hits.has(k)) return
+      if (k === 's-big' && r.total === 10) nm.add(k)
+      else if (k === 's-small' && r.total === 11) nm.add(k)
+      else if (k.startsWith('t-')) {
+        const N = parseInt(k.slice(2), 10)
+        if (r.total === N - 1 || r.total === N + 1) nm.add(k)
+      }
+    })
+    setNearMiss(nm)
     // 假注单本期落账（展示用，结果已定后的装饰随机）
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
       : { ...b, status: 'crashed' }))
+  }
+
+  // 注区中文名（悬念文案用）
+  function keyLabel(key) {
+    if (key === 's-big') return '大'
+    if (key === 's-small') return '小'
+    if (key === 's-odd') return '单'
+    if (key === 's-even') return '双'
+    if (key === 'tr-any') return '任意豹子'
+    if (key.startsWith('tr-')) return `豹子${key.slice(3)}`
+    if (key.startsWith('d-')) return `对子${key.slice(2)}`
+    if (key.startsWith('t-')) return `和值${key.slice(2)}`
+    return key
+  }
+
+  // 块A：第二颗定格后的悬念窗 —— 找出「第三颗某点数就能中」的已下注注区
+  function onLastSuspense() {
+    const r = pendingRef.current
+    if (!r) return
+    const [d0, d1] = r.dice
+    const suspended = []
+    betsRef.current.forEach((_, key) => {
+      const faces = []
+      for (let v = 1; v <= 6; v++) {
+        if (hitsOf(deriveRoll([d0, d1, v])).has(key)) faces.push(v)
+      }
+      // 揪心 = 第三颗能中但非必中（1..5 个点数能中；0=没戏、6=已锁定不揪心）
+      if (faces.length >= 1 && faces.length <= 5) suspended.push({ key, faces })
+    })
+    if (!suspended.length) return
+    const keys = new Set(suspended.map(s => s.key))
+    const msg = suspended.length === 1
+      ? `第三颗开 ${suspended[0].faces.join('/')}，你押的 ${keyLabel(suspended[0].key)} 就中！`
+      : `就看最后一颗！${suspended.length} 注临门一脚`
+    setSuspense({ keys, msg })
+    startHeartbeat()   // 加速心跳
+    // 第三颗定格（DIE_LOCK[2]）时清掉悬念提示，进正常结算
+    timersRef.current.push(setTimeout(() => setSuspense(null), DIE_LOCK[2] - DIE_LOCK[1]))
   }
 
   // 单 interval 驱动整台状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
@@ -514,6 +592,8 @@ export default function HatTrick({ balance, setBalance, onBack }) {
         setResult(null)
         setPreHits(null)
         setSettleFx(false)
+        setSuspense(null)
+        setNearMiss(new Set())
         setFeedBets(makeFeedBots())
         setRoundNo(n => n + 1)
         phaseRef.current = 'betting'; setGamePhase('betting')
@@ -584,10 +664,10 @@ export default function HatTrick({ balance, setBalance, onBack }) {
     background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
     boxSizing: 'border-box',
   }
-  // 押额胶囊：只显 $押额（未中结算时碎裂）
+  // 押额胶囊：只显 $押额（未中结算时碎裂；就差1点的不碎，让位橙红惋惜）
   const stakeChip = key => {
     if (!betsPlaced.has(key)) return null
-    const lose = settleFx && !result?.hits?.has(key)
+    const lose = settleFx && !result?.hits?.has(key) && !nearMiss.has(key)
     return (
       <span className={lose ? 'htLose' : undefined} style={{
         position: 'absolute', top: 2, right: 3, zIndex: 2,
@@ -599,9 +679,23 @@ export default function HatTrick({ balance, setBalance, onBack }) {
   }
   // 赔率位常显赢额（下注后替换赔率数字，不并列） + 结算演出 class
   const winTxt = (key, odds) => `赢 $${round2(betsPlaced.get(key) * odds)}`
-  const fxCls = key => (!settleFx || !betsPlaced.has(key))
-    ? undefined
-    : (result?.hits?.has(key) ? 'htWinFly' : 'htLose')
+  const fxCls = key => {
+    if (!settleFx || !betsPlaced.has(key)) return undefined
+    if (result?.hits?.has(key)) return 'htWinFly'
+    if (nearMiss.has(key)) return undefined   // 就差1点：不灰碎，改橙红 badge
+    return 'htLose'
+  }
+  // 悬念脉冲：块A 悬着的注区高亮
+  const cellCls = key => 'htCell' + (suspense?.keys.has(key) ? ' htSuspense' : '')
+  // 块B 就差1点橙红惋惜 badge（仅 totalCell + SIDES 用）
+  const nearBadge = key => nearMiss.has(key) && (
+    <span className="htNear" style={{
+      position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+      zIndex: 4, padding: '2px 6px', borderRadius: RADIUS.pill,
+      background: 'rgba(4,10,7,0.78)', color: '#ff6a3d', border: '1px solid #ff6a3d',
+      fontSize: isMobile ? 8.5 : 9.5, fontWeight: 900, whiteSpace: 'nowrap', pointerEvents: 'none',
+    }}>就差1点！</span>
+  )
 
   // TOTAL 4–17 小格（desk 14 连排 / mobile 7×2 折行不挤爆）
   const totalCell = s => {
@@ -610,7 +704,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
     const hit = (result?.hits ?? preHits)?.has(key)
     const placed = betsPlaced.has(key)
     return (
-      <button key={key} type="button" className="htCell" disabled={!betting} onClick={() => toggleSel(key)} style={{
+      <button key={key} type="button" className={cellCls(key)} disabled={!betting} onClick={() => toggleSel(key)} style={{
         minWidth: 0, padding: '3px 0',
         borderRadius: 8, cursor: betting ? 'pointer' : 'not-allowed',
         background: hit ? HATTRICK.sel : sel ? HATTRICK.selTint : `linear-gradient(180deg, ${HATTRICK.ctrl}, ${HATTRICK.band})`,
@@ -627,6 +721,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
         }}>{s}</span>
         <span className={fxCls(key)} style={{ color: hit ? '#083a1b' : HATTRICK.gold, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, whiteSpace: 'nowrap' }}>{placed ? winTxt(key, ODDS.total[s]) : ODDS.total[s]}</span>
         {stakeChip(key)}
+        {nearBadge(key)}
       </button>
     )
   }
@@ -746,7 +841,42 @@ export default function HatTrick({ balance, setBalance, onBack }) {
           100% { transform: translateY(-120px) scale(0.85); opacity: 0; }
         }
         .htFlyGold { animation: htFlyGold 1.25s ease-out forwards; }
+        @keyframes htPulseRing {
+          0%,100% { box-shadow: 0 0 0 0 rgba(255,213,79,0); }
+          50%     { box-shadow: 0 0 11px 2px rgba(255,213,79,0.9); }
+        }
+        .htSuspense { animation: htPulseRing 0.6s ease-in-out infinite; border-color: #ffd54f !important; }
+        @keyframes htNearPop {
+          0%   { transform: translate(-50%,-50%) scale(0.4); opacity: 0; }
+          45%  { transform: translate(-50%,-50%) scale(1.15); opacity: 1; }
+          100% { transform: translate(-50%,-50%) scale(1); opacity: 1; }
+        }
+        @keyframes htNearGlow {
+          from { box-shadow: 0 0 6px rgba(255,106,61,0.5); }
+          to   { box-shadow: 0 0 14px rgba(255,106,61,0.95); }
+        }
+        .htNear { animation: htNearPop 0.45s ease-out both, htNearGlow 0.85s ease-in-out 0.45s infinite alternate; }
+        @keyframes htBannerPulse {
+          0%,100% { transform: scale(1); }
+          50%     { transform: scale(1.06); }
+        }
+        .htSuspenseBanner { animation: htBannerPulse 0.55s ease-in-out infinite; }
       `}</style>
+
+      {/* 块A 悬念横幅：最后一颗揪心提示（第三颗定格即撤） */}
+      {suspense && (
+        <div style={{
+          position: 'absolute', top: isMobile ? 116 : 92, left: 0, right: 0, zIndex: 7,
+          textAlign: 'center', pointerEvents: 'none',
+        }}>
+          <span className="htSuspenseBanner" style={{
+            display: 'inline-block', padding: '6px 14px', borderRadius: RADIUS.pill,
+            background: 'rgba(8,18,12,0.92)', border: '2px solid #ffd54f', color: '#ffd54f',
+            fontSize: isMobile ? 12 : 14, fontWeight: 900, whiteSpace: 'nowrap',
+            boxShadow: '0 0 18px rgba(255,213,79,0.7)',
+          }}>❤ {suspense.msg}</span>
+        </div>
+      )}
 
       {/* 结算飞金：命中总额从盘区飞向顶栏余额位淡出（不改 Header/App） */}
       {settleFx && result?.winTotal > 0 && (
@@ -776,6 +906,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
           <DiceStage key={roundNo} roll={pendingRef.current}
             height="100%"
             shakeRef={cardShakeRef} sfx={stageSfx}
+            onLastSuspense={onLastSuspense}
             onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
         ) : (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
@@ -811,12 +942,13 @@ export default function HatTrick({ balance, setBalance, onBack }) {
           </div>
           <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
             {SIDES.map(m => (
-              <button key={m.key} type="button" className="htCell" disabled={!betting} onClick={() => toggleSel(m.key)} style={cellBtn(m.key, { compact: true })}>
+              <button key={m.key} type="button" className={cellCls(m.key)} disabled={!betting} onClick={() => toggleSel(m.key)} style={cellBtn(m.key, { compact: true })}>
                 <span style={cellName}>{m.name}</span>
                 <span style={cellRange}>{m.range}</span>
                 <span className={fxCls(m.key)} style={{ ...cellOdds, fontSize: isMobile ? 10 : 11.5, whiteSpace: 'nowrap' }}>{betsPlaced.has(m.key) ? winTxt(m.key, MARKETS[m.key].odds) : ODDS.side.toFixed(2)}</span>
                 <span style={{ color: HATTRICK.dim, fontSize: isMobile ? 7.5 : 8.5, fontWeight: 700, whiteSpace: 'nowrap' }}>Triple loses</span>
                 {stakeChip(m.key)}
+                {nearBadge(m.key)}
               </button>
             ))}
           </div>
@@ -826,7 +958,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
         <div style={secBox}>
           <div style={secHead}>HAT TRICK · 豹子</div>
           <div style={{ display: 'flex', gap: isMobile ? 5 : 8, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
-            <button type="button" className="htCell" disabled={!betting} onClick={() => toggleSel('tr-any')}
+            <button type="button" className={cellCls('tr-any')} disabled={!betting} onClick={() => toggleSel('tr-any')}
               style={{ ...cellBtn('tr-any'), ...(isMobile ? { flex: '1 1 100%' } : { flex: 1.6 }) }}>
               <span style={cellName}>ANY TRIPLE</span>
               <span style={cellRange}>任意豹子</span>
@@ -834,7 +966,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
               {stakeChip('tr-any')}
             </button>
             {Array.from({ length: 6 }, (_, i) => i + 1).map(v => (
-              <button key={v} type="button" className="htCell" disabled={!betting} onClick={() => toggleSel(`tr-${v}`)}
+              <button key={v} type="button" className={cellCls(`tr-${v}`)} disabled={!betting} onClick={() => toggleSel(`tr-${v}`)}
                 style={{ ...cellBtn(`tr-${v}`, { compact: true }), ...(isMobile ? { flex: '1 1 30%' } : {}) }}>
                 <span style={{ display: 'flex', gap: 2 }}>
                   {[v, v, v].map((d, i) => <DieFace key={i} v={d} size={isMobile ? 13 : 15} />)}
@@ -851,7 +983,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
           <div style={secHead}>DOUBLE · 对子</div>
           <div style={{ display: 'flex', gap: isMobile ? 5 : 8, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
             {Array.from({ length: 6 }, (_, i) => i + 1).map(v => (
-              <button key={v} type="button" className="htCell" disabled={!betting} onClick={() => toggleSel(`d-${v}`)}
+              <button key={v} type="button" className={cellCls(`d-${v}`)} disabled={!betting} onClick={() => toggleSel(`d-${v}`)}
                 style={{ ...cellBtn(`d-${v}`, { compact: true }), ...(isMobile ? { flex: '1 1 30%' } : {}) }}>
                 <span style={{ display: 'flex', gap: 2 }}>
                   {[v, v].map((d, i) => <DieFace key={i} v={d} size={isMobile ? 14 : 16} />)}
