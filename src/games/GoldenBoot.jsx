@@ -620,6 +620,46 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
     </div>
   )
 
+  // ---- 开奖区（常驻顶部）：RACING/SETTLED 冲刺舞台 / BETTING 上期名次静态待命 ----
+  const stageH = isMobile ? 150 : 178
+  const stageZone = (
+    <div style={{
+      flex: '0 0 auto', position: 'relative', zIndex: 1,
+      margin: isMobile ? '8px 12px 0' : '6px 18px 0',
+      background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box', minHeight: stageH,
+    }}>
+      {gamePhase !== 'betting' && pendingRef.current ? (
+        <RaceStage key={roundNo} race={pendingRef.current}
+          height={stageH}
+          shakeRef={cardShakeRef} sfx={stageSfx}
+          onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
+      ) : (
+        <div style={{
+          height: stageH, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 10, padding: 10, boxSizing: 'border-box',
+        }}>
+          <span style={{ color: GOLDENBOOT.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>上期名次 · 待命中</span>
+          <div style={{ display: 'flex', gap: isMobile ? 4 : 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {lastRace.order.map((n, i) => (
+              <div key={`${n}-${i}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                <span style={{ color: i === 0 ? GOLDENBOOT.gold : GOLDENBOOT.dim, fontSize: 8, fontWeight: 800 }}>{i + 1}</span>
+                <JerseyBead num={n} size={isMobile ? 22 : 28} dim={i > 2} />
+              </div>
+            ))}
+          </div>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '2px 12px 2px 6px', borderRadius: RADIUS.pill,
+            background: GOLDENBOOT.gold, color: '#3a2c00', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
+          }}>
+            <JerseyBead num={lastRace.winner} size={20} /> WINNER #{lastRace.winner}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+
   const gameCard = (
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${GOLDENBOOT.bgCenter}, ${GOLDENBOOT.bgOuter})`,
@@ -633,13 +673,15 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
       {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
       {topBar}
 
+      {/* ---- ① 开奖区（常驻顶部）---- */}
+      {stageZone}
 
-      {/* ---- middle zone: 盘区三族，垂直居中 ---- */}
+      {/* ---- ② 下注区: 盘区三族，可滚 ---- */}
       <div style={{
-        flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
-        display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        padding: isMobile ? '10px 12px' : '12px 18px', boxSizing: 'border-box',
-        gap: isMobile ? 8 : 10,
+        flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
+        display: 'flex', flexDirection: 'column',
+        padding: isMobile ? '8px 12px' : '8px 18px', boxSizing: 'border-box',
+        gap: isMobile ? 8 : 10, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
         {/* 族① WINNER 冠军直选 1–10 */}
@@ -695,23 +737,12 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
 
       </div>
 
-      {/* ---- 冲刺舞台占珠盘路位：RACING 表演 / SETTLED 定格，回 BETTING 换回珠盘路
-           （等高替换 → 中区盘族与金框预亮全程可见，卡高不抖）---- */}
-      {gamePhase !== 'betting' && pendingRef.current ? (
-        <div style={{
-          flex: '0 0 auto', position: 'relative', zIndex: 1,
-          margin: isMobile ? '0 12px 10px' : '0 18px 12px',
-          background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: 10, overflow: 'hidden',
-        }}>
-          <RaceStage key={roundNo} race={pendingRef.current}
-            height={isMobile ? 150 : 178}
-            shakeRef={cardShakeRef} sfx={stageSfx}
-            onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
-        </div>
-      ) : beadRoad}
+      <div style={{ flex: '1 0 auto' }} />
 
-      {/* ---- bottom bet band — pinned ---- */}
+      {/* ---- ③ 珠盘路（常驻底部）---- */}
+      {beadRoad}
+
+      {/* ---- ④ bottom bet band — pinned ---- */}
       <div style={{
         flex: '0 0 auto',
         padding: '12px 14px',
