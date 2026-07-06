@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 import trophyImg from '../assets/shared/trophy.png'
 
 // Derby Day — 主客对抗 Keno（主队 10 珠 vs 客队 10 珠比和值），第 16 卡。
@@ -124,8 +125,32 @@ const BALL_LAUNCHES = (() => {
   for (let k = 1; k < 20; k++) ls.push(ls[k - 1] + (k > 19 - SLOW_N ? slow : fast))
   return ls
 })()
-const VENUE = 'EMERALD ARENA'   // 架空场馆名（禁真实球场名）
+const VENUE = '翡翠竞技场'       // 架空场馆名（禁真实球场名）
 const ROUND_DATE = 'EA20260705'
+
+// 玩法说明文案（中文；盘口数字照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '主队和客队各自从 1–80 号池中抽 20 个球。前 10 球算半场（HT）比分，20 球累计算全场（FT）比分。两队比分高低决定胜负，你可以押半场或全场的多种盘口。下注在开球前截止，之后分半场、全场两阶段揭示。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 胜负：半场/全场分别押主队胜或客队胜，约 1.95 倍。若该阶段两队打平，退回本金（不算输赢）。\n· 大 / 小：半场以 810、全场以 1620 为界，大约 1.95 倍 / 小约 1.92 倍。\n· 单 / 双：按该阶段两队总分判定，约 1.95 倍。\n· 半全场：押半场和全场的胜方组合（主主 / 主客 / 客主 / 客客）。同向（主主、客客）约 2.65 倍，反转（主客、客主）约 7.1 倍。半场或全场任一打平则退本金。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '先揭示半场（前 10 球），再揭示全场（累计 20 球）。所有盘口在开球前已锁定，两阶段揭示只是展示过程，命中的盘口按锁定赔率结算。打平的胜负盘、半全场盘退回本金。每期独立。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押半全场反转。\n· 胜负盘和半全场盘遇平局退本金，降低了风险。\n· 本游戏理论返还率约 96%，属娱乐性质，理性游戏。',
+  },
+]
 const ROAD_CAP = 120
 
 // 种子上局（确定性脚本预生成后硬编码；真开奖逐期顶掉）
@@ -145,6 +170,11 @@ const SEED_ROUNDS = [
 
 // ---------- 珠盘路（六页签）----------
 const ROAD_TABS = ['HT-H/A', 'HT-O/U', 'HT-O/E', 'FT-H/A', 'FT-O/U', 'FT-O/E']
+// 页签中文显示标签（key = 内部值不碰，仅译显示层）
+const ROAD_TAB_LABELS = {
+  'HT-H/A': '半场胜负', 'HT-O/U': '半场大小', 'HT-O/E': '半场单双',
+  'FT-H/A': '全场胜负', 'FT-O/U': '全场大小', 'FT-O/E': '全场单双',
+}
 function beadFor(tab, r) {
   const [hh, ha, fh, fa] = r
   const half = tab.startsWith('HT')
@@ -416,7 +446,7 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
         // 字卡弹簧：160ms 线性入 → 指数衰减余弦回弹
         const base = Math.min(1, tc / 160)
         const spring = tc <= 160 ? 1.35 : 1 + 0.35 * Math.exp(-(tc - 160) / 240) * Math.cos((tc - 160) / 110)
-        const label = homeLead ? '主队 WINS' : '客队 WINS'
+        const label = homeLead ? '主队胜' : '客队胜'
         ctx.save()
         ctx.translate(W / 2, H - 11 * dpr); ctx.scale(base * spring, base * spring)
         ctx.font = `900 ${11 * dpr}px 'Space Grotesk', sans-serif`
@@ -472,6 +502,7 @@ export default function DerbyDay({ balance, setBalance, onBack }) {
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [roadTab, setRoadTab] = useState('FT-H/A')
@@ -773,11 +804,12 @@ export default function DerbyDay({ balance, setBalance, onBack }) {
   )
   const topBar = (
     <GameTopBar
-      gameName="DERBY DAY"
+      gameName="德比大战"
       venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
       phaseChip={phaseChipNode}
       onBack={onBack}
+      onHowTo={() => setRulesOpen(true)}
     />
   )
 
@@ -893,13 +925,13 @@ export default function DerbyDay({ balance, setBalance, onBack }) {
       <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 6 }}>
         <button type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-home`)}
           style={cellBase(`${g.key}-home`, DERBY.home)}>
-          <span style={cellName}>主队 HOME</span>
+          <span style={cellName}>主队</span>
           <span style={cellOdds}>{ODDS.main.toFixed(2)}</span>
           {stakeChip(`${g.key}-home`)}
         </button>
         <button type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-away`)}
           style={cellBase(`${g.key}-away`, DERBY.away)}>
-          <span style={cellName}>客队 AWAY</span>
+          <span style={cellName}>客队</span>
           <span style={cellOdds}>{ODDS.main.toFixed(2)}</span>
           {stakeChip(`${g.key}-away`)}
         </button>
@@ -981,7 +1013,7 @@ export default function DerbyDay({ balance, setBalance, onBack }) {
             color: roadTab === t ? '#083a1b' : DERBY.dim,
             border: `1px solid ${roadTab === t ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
             fontSize: 9.5, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer', whiteSpace: 'nowrap',
-          }}>{t}</button>
+          }}>{ROAD_TAB_LABELS[t]}</button>
         ))}
       </div>
       {/* 占比条：近 30 期 H/A 分布（随页签 HT/FT 切换重算） */}
@@ -1105,7 +1137,7 @@ export default function DerbyDay({ balance, setBalance, onBack }) {
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input
               value={bet}
               disabled={!betting}
@@ -1129,7 +1161,7 @@ export default function DerbyDay({ balance, setBalance, onBack }) {
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
-              label={betting ? '▷ CONFIRM' : gamePhase === 'settled' ? '本期已结算' : '已锁盘 · 开赛中'}
+              label={betting ? `▷ 下注 ${pricedOf(picks).length} 格` : gamePhase === 'settled' ? '本期已结算' : '已锁盘 · 开赛中'}
               sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
               onClick={confirmBets}
               disabled={!confirmOk}
@@ -1138,6 +1170,8 @@ export default function DerbyDay({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="德比大战 玩法说明" sections={RULES} />
     </Panel>
   )
 
