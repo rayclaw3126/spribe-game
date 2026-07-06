@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 
 // Domino Duel — 骨牌版主客对决（闲庄→主蓝客红），第 21 卡。
 // X2：真引擎 + 真赔率 + 真算钱（抄 Derby Day 结构）。翻牌动画留 X3。
@@ -96,7 +97,31 @@ const FLIP_DUR = [0.55, 0.55, 0.55, 1.4]
 const FLIP_END = 1.75 + 1.4   // 末张翻完 ≈ 3.15s
 const ROAD_CAP = 120
 
-const VENUE = 'ONYX ARENA'
+const VENUE = '玛瑙竞技场'
+
+// 玩法说明文案（中文；盘口/比分数字照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每期从 28 张骨牌中无放回抽 4 张，前 2 张归主队、后 2 张归客队。每队 2 张骨牌的点数相加后取个位数，就是该队的比分（0–9）。比分高的一方获胜，相同则平局。开奖后按你押中的盘口赔付。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 主要盘：主队胜 1.90 / 平局 9.38 / 客队胜 1.90。押主胜或客胜时，若开出平局则退回本金（不算输赢）。\n· 全场总进球：主客两队比分之和，大[9-18] 1.74 / 小[0-8] 2.11 / 单 1.91 / 双 1.91。\n· 主队总分 / 客队总分：单看一队的比分，大[5-9] 1.92 / 小[0-4] 1.90 / 单 1.88 / 双 1.94。\n· 正确比分（波胆）：直接押中主客双方的确切比分，共 9 个热门比分可选，赔率 88–98 倍不等，越冷门赔越高。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '下注截止后骨牌翻开，两队亮出比分，命中的盘口高亮结算，赔付直接入余额。押主胜/客胜遇平局按本金退回。每期独立，上期不影响下期。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款，开奖前可继续加注。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押波胆比分。\n· 主胜/客胜的平局退本机制降低了风险，适合保守玩家。\n· 本游戏理论返还率约 95.5%，属娱乐性质，理性游戏。',
+  },
+]
 const ROUND_DATE = 'OA20260706'
 const SEED_LAST = deriveRound([[3, 2], [1, 1], [2, 1], [0, 1]])   // 上局回顾种子（真开奖逐期顶掉）
 const SEED_ROAD = [
@@ -191,6 +216,7 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
@@ -490,9 +516,9 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
     }}>{phaseInfo.text}{phaseInfo.cd && <span style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{secs}</span>}</span>
   )
   const topBar = (
-    <GameTopBar gameName="DOMINO DUEL" venue={VENUE}
+    <GameTopBar gameName="骨牌对决" venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} onBack={onBack} />
+      phaseChip={phaseChipNode} onHowTo={() => setRulesOpen(true)} onBack={onBack} />
   )
 
   // ---- ① 对决区：主(蓝) VS 客(红)，各两张骨牌 + 比分（drawing 翻牌演出）----
@@ -700,7 +726,7 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
             borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
           </div>
@@ -724,6 +750,10 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+
+      {/* 玩法说明抽屉（position:fixed 覆盖，桌面/移动两分支共用同一 gameCard）*/}
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="骨牌对决 玩法说明" sections={RULES} />
     </Panel>
   )
 
