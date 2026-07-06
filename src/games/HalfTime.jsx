@@ -7,6 +7,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import BetButton from '../components/shell/BetButton'
 import ballUrl from '../assets/covers/ball-3d.png'
 
 // Half Time — 快乐8和值盘（足球皮）。
@@ -407,12 +408,14 @@ export default function HalfTime({ balance, setBalance, onBack }) {
   const [history, setHistory] = useState(SEED_HISTORY)
   const [result, setResult] = useState(null)   // { hits:Set, winTotal }
   const [toasts, setToasts] = useState([])
+  const [hasLast, setHasLast] = useState(false)   // 是否有上局注单快照（重复钮亮灭）
 
   const [preHits, setPreHits] = useState(null)   // 开奖动画收尾的命中预亮（结算前）
   const phaseRef = useRef('betting')
   const cdRef = useRef(BETTING_T)
   const picksRef = useRef(picks)
   const betsRef = useRef(new Map())
+  const lastBetsRef = useRef(new Map())   // 上局注单快照（重复投注用）
   const betRef = useRef(bet)
   const balanceRef = useRef(balance)
   const pendingRef = useRef(null)
@@ -512,6 +515,11 @@ export default function HalfTime({ balance, setBalance, onBack }) {
         phaseRef.current = 'settled'; setGamePhase('settled')
         cdRef.current = SETTLED_T; setCountdown(SETTLED_T)
       } else {
+        // 清盘前快照本局注单（空局不覆盖，重复钮始终指向最近一张有效注单）
+        if (betsRef.current.size) {
+          lastBetsRef.current = new Map(betsRef.current)
+          setHasLast(true)
+        }
         betsRef.current = new Map(); setBetsPlaced(new Map())
         picksRef.current = new Set(); setPicks(new Set())
         setResult(null)
@@ -537,24 +545,35 @@ export default function HalfTime({ balance, setBalance, onBack }) {
     })
   }
 
-  // 唯一扣注点：注额 × 选格数，一次性扣款后入 betsRef，清空待选
-  function confirmBets() {
-    if (phaseRef.current !== 'betting') return
-    const keys = [...picksRef.current]
-    const amount = betRef.current
-    const total = round2(amount * keys.length)
-    if (!keys.length || amount < 1 || total > balanceRef.current) return
+  // 唯一扣注点：确认/重复两个入口都走这一条（一次性扣款后入 betsRef）
+  function placeBets(entries) {
+    if (phaseRef.current !== 'betting') return false
+    let total = 0
+    entries.forEach(s => { total = round2(total + s) })
+    if (!entries.size || total <= 0 || total > balanceRef.current) return false
     setBalance(b => round2(b - total))
     balanceRef.current = round2(balanceRef.current - total)
-    keys.forEach(k => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + amount)))
+    entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
     setBetsPlaced(new Map(betsRef.current))
-    picksRef.current = new Set()
-    setPicks(new Set())
+    return true
   }
+  function confirmBets() {
+    const amount = betRef.current
+    if (amount < 1) return
+    if (placeBets(new Map([...picksRef.current].map(k => [k, amount])))) {
+      picksRef.current = new Set()
+      setPicks(new Set())
+    }
+  }
+  // 重复投注 = 复用上局注单快照原额重下
+  function repeatBets() { placeBets(new Map(lastBetsRef.current)) }
 
   const betting = gamePhase === 'betting'
   const confirmTotal = round2(bet * picks.size)
   const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
+  let lastTotal = 0
+  lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
+  const repeatOk = betting && hasLast && lastTotal > 0 && lastTotal <= balance
 
   // ---- 样式件 ----
   const cellBtn = (key, { compact = false } = {}) => {
@@ -754,53 +773,55 @@ export default function HalfTime({ balance, setBalance, onBack }) {
 
       {beadRoad}
 
-      {/* ---- bottom bet band — pinned ---- */}
+      {/* ---- bottom bet band — pinned，grid 4列×2行（照 Line Up 定案）---- */}
       <div style={{
-        flex: '0 0 auto',
-        padding: '12px 14px',
-        background: HALFTIME.band,
-        borderTop: '1px solid rgba(0,0,0,0.25)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: 10, flexWrap: 'wrap', position: 'relative', zIndex: 1,
+        flex: '0 0 auto', padding: '6px 12px', background: HALFTIME.band,
+        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
       }}>
         <div style={{
-          padding: '5px 18px', borderRadius: RADIUS.pill,
-          background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-          textAlign: 'center', lineHeight: 1.2,
-          opacity: betting ? 1 : 0.6,
+          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
         }}>
-          <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
-          <input
-            value={bet}
-            disabled={!betting}
-            onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
-            style={{
-              width: 56, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-              color: COLORS.white, fontSize: 15, fontWeight: 900,
-            }}
-          />
+          {[
+            { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+            { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+          ].map(({ v, col, row }) => (
+            <button key={v} type="button" className="htChip" disabled={!betting} onClick={() => setBet(v)} style={{
+              gridColumn: col, gridRow: row, width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+              background: bet === v ? HALFTIME.selTint : 'rgba(0,0,0,0.35)',
+              border: `1px solid ${bet === v ? HALFTIME.sel : 'rgba(255,255,255,0.35)'}`,
+              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
+            }}>{v}</button>
+          ))}
+          <div style={{
+            gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+            borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+          }}>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
+          </div>
+          <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
+            gridColumn: 3, gridRow: 2, width: '100%', height: '100%', borderRadius: 8,
+            fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+            color: repeatOk ? COLORS.white : HALFTIME.dim, background: 'rgba(0,0,0,0.35)',
+            border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
+            cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+          <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+            <BetButton
+              state="bet"
+              label={betting ? `下注 ${picks.size} 格` : gamePhase === 'drawing' ? '开奖中…' : '本期已结算'}
+              sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+              onClick={confirmBets}
+              disabled={!confirmOk}
+              stretch
+            />
+          </div>
         </div>
-        {[10, 50, 100, 500].map(v => (
-          <button key={v} type="button" disabled={!betting} onClick={() => setBet(v)} style={{
-            minWidth: 38, padding: '0 10px', height: 30, borderRadius: RADIUS.pill,
-            fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
-            background: bet === v ? HALFTIME.selTint : HALFTIME.band,
-            border: `1px solid ${bet === v ? HALFTIME.sel : 'rgba(255,255,255,0.35)'}`,
-            cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
-          }}>{v}</button>
-        ))}
-        <button type="button" disabled={!confirmOk} onClick={confirmBets} style={{
-          minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
-          background: HALFTIME.sel, color: '#083a1b',
-          border: '1px solid rgba(255,255,255,0.35)',
-          fontSize: 14, fontWeight: 900, letterSpacing: 1,
-          cursor: confirmOk ? 'pointer' : 'not-allowed',
-          opacity: confirmOk ? 1 : 0.55,
-        }}>
-          {betting
-            ? `▷ CONFIRM${picks.size > 0 ? ` $${confirmTotal.toFixed(0)}` : ''}`
-            : gamePhase === 'drawing' ? '开奖中…' : '本期已结算'}
-        </button>
       </div>
     </Panel>
   )
