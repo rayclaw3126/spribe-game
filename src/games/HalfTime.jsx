@@ -564,9 +564,7 @@ export default function HalfTime({ balance, setBalance, onBack }) {
     return {
       flex: 1, minWidth: 0, padding: compact ? '7px 2px' : '9px 4px',
       borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
-      background: sel
-        ? HALFTIME.selTint
-        : `linear-gradient(180deg, ${HALFTIME.cellTop}, ${HALFTIME.cellBot})`,
+      background: sel ? HALFTIME.selTint : HALFTIME.grey,
       border: `1px solid ${hit ? HALFTIME.gold : sel || placed ? HALFTIME.sel : HALFTIME.cellBorder}`,
       boxShadow: hit
         ? `0 0 12px ${HALFTIME.gold}`

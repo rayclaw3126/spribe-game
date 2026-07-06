@@ -291,6 +291,7 @@ export const HALFTIME = {
   strip: 'rgba(0,0,0,0.32)',   // round bar / bead-road backing
   cellTop: '#12351f',      // bet cell gradient — MINES.cellTop family, darker
   cellBot: '#0a1f12',
+  grey: '#1a2230',         // = DERBY.grey，暗灰格底（下注格底）
   cellBorder: 'rgba(255,255,255,0.16)',
   sel: '#35d07f',          // selected outline (shared green)
   selTint: 'rgba(53,208,127,0.16)',
