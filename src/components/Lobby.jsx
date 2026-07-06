@@ -38,6 +38,8 @@ const GAMES = [
   { id: 'SpeedGrid', name: 'Speed Grid', desc: '24 cars, one champion — call it!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverSpeedGrid },
   // TODO: 换 Codex 专属封面（暂借 Team Keno 封面占位）
   { id: 'WuXing', name: 'Wu Xing', desc: 'Twenty balls, five elements!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamKeno },
+  // TODO: 换 Codex 专属封面（暂借 Team Keno 封面占位）
+  { id: 'RollingBall', name: 'Rolling Ball', desc: 'Three balls roll — call each one!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamKeno },
 ]
 
 export default function Lobby({ onSelect, balance }) {

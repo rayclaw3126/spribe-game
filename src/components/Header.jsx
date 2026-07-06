@@ -21,6 +21,7 @@ const GAME_NAMES = {
   LineUp: 'Line Up',
   SpeedGrid: 'Speed Grid',
   WuXing: 'Wu Xing',
+  RollingBall: 'Rolling Ball',
 }
 
 export default function Header({ balance, onHome, activeGame }) {
