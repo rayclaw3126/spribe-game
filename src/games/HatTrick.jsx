@@ -380,6 +380,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
   const [result, setResult] = useState(null)              // { hits:Set, winTotal }
   const [preHits, setPreHits] = useState(null)            // 掷骰动画收尾的命中预亮
   const [toasts, setToasts] = useState([])
+  const [settleFx, setSettleFx] = useState(false)         // 结算演出开关（飞金 + 命中/未中标签动画）
 
   const phaseRef = useRef('betting')
   const cdRef = useRef(BETTING_T)
@@ -485,6 +486,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
     setRecent(list => [r.total, ...list].slice(0, 5))
     setHistory(h => [...h, r.dice].slice(-ROAD_CAP))
     setResult({ hits, winTotal })
+    setSettleFx(true)   // 开结算演出：命中飞金 / 未中碎裂
     // 假注单本期落账（展示用，结果已定后的装饰随机）
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
@@ -511,6 +513,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
         picksRef.current = new Set(); setPicks(new Set())
         setResult(null)
         setPreHits(null)
+        setSettleFx(false)
         setFeedBets(makeFeedBots())
         setRoundNo(n => n + 1)
         phaseRef.current = 'betting'; setGamePhase('betting')
@@ -581,14 +584,24 @@ export default function HatTrick({ balance, setBalance, onBack }) {
     background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
     boxSizing: 'border-box',
   }
-  const stakeChip = key => betsPlaced.has(key) && (
-    <span style={{
-      position: 'absolute', top: 2, right: 3,
-      padding: '1px 5px', borderRadius: RADIUS.pill,
-      background: HATTRICK.sel, color: '#083a1b',
-      fontSize: 8, fontWeight: 900,
-    }}>${betsPlaced.get(key)}</span>
-  )
+  // 押额胶囊：只显 $押额（未中结算时碎裂）
+  const stakeChip = key => {
+    if (!betsPlaced.has(key)) return null
+    const lose = settleFx && !result?.hits?.has(key)
+    return (
+      <span className={lose ? 'htLose' : undefined} style={{
+        position: 'absolute', top: 2, right: 3, zIndex: 2,
+        padding: '1px 5px', borderRadius: RADIUS.pill,
+        background: HATTRICK.sel, color: '#083a1b',
+        fontSize: 8, fontWeight: 900, pointerEvents: 'none',
+      }}>${betsPlaced.get(key)}</span>
+    )
+  }
+  // 赔率位常显赢额（下注后替换赔率数字，不并列） + 结算演出 class
+  const winTxt = (key, odds) => `赢 $${round2(betsPlaced.get(key) * odds)}`
+  const fxCls = key => (!settleFx || !betsPlaced.has(key))
+    ? undefined
+    : (result?.hits?.has(key) ? 'htWinFly' : 'htLose')
 
   // TOTAL 4–17 小格（desk 14 连排 / mobile 7×2 折行不挤爆）
   const totalCell = s => {
@@ -612,7 +625,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
           color: hit ? '#083a1b' : HATTRICK.text, fontSize: isMobile ? 12 : 13, fontWeight: 900,
           fontFamily: "'Space Grotesk', sans-serif",
         }}>{s}</span>
-        <span style={{ color: hit ? '#083a1b' : HATTRICK.gold, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800 }}>{ODDS.total[s]}</span>
+        <span className={fxCls(key)} style={{ color: hit ? '#083a1b' : HATTRICK.gold, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, whiteSpace: 'nowrap' }}>{placed ? winTxt(key, ODDS.total[s]) : ODDS.total[s]}</span>
         {stakeChip(key)}
       </button>
     )
@@ -714,7 +727,37 @@ export default function HatTrick({ balance, setBalance, onBack }) {
       display: 'flex', flexDirection: 'column',
       ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
     }}>
-      <style>{`.htCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
+      <style>{`
+        .htCell:hover:not(:disabled) { filter: brightness(1.3); }
+        @keyframes htWinFly {
+          0%   { transform: scale(1); opacity: 1; }
+          25%  { transform: scale(1.65); opacity: 1; filter: drop-shadow(0 0 6px rgba(255,213,79,0.95)); }
+          100% { transform: translateY(-16px) scale(1.1); opacity: 0; }
+        }
+        .htWinFly { animation: htWinFly 1s ease-out forwards; transform-origin: right center; }
+        @keyframes htLose {
+          0%   { transform: scale(1); opacity: 1; filter: grayscale(0); }
+          100% { transform: scale(0.7); opacity: 0; filter: grayscale(1); }
+        }
+        .htLose { animation: htLose 0.7s ease-in forwards; transform-origin: right center; }
+        @keyframes htFlyGold {
+          0%   { transform: translateY(14px) scale(0.7); opacity: 0; }
+          18%  { transform: translateY(0) scale(1.15); opacity: 1; }
+          100% { transform: translateY(-120px) scale(0.85); opacity: 0; }
+        }
+        .htFlyGold { animation: htFlyGold 1.25s ease-out forwards; }
+      `}</style>
+
+      {/* 结算飞金：命中总额从盘区飞向顶栏余额位淡出（不改 Header/App） */}
+      {settleFx && result?.winTotal > 0 && (
+        <div className="htFlyGold" style={{
+          position: 'absolute', top: '44%', left: 0, right: 0, zIndex: 6,
+          textAlign: 'center', pointerEvents: 'none',
+          color: HATTRICK.gold, fontSize: isMobile ? 26 : 32, fontWeight: 900,
+          fontFamily: "'Space Grotesk', sans-serif",
+          textShadow: '0 0 16px rgba(255,213,79,0.9)',
+        }}>+${result.winTotal.toFixed(2)}</div>
+      )}
 
       {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
       {topBar}
@@ -771,7 +814,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
               <button key={m.key} type="button" className="htCell" disabled={!betting} onClick={() => toggleSel(m.key)} style={cellBtn(m.key, { compact: true })}>
                 <span style={cellName}>{m.name}</span>
                 <span style={cellRange}>{m.range}</span>
-                <span style={{ ...cellOdds, fontSize: isMobile ? 10 : 11.5 }}>{ODDS.side.toFixed(2)}</span>
+                <span className={fxCls(m.key)} style={{ ...cellOdds, fontSize: isMobile ? 10 : 11.5, whiteSpace: 'nowrap' }}>{betsPlaced.has(m.key) ? winTxt(m.key, MARKETS[m.key].odds) : ODDS.side.toFixed(2)}</span>
                 <span style={{ color: HATTRICK.dim, fontSize: isMobile ? 7.5 : 8.5, fontWeight: 700, whiteSpace: 'nowrap' }}>Triple loses</span>
                 {stakeChip(m.key)}
               </button>
@@ -787,7 +830,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
               style={{ ...cellBtn('tr-any'), ...(isMobile ? { flex: '1 1 100%' } : { flex: 1.6 }) }}>
               <span style={cellName}>ANY TRIPLE</span>
               <span style={cellRange}>任意豹子</span>
-              <span style={cellOdds}>{ODDS.anyTriple.toFixed(2)}</span>
+              <span className={fxCls('tr-any')} style={{ ...cellOdds, whiteSpace: 'nowrap' }}>{betsPlaced.has('tr-any') ? winTxt('tr-any', MARKETS['tr-any'].odds) : ODDS.anyTriple.toFixed(2)}</span>
               {stakeChip('tr-any')}
             </button>
             {Array.from({ length: 6 }, (_, i) => i + 1).map(v => (
@@ -796,7 +839,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
                 <span style={{ display: 'flex', gap: 2 }}>
                   {[v, v, v].map((d, i) => <DieFace key={i} v={d} size={isMobile ? 13 : 15} />)}
                 </span>
-                <span style={{ ...cellOdds, fontSize: isMobile ? 9.5 : 11 }}>{ODDS.triple.toFixed(2)}</span>
+                <span className={fxCls(`tr-${v}`)} style={{ ...cellOdds, fontSize: isMobile ? 9.5 : 11, whiteSpace: 'nowrap' }}>{betsPlaced.has(`tr-${v}`) ? winTxt(`tr-${v}`, MARKETS[`tr-${v}`].odds) : ODDS.triple.toFixed(2)}</span>
                 {stakeChip(`tr-${v}`)}
               </button>
             ))}
@@ -813,7 +856,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
                 <span style={{ display: 'flex', gap: 2 }}>
                   {[v, v].map((d, i) => <DieFace key={i} v={d} size={isMobile ? 14 : 16} />)}
                 </span>
-                <span style={{ ...cellOdds, fontSize: isMobile ? 9.5 : 11 }}>{ODDS.double.toFixed(2)}</span>
+                <span className={fxCls(`d-${v}`)} style={{ ...cellOdds, fontSize: isMobile ? 9.5 : 11, whiteSpace: 'nowrap' }}>{betsPlaced.has(`d-${v}`) ? winTxt(`d-${v}`, MARKETS[`d-${v}`].odds) : ODDS.double.toFixed(2)}</span>
                 {stakeChip(`d-${v}`)}
               </button>
             ))}
