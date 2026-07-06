@@ -609,12 +609,17 @@ export default function HalfTime({ balance, setBalance, onBack }) {
       color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
     }}>{phaseChip.text}</span>
   )
+  const ballSz = isMobile ? 15 : 17
   const subRowNode = (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0, flex: '1 1 auto' }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', minWidth: 0 }}>
+    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', minWidth: 0, flex: '1 1 auto' }}>
+      {/* 20 球固定两行×10 对齐（grid，不随 wrap 挤乱） */}
+      <span style={{
+        display: 'grid', flex: '0 0 auto',
+        gridTemplateColumns: `repeat(10, ${ballSz}px)`, gridAutoRows: `${ballSz}px`, gap: 3,
+      }}>
         {lastDraw.balls.map((n, i) => (
           <span key={`${n}-${i}`} style={{
-            width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: '50%',
+            width: ballSz, height: ballSz, borderRadius: '50%',
             background: n > 40 ? HALFTIME.under : HALFTIME.over, color: COLORS.white,
             fontSize: isMobile ? 7.5 : 8.5, fontWeight: 800,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -622,7 +627,7 @@ export default function HalfTime({ balance, setBalance, onBack }) {
         ))}
       </span>
       <span style={{
-        marginLeft: 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
+        marginLeft: 'auto', flex: '0 0 auto', padding: '2px 12px', borderRadius: RADIUS.pill,
         background: HALFTIME.sel, color: '#083a1b', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
       }}>SCORE {lastDraw.sum}</span>
     </span>
