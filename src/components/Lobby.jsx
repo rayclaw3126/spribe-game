@@ -42,6 +42,7 @@ const GAMES = [
   { id: 'SpeedGrid', name: 'Speed Grid', desc: '24 cars, one champion — call it!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverSpeedGrid, cat: 'lottery' },
   { id: 'WuXing', name: 'Wu Xing', desc: 'Twenty balls, five elements!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverWuXing, cat: 'lottery' },
   { id: 'RollingBall', name: 'Rolling Ball', desc: 'Three balls roll — call each one!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverRollingBall, cat: 'lottery' },
+  { id: 'DominoDuel', name: 'Domino Duel', desc: 'Home vs away — dominoes decide!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: null, cat: 'lottery' },
 ]
 
 const TOP_IDS = ['RollingBall', 'WuXing', 'SpeedGrid', 'LineUp', 'DerbyDay']

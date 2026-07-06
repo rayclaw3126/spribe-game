@@ -21,8 +21,9 @@ import LineUp from './games/LineUp'
 import SpeedGrid from './games/SpeedGrid'
 import WuXing from './games/WuXing'
 import RollingBall from './games/RollingBall'
+import DominoDuel from './games/DominoDuel'
 
-const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum, HalfTime, GoldenBoot, NumberUp, HatTrick, DerbyDay, LineUp, SpeedGrid, WuXing, RollingBall }
+const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum, HalfTime, GoldenBoot, NumberUp, HatTrick, DerbyDay, LineUp, SpeedGrid, WuXing, RollingBall, DominoDuel }
 
 export default function App() {
   const [balance, setBalance] = useState(1000)
