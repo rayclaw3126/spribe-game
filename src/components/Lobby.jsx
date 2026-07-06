@@ -44,12 +44,25 @@ const GAMES = [
   { id: 'RollingBall', name: 'Rolling Ball', desc: 'Three balls roll — call each one!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverRollingBall, cat: 'lottery' },
 ]
 
-const TABS = [{ k: 'all', label: '全部' }, { k: 'instant', label: '即时街机' }, { k: 'lottery', label: '轮次开奖' }]
+const TOP_IDS = ['RollingBall', 'WuXing', 'SpeedGrid', 'LineUp', 'DerbyDay']
+const HOT_IDS = ['DerbyDay', 'LineUp', 'SpeedGrid', 'WuXing', 'RollingBall']
+const NEW_IDS = ['LineUp', 'SpeedGrid', 'WuXing', 'RollingBall']
+
+const TABS = [
+  { k: 'all', label: '全部' },
+  { k: 'hot', label: '热门' },
+  { k: 'new', label: '新游' },
+  { k: 'instant', label: '即时街机' },
+  { k: 'lottery', label: '轮次开奖' },
+]
 
 export default function Lobby({ onSelect, balance }) {
   const isMobile = useIsMobile()
-  const [tab, setTab] = useState('all')
-  const shown = tab === 'all' ? GAMES : GAMES.filter(g => g.cat === tab)
+  const [tab, setTab] = useState('hot')
+  const shown = tab === 'all' ? [...TOP_IDS.map(id => GAMES.find(g => g.id === id)), ...GAMES.filter(g => !TOP_IDS.includes(g.id))]
+    : tab === 'hot' ? GAMES.filter(g => HOT_IDS.includes(g.id))
+      : tab === 'new' ? GAMES.filter(g => NEW_IDS.includes(g.id))
+        : GAMES.filter(g => g.cat === tab)
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: isMobile ? '16px 12px 32px' : '32px 24px 40px', color: '#e8edf2' }}>
       <div style={{
@@ -82,7 +95,7 @@ export default function Lobby({ onSelect, balance }) {
                 background: active ? '#16c784' : '#1a2230',
                 color: active ? '#06251a' : '#8a97a6',
                 border: `1px solid ${active ? '#16c784' : '#232c39'}`,
-                borderRadius: 999,
+                borderRadius: 8,
                 padding: '8px 14px',
                 fontSize: 13,
                 fontWeight: 800,
