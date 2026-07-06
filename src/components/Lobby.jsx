@@ -15,6 +15,7 @@ import coverNumberUp from '../assets/covers/cover_numberup.png'
 import coverDerbyDay from '../assets/covers/cover_derbyday.png'
 import coverLineUp from '../assets/covers/cover_lineup.png'
 import coverSpeedGrid from '../assets/covers/cover_speedgrid.png'
+import coverWuXing from '../assets/covers/cover_wuxing.png'
 
 const GAMES = [
   { id: 'Aviator',   name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway },
@@ -36,8 +37,7 @@ const GAMES = [
   { id: 'DerbyDay', name: 'Derby Day', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDerbyDay },
   { id: 'LineUp', name: 'Line Up', desc: 'Five lines, 25 numbers — call the sums!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverLineUp },
   { id: 'SpeedGrid', name: 'Speed Grid', desc: '24 cars, one champion — call it!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverSpeedGrid },
-  // TODO: 换 Codex 专属封面（暂借 Team Keno 封面占位）
-  { id: 'WuXing', name: 'Wu Xing', desc: 'Twenty balls, five elements!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamKeno },
+  { id: 'WuXing', name: 'Wu Xing', desc: 'Twenty balls, five elements!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverWuXing },
   // TODO: 换 Codex 专属封面（暂借 Team Keno 封面占位）
   { id: 'RollingBall', name: 'Rolling Ball', desc: 'Three balls roll — call each one!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamKeno },
 ]
