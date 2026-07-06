@@ -48,7 +48,7 @@ const GAMES = [
 
 const TOP_IDS = ['RollingBall', 'WuXing', 'SpeedGrid', 'LineUp', 'DerbyDay']
 const HOT_IDS = ['DerbyDay', 'LineUp', 'SpeedGrid', 'WuXing', 'RollingBall', 'GoldenBoot']
-const NEW_IDS = ['LineUp', 'SpeedGrid', 'WuXing', 'RollingBall', 'GoldenBoot']
+const NEW_IDS = ['LineUp', 'SpeedGrid', 'WuXing', 'RollingBall', 'GoldenBoot', 'DerbyDay']
 
 const TABS = [
   { k: 'all', label: '全部' },
