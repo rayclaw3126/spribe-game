@@ -6,6 +6,7 @@ import BetFeed from '../components/shell/BetFeed'
 import BetButton from '../components/shell/BetButton'
 import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
+import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
@@ -137,6 +138,118 @@ const ROWS = [
   { slot: 'row-t5', name: '>5行', range: '3行×25号' },
 ]
 
+// ---------- 滚球舞台（draw 相位；目标已锁于 pendingRef，动画只读）----------
+// 1-75 快闪滚号 → 减速定格真值（末球慢放）；canvas 单 rAF，key=期号+球序重挂载；
+// StrictMode 双挂载由 cleanup 兜底；prefers-reduced-motion 直出终态帧不发声。
+function RollStage({ target, isLast, size, sfx }) {
+  const ref = useRef(null)
+  const cbRef = useRef(sfx)
+  cbRef.current = sfx
+  const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  useEffect(() => {
+    const canvas = ref.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    const dpr = window.devicePixelRatio || 1
+    canvas.width = Math.round(size * dpr)
+    canvas.height = Math.round(size * dpr)
+    const LAND = isLast ? 1600 : 1050   // 末球慢放（仍在 DRAW_T=2s 内收尾）
+    // 射门入网：球门框(白) + 网格(白半透) + 定格瞬间球飞入网 + 网抖衰减；方形画布不改布局
+    const drawScene = (n, landed, t) => {
+      const W = canvas.width, H = canvas.height
+      ctx.clearRect(0, 0, W, H)
+      const gL = W * 0.16, gR = W * 0.84, gT = H * 0.05, gB = H * 0.46
+      const shake = landed ? 4 * dpr * Math.exp(-(t - LAND) / 80) * Math.cos((t - LAND) / 26) : 0
+      // 网格（先画为背景，横线随抖动位移）
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1 * dpr
+      const step = (gR - gL) / 6
+      for (let x = gL; x <= gR + 0.5; x += step) { ctx.beginPath(); ctx.moveTo(x, gT); ctx.lineTo(x + shake, gB); ctx.stroke() }
+      for (let y = gT; y <= gB + 0.5; y += step) { ctx.beginPath(); ctx.moveTo(gL, y + (y > gT ? shake * 0.6 : 0)); ctx.lineTo(gR, y); ctx.stroke() }
+      // 球门框（白）
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2 * dpr
+      ctx.beginPath(); ctx.moveTo(gL, gB); ctx.lineTo(gL, gT); ctx.lineTo(gR, gT); ctx.lineTo(gR, gB); ctx.stroke()
+      // 球：滚号时在下方，定格后短飞入网（150ms）+ 落网轻弹
+      const flight = landed ? Math.min(1, (t - LAND) / 150) : 0
+      const cy = H * 0.72 + (H * 0.30 - H * 0.72) * flight
+      const r = W * 0.24
+      const pop = landed ? 1 + 0.14 * Math.max(0, 1 - (t - LAND) / 160) : 1
+      ctx.save(); ctx.translate(W / 2, cy + shake * 0.5); ctx.scale(pop, pop)
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2)
+      ctx.fillStyle = landed ? (isRed(n) ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.10)'
+      ctx.fill()
+      ctx.lineWidth = 2 * dpr
+      ctx.strokeStyle = landed ? DERBY.gold : 'rgba(255,255,255,0.3)'
+      ctx.stroke()
+      ctx.fillStyle = landed ? '#ffffff' : 'rgba(255,255,255,0.8)'
+      ctx.font = `900 ${Math.round(r * 0.85)}px 'Space Grotesk', sans-serif`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText(String(n).padStart(2, '0'), 0, 1 * dpr)
+      ctx.restore()
+    }
+    const drawFace = drawScene
+    if (reduced) {
+      drawFace(target, true, LAND + 200)
+      if (import.meta.env.DEV) window.__RB_ANIM_LAST = String(target)
+      return
+    }
+    if (import.meta.env.DEV) window.__RB_RAF_ACTIVE = (window.__RB_RAF_ACTIVE || 0) + 1
+    let landed = false, raf = 0
+    const t0 = performance.now()
+    const loop = now => {
+      const t = now - t0
+      if (t < LAND) {
+        // 快闪滚号：接近 LAND 时换号变慢（减速感），伪序列从 target 派生（零随机数）
+        const speed = t < LAND * 0.6 ? 55 : 90 + (t - LAND * 0.6) / (LAND * 0.4) * 170
+        const fr = Math.floor(t / speed)
+        drawFace(((target * 7 + fr * 13) % 75) + 1, false, t)
+      } else {
+        drawFace(target, true, t)
+        if (!landed) {
+          landed = true
+          cbRef.current.tick?.()
+          if (import.meta.env.DEV) window.__RB_ANIM_LAST = String(target)
+        }
+      }
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => {
+      cancelAnimationFrame(raf)
+      if (import.meta.env.DEV) window.__RB_RAF_ACTIVE -= 1
+    }
+    // 舞台一次挂载跑完整条时间轴
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return <canvas ref={ref} style={{ width: size, height: size, display: 'block' }} aria-hidden />
+}
+
+// ---------- betting 等待区暖场球（号码快跳障眼动效）----------
+// setInterval 驱动（非 rAF → __RB_RAF_ACTIVE 不新增环）；伪随机滚号 = 确定性 scramble
+// （不碰引擎 RNG，纯展示）；开奖真值仍锁于 pendingRef，本球只是暖场障眼。
+function BettingBall({ size }) {
+  const [n, setN] = useState(37)
+  const cntRef = useRef(0)
+  useEffect(() => {
+    const id = setInterval(() => {
+      cntRef.current += 1
+      setN(((cntRef.current * 37) % 75) + 1)   // +37 mod 75 全覆盖，跳变似滚号
+    }, 80)
+    return () => clearInterval(id)
+  }, [])
+  return (
+    <span style={{
+      width: size, height: size, borderRadius: '50%',
+      background: 'rgba(255,255,255,0.08)', border: '2px dashed rgba(53,208,127,0.5)',
+      color: 'rgba(255,255,255,0.85)', fontSize: size * 0.42, fontWeight: 900,
+      fontFamily: "'Space Grotesk', sans-serif",
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      animation: 'rbBetBounce 0.7s ease-in-out infinite',
+    }}>{String(n).padStart(2, '0')}</span>
+  )
+}
+
 export default function RollingBall({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
@@ -170,9 +283,122 @@ export default function RollingBall({ balance, setBalance, onBack }) {
   const sub = phase.slice(3)   // bet | draw | settle
   const betting = sub === 'bet'
 
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
+  const audioRef = useRef({ ctx: null, muted: false })
+
   useEffect(() => { balanceRef.current = balance }, [balance])
   useEffect(() => { betRef.current = bet }, [bet])
+  useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
+
+  // ---------- SFX（WebAudio 已验配方；muted 门控，短音无持续底噪无掩蔽坑）----------
+  function ensureAudio() {
+    if (audioRef.current.ctx) return audioRef.current.ctx
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
+    audioRef.current.ctx = ctx; return ctx
+  }
+  const probe = name => {
+    if (import.meta.env.DEV) console.debug(`[RB-SFX] ${name} fired ctx=${audioRef.current.ctx?.state ?? 'null'} muted=${audioRef.current.muted}`)
+  }
+  function sfxTick() {   // 落球 tick：短 blip（每球定格一响，canvas 落地帧内触发）
+    const ctx = ensureAudio(); probe('tick'); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const o = ctx.createOscillator(); o.type = 'sine'
+    o.frequency.setValueAtTime(520, t); o.frequency.exponentialRampToValueAtTime(700, t + 0.05)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09)
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.1)
+  }
+  function sfxHit() {   // 命中提示：上扬三连音（本球有中注时）
+    const ctx = ensureAudio(); probe('hit'); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    ;[660, 880, 1170].forEach((f, i) => {
+      const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f
+      const s = t + i * 0.08
+      g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.09, s + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.26)
+      o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.28)
+    })
+  }
+  function sfxFinal() {   // 三球齐终场哨：短哨两响（次响拉长）
+    const ctx = ensureAudio(); probe('final'); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    ;[[0, 0.14], [0.2, 0.3]].forEach(([off, len]) => {
+      const o = ctx.createOscillator(); o.type = 'square'
+      o.frequency.setValueAtTime(2050, t + off); o.frequency.linearRampToValueAtTime(2400, t + off + len)
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(0.0001, t + off); g.gain.exponentialRampToValueAtTime(0.04, t + off + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + off + len)
+      o.connect(g); g.connect(ctx.destination); o.start(t + off); o.stop(t + off + len + 0.02)
+    })
+  }
+  const stageSfx = { tick: sfxTick }
+
+  // 场馆环境底噪（betting 期持续，观众嗡嗡＝带通白噪，音量压极低）；WebAudio 循环缓冲，
+  // 非 rAF（不新增第二环）；draw 瞬间由 effect 切掉。ambientRef 守幂等，muted 门控。
+  const ambientRef = useRef(null)
+  function stopAmbient() {
+    const a = ambientRef.current; if (!a) return
+    ambientRef.current = null
+    const ctx = audioRef.current.ctx; if (!ctx) return
+    const t = ctx.currentTime
+    try {
+      a.g.gain.cancelScheduledValues(t)
+      a.g.gain.setValueAtTime(Math.max(0.0001, a.g.gain.value), t)
+      a.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15)
+      a.src.stop(t + 0.2)
+    } catch { /* 已停 */ }
+    if (import.meta.env.DEV) console.debug('[RB-SFX] ambient stop')
+  }
+  function startAmbient() {
+    stopAmbient()
+    const ctx = ensureAudio(); if (!ctx || audioRef.current.muted) return
+    const t = ctx.currentTime
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 2), ctx.sampleRate)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
+    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 300; f.Q.value = 0.5
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.016, t + 0.6)   // 淡入到极低量
+    src.connect(f); f.connect(g); g.connect(ctx.destination); src.start(t)
+    ambientRef.current = { src, g }
+    if (import.meta.env.DEV) console.debug('[RB-SFX] ambient start')
+  }
+  // 心跳加速序列：末 5s 一次性按 ctx.currentTime 预排渐快 lub-dub（间隔 0.62→0.26s）
+  function sfxHeartbeatSeq(cdTicks) {
+    const ctx = ensureAudio(); probe('heartbeat'); if (!ctx || audioRef.current.muted) return
+    const t0 = ctx.currentTime, secs = cdTicks / 2
+    let t = t0, gap = 0.62, n = 0
+    while (t < t0 + secs && n < 12) {
+      ;[0, 0.13].forEach(off => {   // lub-dub
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(off ? 70 : 92, t + off)
+        const g = ctx.createGain()
+        g.gain.setValueAtTime(0.0001, t + off); g.gain.exponentialRampToValueAtTime(0.09, t + off + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + off + 0.16)
+        o.connect(g); g.connect(ctx.destination); o.start(t + off); o.stop(t + off + 0.18)
+      })
+      n++; t += gap; gap = Math.max(0.26, gap * 0.86)
+    }
+    if (import.meta.env.DEV) console.debug(`[RB-SFX] heartbeat seq beats=${n}`)
+  }
+
+  // betting 期底噪启停（sub/muted 驱动；StrictMode 双挂载由 cleanup + 幂等 start 兜底，
+  // 非 rAF 无第二环）；心跳末 5s 一次性预排（hbRef 守单发防双发）
+  const hbRef = useRef(false)
+  useEffect(() => {
+    if (sub === 'bet' && !muted) startAmbient(); else stopAmbient()
+    return stopAmbient
+    // startAmbient/stopAmbient 走 refs，仅随 sub/muted 变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sub, muted])
+  useEffect(() => { hbRef.current = false }, [ballIdx, sub])   // 每球押注窗重置
+  useEffect(() => {
+    if (sub === 'bet' && countdown <= 10 && countdown > 0 && !hbRef.current) {
+      hbRef.current = true
+      sfxHeartbeatSeq(countdown)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countdown, sub])
 
   function pushToast(label, win) {
     const id = ++toastIdRef.current
@@ -189,8 +415,9 @@ export default function RollingBall({ balance, setBalance, onBack }) {
     betsRef.current.forEach(({ stake, odds }, key) => {
       if (hitOf(key, n)) { win = round2(win + stake * odds); hits.add(key) }
     })
-    if (win > 0) { setBalance(b => round2(b + win)); pushToast(`第${idx + 1}球命中`, win) }
+    if (win > 0) { setBalance(b => round2(b + win)); pushToast(`第${idx + 1}球命中`, win); sfxHit() }
     setResult({ idx, ball: n, hits, win })
+    if (idx === 2) sfxFinal()   // 三球齐 → 终场哨
     if (idx === 0) setRoad(r => [...r, n >= 38 ? '大' : '小'].slice(-ROAD_CAP))
   }
 
@@ -330,7 +557,7 @@ export default function RollingBall({ balance, setBalance, onBack }) {
         style={{ ...cellBase(slot, bg), padding: '4px 2px' }}>
         <span style={{ ...cellName, fontSize: 12 }}>{name}</span>
         {range ? <span style={{ ...cellRange, fontSize: 8 }}>{range}</span> : null}
-        <span style={cellOdds}>{oddsStr(slot)}</span>
+        <span key={oddsStr(slot)} className="rbOdds" style={cellOdds}>{oddsStr(slot)}</span>
         {stakeChip(slot)}
       </button>
     ) : rowCell(slot, name, range, bg)
@@ -344,23 +571,34 @@ export default function RollingBall({ balance, setBalance, onBack }) {
       }}>
       <span style={cellName}>{name}</span>
       {range ? <span style={{ ...cellRange, flex: 1, textAlign: 'center' }}>{range}</span> : <span style={{ flex: 1 }} />}
-      <span style={cellOdds}>{oddsStr(slot)}</span>
+      <span key={oddsStr(slot)} className="rbOdds" style={cellOdds}>{oddsStr(slot)}</span>
       {stakeChip(slot)}
     </button>
   )
 
   // ---- 顶栏 ----
+  const lowTime = betting && countdown <= 10   // 末 5s 催注（数字变红放大）
+  const secs = String(Math.ceil(countdown / 2)).padStart(2, '0')
   const phaseInfo = betting
-    ? { text: `⏱ 押注 第${ballIdx + 1}球 00:${String(Math.ceil(countdown / 2)).padStart(2, '0')}`, c: DERBY.sel }
+    ? { text: `⏱ 押注 第${ballIdx + 1}球 00:`, c: lowTime ? DERBY.away : DERBY.sel }
     : sub === 'draw'
       ? { text: `第${ballIdx + 1}球开球中…`, c: DERBY.orange }
       : { text: result ? `第${ballIdx + 1}球 ${String(result.ball).padStart(2, '0')}${result.win > 0 ? ` +$${result.win.toFixed(2)}` : ''}` : '已开', c: DERBY.gold }
   const phaseChipNode = (
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
-      background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseInfo.c}`,
+      background: lowTime ? 'rgba(226,86,74,0.18)' : 'rgba(0,0,0,0.35)', border: `1px solid ${phaseInfo.c}`,
       color: phaseInfo.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
-    }}>{phaseInfo.text}</span>
+    }}>
+      {phaseInfo.text}
+      {betting && (
+        <span data-cd style={lowTime ? {
+          display: 'inline-block', color: DERBY.away, fontSize: 15,
+          fontFamily: "'Space Grotesk', sans-serif",
+          animation: 'rbPulse 0.5s ease-in-out infinite',
+        } : { fontFamily: "'Space Grotesk', sans-serif" }}>{secs}</span>
+      )}
+    </span>
   )
   const topBar = (
     <GameTopBar gameName="ROLLING BALL" venue={VENUE}
@@ -384,28 +622,58 @@ export default function RollingBall({ balance, setBalance, onBack }) {
         <span style={{ color: sub === 'draw' ? DERBY.orange : DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>
           {betting ? `押注 · 第${ballIdx + 1}球` : sub === 'draw' ? '开球中' : `第${ballIdx + 1}球已开`}
         </span>
-        <span style={{
-          width: isMobile ? 56 : 66, height: isMobile ? 56 : 66, borderRadius: '50%',
-          background: curNum != null ? (isRed(curNum) ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.08)',
-          border: `2px ${curNum != null ? 'solid' : 'dashed'} ${curNum != null ? DERBY.gold : 'rgba(255,255,255,0.3)'}`,
-          boxShadow: curNum != null ? '0 0 14px rgba(255,213,79,0.45), inset 0 2px 3px rgba(255,255,255,0.28)' : 'none',
-          color: curNum != null ? COLORS.white : DERBY.dim, fontSize: isMobile ? 26 : 30, fontWeight: 900,
-          fontFamily: "'Space Grotesk', sans-serif",
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}>{curNum != null ? String(curNum).padStart(2, '0') : '?'}</span>
+        {sub === 'draw' && pendingRef.current ? (
+          // draw 相位：canvas 滚球定格（1-75 快闪 → 真值），末球慢放
+          <RollStage key={`${roundNo}-roll-${ballIdx}`} target={pendingRef.current[ballIdx]}
+            isLast={ballIdx === 2} size={isMobile ? 56 : 66} sfx={stageSfx} />
+        ) : betting ? (
+          // betting 期：暖场号码快跳（障眼动效，非 rAF；真值仍锁 pendingRef）
+          <BettingBall size={isMobile ? 56 : 66} />
+        ) : (
+          <span style={{
+            width: isMobile ? 56 : 66, height: isMobile ? 56 : 66, borderRadius: '50%',
+            background: curNum != null ? (isRed(curNum) ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.08)',
+            border: `2px ${curNum != null ? 'solid' : 'dashed'} ${curNum != null ? DERBY.gold : 'rgba(255,255,255,0.3)'}`,
+            boxShadow: curNum != null ? '0 0 14px rgba(255,213,79,0.45), inset 0 2px 3px rgba(255,255,255,0.28)' : 'none',
+            color: curNum != null ? COLORS.white : DERBY.dim, fontSize: isMobile ? 26 : 30, fontWeight: 900,
+            fontFamily: "'Space Grotesk', sans-serif",
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}>{curNum != null ? String(curNum).padStart(2, '0') : '?'}</span>
+        )}
         <span style={{ color: DERBY.gold, fontSize: 10, fontWeight: 900, minHeight: 13 }}>
-          {curNum != null ? `${isRed(curNum) ? '红' : '蓝'} · ${curNum >= 38 ? '大' : '小'} · ${curNum % 2 ? '单' : '双'}` : ''}
+          {/* 滚号中不剧透属性，定格（settle）后才显示 */}
+          {sub === 'settle' && curNum != null ? `${isRed(curNum) ? '红' : '蓝'} · ${curNum >= 38 ? '大' : '小'} · ${curNum % 2 ? '单' : '双'}` : ''}
         </span>
       </div>
+      {/* 属性亮牌：定格后弹出该球 大小/红蓝 牌（scale 弹簧 + 1.5s 淡出，CSS 无 rAF） */}
+      {sub === 'settle' && curNum != null && (
+        <div key={`card-${roundNo}-${ballIdx}`} style={{
+          position: 'absolute', top: 2, left: '50%', zIndex: 3,
+          display: 'flex', gap: 4, animation: 'rbCardPop 1.5s ease-out forwards', pointerEvents: 'none',
+        }}>
+          {[
+            { t: curNum >= 38 ? '大' : '小', c: DERBY.grey },
+            { t: isRed(curNum) ? '红' : '蓝', c: isRed(curNum) ? DERBY.away : DERBY.home },
+          ].map((b, i) => (
+            <span key={i} style={{
+              padding: '3px 12px', borderRadius: RADIUS.pill,
+              background: b.c, border: `1.5px solid ${DERBY.gold}`,
+              color: COLORS.white, fontSize: 13, fontWeight: 900,
+              boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
+            }}>{b.t}</span>
+          ))}
+        </div>
+      )}
       {/* 3 球槽（本局逐球揭示） */}
       <div style={{ display: 'flex', gap: isMobile ? 8 : 14, alignItems: 'flex-start' }}>
         {[0, 1, 2].map(i => {
-          const lit = i < revealedCount
-          const n = drawnBalls[i]
+          // 球槽定格才亮：当前球 draw 相位滚号未定 → 槽仍暗，settle 时点亮
+          const lit = i < ballIdx || (i === ballIdx && sub === 'settle')
+          const n = pendingRef.current ? pendingRef.current[i] : undefined
           return (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flex: '0 0 auto' }}>
               <span style={{ color: i === ballIdx ? DERBY.gold : DERBY.dim, fontSize: 9, fontWeight: 900 }}>第 {i + 1} 球</span>
-              <span data-slot={i} style={{
+              <span data-slot={i} key={lit ? 'lit' : 'dim'} style={{
                 width: slotSz, height: slotSz, borderRadius: '50%',
                 background: lit ? (isRed(n) ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.08)',
                 border: lit ? `2px solid ${DERBY.gold}` : `1px dashed ${i === ballIdx ? DERBY.sel : 'rgba(255,255,255,0.3)'}`,
@@ -413,6 +681,7 @@ export default function RollingBall({ balance, setBalance, onBack }) {
                 color: lit ? COLORS.white : DERBY.dim, fontSize: slotSz * 0.38, fontWeight: 900,
                 fontFamily: "'Space Grotesk', sans-serif",
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+                animation: lit ? 'rbSlotIn 0.35s ease-out' : 'none',   // 已开号飞入微动效
               }}>{lit ? String(n).padStart(2, '0') : '?'}</span>
             </div>
           )
@@ -451,6 +720,13 @@ export default function RollingBall({ balance, setBalance, onBack }) {
           }}>第{i + 1}球{done && drawnBalls[i] != null ? ` ${String(drawnBalls[i]).padStart(2, '0')}` : active ? ' ◀ 押注中' : ''}</span>
         )
       })}
+      {/* 剩余池收缩可视化：75→74→73 每球定后跳动（key 由值驱动，CSS 无 rAF） */}
+      <span style={{
+        marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '3px 10px', borderRadius: RADIUS.pill,
+        background: 'rgba(0,0,0,0.35)', border: `1px solid ${DERBY.gold}`,
+        color: DERBY.gold, fontSize: 10, fontWeight: 900, whiteSpace: 'nowrap',
+      }}>剩余池 <span key={75 - ballIdx} style={{ display: 'inline-block', animation: 'rbPoolBump 0.4s ease-out', fontFamily: "'Space Grotesk', sans-serif", fontSize: 12 }}>{75 - ballIdx}</span></span>
       {ballIdx > 0 && (
         <span style={{ color: DERBY.orange, fontSize: 9, fontWeight: 800, whiteSpace: 'nowrap' }}>
           赔率已按剩余池重算
@@ -500,7 +776,7 @@ export default function RollingBall({ balance, setBalance, onBack }) {
   const numCols = isDesk ? 15 : 5
   const numBoard = (
     <div style={secBox}>
-      <div style={secHead}>单号直选 · {numCols}×{75 / numCols}（{oddsStr(`num-1`)}）</div>
+      <div style={secHead}>单号直选 · {numCols}×{75 / numCols}（<span key={oddsStr(`num-1`)} className="rbOdds">{oddsStr(`num-1`)}</span>）</div>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numCols}, 1fr)`, gap: isMobile ? 3 : 4 }}>
         {Array.from({ length: 75 }, (_, i) => {
           const n = i + 1
@@ -560,7 +836,28 @@ export default function RollingBall({ balance, setBalance, onBack }) {
       display: 'flex', flexDirection: 'column',
       ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
     }}>
-      <style>{`.rbCell:hover:not(:disabled) { filter: brightness(1.2); }`}</style>
+      <style>{`
+        .rbCell:hover:not(:disabled) { filter: brightness(1.2); }
+        /* 属性亮牌：scale 弹簧入 → 停留 → 1.5s 后淡出（单次，CSS 无 rAF） */
+        @keyframes rbCardPop {
+          0% { transform: translateX(-50%) scale(0.3); opacity: 0; }
+          14% { transform: translateX(-50%) scale(1.18); opacity: 1; }
+          24% { transform: translateX(-50%) scale(1); opacity: 1; }
+          80% { transform: translateX(-50%) scale(1); opacity: 1; }
+          100% { transform: translateX(-50%) scale(0.96); opacity: 0; }
+        }
+        /* 剩余池数字跳动 */
+        @keyframes rbPoolBump { 0% { transform: scale(1.4); color: ${DERBY.gold}; } 100% { transform: scale(1); } }
+        /* 下球赔率黄闪一下再落定 */
+        @keyframes rbOddsFlash { 0%, 35% { filter: brightness(2); text-shadow: 0 0 6px currentColor; } 100% { filter: none; text-shadow: none; } }
+        .rbOdds { display: inline-block; animation: rbOddsFlash 0.6s ease-out; }
+        /* 已开号飞走微动效（当前球定格后本球槽一跳） */
+        @keyframes rbSlotIn { 0% { transform: translateY(-8px) scale(0.7); opacity: 0.3; } 100% { transform: none; opacity: 1; } }
+        /* 末 5s 倒计时数字放大脉冲催注 */
+        @keyframes rbPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+        /* betting 暖场球轻晃 */
+        @keyframes rbBetBounce { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.04); } }
+      `}</style>
       {topBar}
       {drawZone}
       <div style={{
