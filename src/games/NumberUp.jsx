@@ -622,6 +622,36 @@ export default function NumberUp({ balance, setBalance, onBack }) {
     </div>
   )
 
+  // ---- 开奖区（常驻顶部）：REVEAL/SETTLED 换人牌舞台 / BETTING 上期开奖静态待命 ----
+  const stageH = isMobile ? 150 : 178
+  const stageZone = (
+    <div style={{
+      flex: '0 0 auto', position: 'relative', zIndex: 1,
+      margin: isMobile ? '8px 12px 0' : '10px 18px 0',
+      background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box', minHeight: stageH,
+    }}>
+      {gamePhase !== 'betting' && pendingRef.current ? (
+        <BoardStage key={roundNo} num={pendingRef.current.num}
+          height={stageH}
+          shakeRef={cardShakeRef} sfx={stageSfx}
+          onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
+      ) : (
+        <div style={{
+          height: stageH, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 10, boxSizing: 'border-box',
+        }}>
+          <span style={{ color: NUMBERUP.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>上期开奖 · 待命中</span>
+          <NumberCard num={lastNum.num} w={isMobile ? 44 : 52} />
+          <span style={{
+            padding: '2px 14px', borderRadius: RADIUS.pill,
+            background: NUMBERUP.gold, color: '#3a2c00', fontSize: 13, fontWeight: 900, whiteSpace: 'nowrap',
+          }}>NUMBER {pad2(lastNum.num)}</span>
+        </div>
+      )}
+    </div>
+  )
+
   const gameCard = (
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${NUMBERUP.bgCenter}, ${NUMBERUP.bgOuter})`,
@@ -635,13 +665,15 @@ export default function NumberUp({ balance, setBalance, onBack }) {
       {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
       {topBar}
 
+      {/* ---- ① 开奖区（常驻顶部）---- */}
+      {stageZone}
 
-      {/* ---- middle zone: 盘区三行；PICK 网格空间不足时独立纵滚 ---- */}
+      {/* ---- ② 下注区: 盘区三行（可滚）；PICK 网格空间不足时独立纵滚 ---- */}
       <div style={{
-        flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
-        display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        padding: isMobile ? '10px 12px' : '10px 18px', boxSizing: 'border-box',
-        gap: isMobile ? 8 : 8,
+        flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
+        display: 'flex', flexDirection: 'column',
+        padding: isMobile ? '8px 12px' : '8px 18px', boxSizing: 'border-box',
+        gap: 8, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
         {/* 行① PICK 00–49 网格（flex 可收缩 + 内部纵滚兜底） */}
@@ -705,22 +737,12 @@ export default function NumberUp({ balance, setBalance, onBack }) {
         </div>
       </div>
 
-      {/* ---- 换人牌舞台占珠盘路位：REVEAL 表演 / SETTLED 定格，BETTING 换回珠盘路 ---- */}
-      {gamePhase !== 'betting' && pendingRef.current ? (
-        <div style={{
-          flex: '0 0 auto', position: 'relative', zIndex: 1,
-          margin: isMobile ? '0 12px 10px' : '0 18px 10px',
-          background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: 10, overflow: 'hidden',
-        }}>
-          <BoardStage key={roundNo} num={pendingRef.current.num}
-            height={isMobile ? 150 : 178}
-            shakeRef={cardShakeRef} sfx={stageSfx}
-            onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
-        </div>
-      ) : beadRoad}
+      <div style={{ flex: '1 0 auto' }} />
 
-      {/* ---- bottom bet band — pinned，grid 4列×2行（照 Line Up 定案）---- */}
+      {/* ---- ③ 珠盘路（常驻底部）---- */}
+      {beadRoad}
+
+      {/* ---- ④ bottom bet band — pinned，grid 4列×2行（照 Line Up 定案）---- */}
       <div style={{
         flex: '0 0 auto', padding: '6px 12px', background: NUMBERUP.band,
         borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
