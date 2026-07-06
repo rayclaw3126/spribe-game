@@ -45,6 +45,19 @@ const totalRow = side => [
   { slot: `${side}-odd`, name: '单', range: '', odds: '1.92' },
   { slot: `${side}-even`, name: '双', range: '', odds: '1.98' },
 ]
+// 全场总进球 大小单双（占位赔率；X2 定真值）
+const GOALS = [
+  { slot: 'g-big', name: '大', range: '3+', odds: '1.90' },
+  { slot: 'g-small', name: '小', range: '0-2', odds: '1.90' },
+  { slot: 'g-odd', name: '单', range: '', odds: '1.95' },
+  { slot: 'g-even', name: '双', range: '', odds: '1.95' },
+]
+// 正确比分 · 波胆 3列×3行（列=主胜/平/客胜，行序填充，占位高赔）
+const CORRECT = [
+  { slot: 'cs-1-0', score: '1:0', odds: '6.50' }, { slot: 'cs-0-0', score: '0:0', odds: '8.00' }, { slot: 'cs-0-1', score: '0:1', odds: '6.50' },
+  { slot: 'cs-2-1', score: '2:1', odds: '7.50' }, { slot: 'cs-1-1', score: '1:1', odds: '6.00' }, { slot: 'cs-1-2', score: '1:2', odds: '7.50' },
+  { slot: 'cs-3-1', score: '3:1', odds: '12.0' }, { slot: 'cs-2-2', score: '2:2', odds: '15.0' }, { slot: 'cs-1-3', score: '1:3', odds: '18.0' },
+]
 
 // 单张多米诺（竖向：上半 / 分隔线 / 下半，各半画 pip 点）
 function DominoTile({ a, b, size = 34 }) {
@@ -199,6 +212,31 @@ export default function DominoDuel({ balance, onBack }) {
       </div>
     </div>
   )
+  // 全场总进球（竖排 colCell）
+  const goalsBoard = (
+    <div style={secBox}>
+      <div style={secHead}>全场总进球 · 大小单双</div>
+      <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
+        {GOALS.map(m => colCell(m.slot, m.name, m.range, m.odds))}
+      </div>
+    </div>
+  )
+  // 正确比分 · 波胆（网格：比分大字 + 占位高赔竖排）
+  const scoreCell = m => (
+    <button key={m.slot} type="button" className="ddCell" onClick={() => toggleSel(m.slot)}
+      style={{ ...cellBase(m.slot, DERBY.grey), padding: isMobile ? '5px 2px' : '6px 4px', gap: 2 }}>
+      <span style={{ ...cellName, fontFamily: "'Space Grotesk', sans-serif" }}>{m.score}</span>
+      <span style={{ ...cellOdds, whiteSpace: 'nowrap' }}>{m.odds}</span>
+    </button>
+  )
+  const correctBoard = (
+    <div style={secBox}>
+      <div style={secHead}>正确比分 · 波胆</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: isMobile ? 5 : 8 }}>
+        {CORRECT.map(scoreCell)}
+      </div>
+    </div>
+  )
 
   // ---- ③ 珠盘路（主/平/客占位）----
   const ROAD_COLS = 20
@@ -255,6 +293,8 @@ export default function DominoDuel({ balance, onBack }) {
           <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{totalBoard('h', '主队总分', DERBY.grey)}</div>
           <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{totalBoard('a', '客队总分', DERBY.grey)}</div>
         </div>
+        {goalsBoard}
+        {correctBoard}
       </div>
       <div style={{ flex: '1 0 auto' }} />
       {beadRoad}
