@@ -311,6 +311,7 @@ export const HATTRICK = {
   band: '#0b3d1c',      // = KENO.band（顶栏/注栏）
   ctrl: '#11582a',      // = KENO.ctrl（chrome 控件底）
   strip: 'rgba(0,0,0,0.32)',
+  grey: '#1a2230',      // = DERBY.grey，暗灰格底（下注格底）
   face: '#ffffff',      // 骰面白（= COLORS.white）
   pip: '#101923',       // 骰点近黑（= COLORS.panel）
   gold: '#ffd54f',      // 共享金 — 选中金框/赔率字

@@ -800,9 +800,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
     return {
       flex: 1, minWidth: 0, padding: compact ? '4px 2px' : '7px 4px',
       borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
-      background: sel
-        ? HATTRICK.selTint
-        : `linear-gradient(180deg, ${HATTRICK.ctrl}, ${HATTRICK.band})`,
+      background: sel ? HATTRICK.selTint : HATTRICK.grey,
       border: `1px solid ${hit ? HATTRICK.sel : sel || placed ? HATTRICK.gold : 'rgba(255,255,255,0.16)'}`,
       boxShadow: hit
         ? `0 0 12px ${HATTRICK.selTint.replace('0.16', '0.6')}`
@@ -865,7 +863,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
       <button key={key} type="button" className={cellCls(key)} disabled={!betting} onClick={() => toggleSel(key)} style={{
         minWidth: 0, padding: '3px 0',
         borderRadius: 8, cursor: betting ? 'pointer' : 'not-allowed',
-        background: hit ? HATTRICK.sel : sel ? HATTRICK.selTint : `linear-gradient(180deg, ${HATTRICK.ctrl}, ${HATTRICK.band})`,
+        background: hit ? HATTRICK.sel : sel ? HATTRICK.selTint : HATTRICK.grey,
         border: `1px solid ${hit ? HATTRICK.sel : sel || placed ? HATTRICK.gold : 'rgba(255,255,255,0.14)'}`,
         boxShadow: hit ? '0 0 10px rgba(53,208,127,0.7)' : sel ? '0 0 8px rgba(255,213,79,0.5)' : 'none',
         opacity: betting || hit || placed ? 1 : 0.75,
