@@ -4,6 +4,7 @@ import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
+import jwt from 'jsonwebtoken';
 import { WebSocketServer } from 'ws';
 import authRouter from './routes/auth.js';
 import roundRouter from './routes/round.js';
@@ -70,6 +71,29 @@ const PORT = process.env.PORT || 4000;
 // Aviator 的实时通道走 /ws/aviator 这条独立 path，互不干扰。
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws/aviator' });
+
+// WS 握手认证：连接建立时用 query string 里的 token 校验身份，只允许 player 类型连接。
+// 这个 handler 在 startAviatorHub(wss) 之前注册，'connection' 事件的多个监听器按注册顺序
+// 同步依次触发，所以等 hub 内部的 connection handler 跑起来时，ws.playerId 已经挂好。
+// 严禁在任何日志里打印 token 原文，认证失败静默关闭连接。
+wss.on('connection', (ws, req) => {
+  try {
+    const url = new URL(req.url, 'http://localhost');
+    const token = url.searchParams.get('token');
+    const payload = jwt.verify(token, process.env.JWT_SECRET); // 失败抛异常
+    if (payload.type !== 'player') throw new Error('仅玩家可连');
+    ws.playerId = payload.sub;
+    ws.playerName = payload.username;
+  } catch (e) {
+    console.error('[ws] WS 认证失败');
+    try {
+      ws.close(1008, '认证失败');
+    } catch {
+      // 关闭失败无需处理，连接大概率已经异常
+    }
+  }
+});
+
 startAviatorHub(wss);
 
 server.listen(PORT, () => {
