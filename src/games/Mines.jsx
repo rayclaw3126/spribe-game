@@ -12,21 +12,19 @@ import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 // 单M2: Dribble gameplay — adjustable defenders, hypergeometric multipliers,
 // RANDOM/Auto, settlement (Spribe Mines model).
 //
-// 倍数公式（超几何逐步累乘）: 已翻 i 格后再翻一格安全的概率
+// 服务器接后端：有状态多步会话（start/reveal/cashout 三接口）。雷位置由服务器
+// serverSeed 派生，前端在 reveal/cashout 拿到终局结果前完全不知道雷在哪；
+// 每一步都走后端行锁 + 事务，钱只认后端 balanceAfter，本地不再算一分钱。
+//
+// 倍数公式（超几何逐步累乘，前端仅用于预览，不参与结算，算法与后端 mines.js
+// calcMultiplier 逐位一致）: 已翻 i 格后再翻一格安全的概率
 //   P_i = (safe − i) / (25 − i)，safe = 25 − 铲球数。
 //   步倍数 = RTP / P_i（RTP = 0.97），累乘 = Π RTP/P_i = 0.97^k / Π P_i。
-//   内部全精度，显示与结算才 round2。
+//   内部全精度，显示才 round2。
 const GRID = 25  // 5x5
 const RTP = 0.97
 const round2 = x => Math.round(x * 100) / 100
-
-function placeMines(count) {
-  const positions = new Set()
-  while (positions.size < count) {
-    positions.add(Math.floor(Math.random() * GRID))
-  }
-  return positions
-}
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `mines-${Date.now()}-${Math.random()}`)
 
 function calcMultiplier(gems, mines) {
   if (gems <= 0) return 1
@@ -37,7 +35,6 @@ function calcMultiplier(gems, mines) {
 }
 
 const MINE_COUNTS = Array.from({ length: 24 }, (_, i) => i + 1)   // Defenders 1–24
-const pickRandomFrom = arr => arr[Math.floor(Math.random() * arr.length)]
 
 // white block-face football (opened-safe cell icon)
 function Football({ size = 22, tone = '#ffffff', ink = '#3a2c00' }) {
@@ -69,31 +66,41 @@ function BallLineArt({ size }) {
   )
 }
 
-export default function Mines({ balance, setBalance, onBack }) {
+export default function Mines({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
   const [mineCount, setMineCount] = useState(3)
   const [defOpen, setDefOpen] = useState(false)
   const [phase, setPhase] = useState('idle')  // idle | playing | done
-  const [mineSet, setMineSet] = useState(null)
-  const [revealed, setRevealed] = useState([])
+  const [roundId, setRoundId] = useState(null)
+  const [minesRevealed, setMinesRevealed] = useState(null)   // 雷位置：只有局结束后才知道
+  const [revealed, setRevealed] = useState([])                // 已安全揭开的格
   const [exploded, setExploded] = useState(null)
+  const [busy, setBusy] = useState(false)       // await 期间禁重复点
   const [autoOn, setAutoOn] = useState(false)
   const [roundHistory, setRoundHistory] = useState([])   // final mult per round, newest first
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [cashedOut, setCashedOut] = useState(false)
+  const [proof, setProof] = useState(null)      // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
+  const [toastMsg, setToastMsg] = useState('')
   const [, setShaking] = useState(false)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   const audioRef = useRef({ ctx: null, muted: false })
   const shakeTimer = useRef(null)
+  const toastTimer = useRef(null)
 
-  // safe reveals only (after bust/cashout `revealed` also holds the mines)
-  const gems = revealed.filter(i => !mineSet?.has(i)).length
+  const gems = revealed.length
   const currentMult = calcMultiplier(gems, mineCount)
   const nextMult = calcMultiplier(gems + 1, mineCount)
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
+
+  function pushToast(msg) {
+    setToastMsg(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToastMsg(''), 3000)
+  }
 
   // ---------- audio (Web Audio synth) ----------
   function ensureAudio() {
@@ -141,7 +148,10 @@ export default function Mines({ balance, setBalance, onBack }) {
     })
   }
 
-  useEffect(() => () => { if (shakeTimer.current) clearTimeout(shakeTimer.current) }, [])
+  useEffect(() => () => {
+    if (shakeTimer.current) clearTimeout(shakeTimer.current)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+  }, [])
 
   function triggerShake() {
     setShaking(true)
@@ -149,79 +159,127 @@ export default function Mines({ balance, setBalance, onBack }) {
     shakeTimer.current = setTimeout(() => setShaking(false), 420)
   }
 
-  // ---------- game ----------
-  // single money path: every round ends here exactly once
-  function settleMoney(mult) {
-    const payout = round2(bet * mult)
-    if (payout > 0) setBalance(b => round2(b + payout))
-    setRoundHistory(h => [round2(mult), ...h].slice(0, 20))
-    // fake feed rows settle for the round: ~45% cash green, the rest grey out
+  // ---------- game (服务器权威：所有钱/雷位置以后端返回为准) ----------
+  async function apiPost(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) {
+      const err = new Error(data?.error || '请求失败，请重试')
+      err.data = data
+      throw err
+    }
+    return data
+  }
+
+  // 单局结束的收尾：写历史条 + 假 feed 结算（展示用），phase 置 done
+  function finishRound(finalMult) {
+    setRoundHistory(h => [round2(finalMult), ...h].slice(0, 20))
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
       : { ...b, status: 'crashed' }))
     setPhase('done')
   }
 
-  function startGame() {
-    if (phase === 'playing' || bet > balance || bet < 1) return
+  async function startGame() {
+    if (phase === 'playing' || busy || bet > (serverBalance ?? 0) || bet < 1) return
     ensureAudio()
-    setBalance(b => round2(b - bet))
-    setMineSet(placeMines(mineCount))
-    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only; after the mines draw)
-    setRevealed([])
-    setExploded(null)
-    setCashedOut(false)
-    setPhase('playing')
-  }
-
-  function revealCell(idx) {
-    if (phase !== 'playing' || revealed.includes(idx) || cashedOut) return
-    if (mineSet.has(idx)) {
-      setExploded(idx)
-      // 揭全盘: show every defender
-      setRevealed(prev => [...new Set([...prev, idx, ...mineSet])])
-      settleMoney(0)
-      playTackle()
-      triggerShake()
-    } else {
-      const newRevealed = [...revealed, idx]
-      setRevealed(newRevealed)
-      const newGems = newRevealed.length
-      const safe = GRID - mineCount
-      if (newGems >= safe) {   // 翻满全部安全格自动结算
-        settleMoney(calcMultiplier(newGems, mineCount))
-        setRevealed(prev => [...new Set([...prev, ...mineSet])])
-        playWin()
-      } else {
-        playGem()
-      }
+    setBusy(true)
+    try {
+      const idempotencyKey = genIdemKey()
+      const data = await apiPost('/round/mines/start', {
+        amount: bet, mines: mineCount, idempotencyKey,
+      })
+      setRoundId(data.roundId)
+      setServerBalance(Number(data.balanceAfter))
+      setProof({ commitHash: data.commitHash })
+      setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
+      setRevealed([])
+      setMinesRevealed(null)
+      setExploded(null)
+      setCashedOut(false)
+      setPhase('playing')
+    } catch (err) {
+      pushToast(err.message)
+    } finally {
+      setBusy(false)
     }
   }
 
-  function cashOut() {   // 任意步可兑 = 注金 × 累乘
-    if (phase !== 'playing' || cashedOut) return
-    setCashedOut(true)
-    settleMoney(currentMult)
-    setRevealed(prev => [...new Set([...prev, ...mineSet])])
-    playCash()
+  async function revealCell(idx) {
+    if (phase !== 'playing' || busy || revealed.includes(idx) || cashedOut) return
+    setBusy(true)
+    try {
+      const data = await apiPost('/round/mines/reveal', { roundId, cell: idx })
+      if (!data.safe) {
+        // 踩雷：服务器此刻才 reveal 雷位置 + seed
+        setExploded(idx)
+        setMinesRevealed(data.mines)
+        setRevealed(prev => [...new Set([...prev, idx, ...data.mines])])
+        setProof(p => ({ ...p, serverSeed: data.serverSeed, clientSeed: data.clientSeed }))
+        finishRound(0)
+        playTackle()
+        triggerShake()
+      } else {
+        const newRevealed = [...revealed, idx]
+        setRevealed(newRevealed)
+        if (data.cleared) {
+          // 揭满全部安全格：自动结算赢，服务器同时 reveal 雷位置
+          setMinesRevealed(data.mines)
+          setRevealed(prev => [...new Set([...prev, ...data.mines])])
+          setServerBalance(Number(data.balanceAfter))
+          setProof(p => ({ ...p, serverSeed: data.serverSeed }))
+          finishRound(data.mult)
+          playWin()
+        } else {
+          playGem()
+        }
+      }
+    } catch (err) {
+      pushToast(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function cashOut() {
+    if (phase !== 'playing' || busy || cashedOut) return
+    setBusy(true)
+    try {
+      const data = await apiPost('/round/mines/cashout', { roundId })
+      setCashedOut(true)
+      setMinesRevealed(data.mines)
+      setRevealed(prev => [...new Set([...prev, ...data.mines])])
+      setServerBalance(Number(data.balanceAfter))
+      setProof(p => ({ ...p, serverSeed: data.serverSeed, clientSeed: data.clientSeed }))
+      finishRound(data.mult)
+      playCash()
+    } catch (err) {
+      pushToast(err.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   function randomPick() {   // 随机点一个未翻格
-    if (phase !== 'playing' || cashedOut) return
+    if (phase !== 'playing' || busy || cashedOut) return
     const candidates = Array.from({ length: GRID }, (_, i) => i).filter(i => !revealed.includes(i))
-    if (candidates.length) revealCell(pickRandomFrom(candidates))
+    if (candidates.length) revealCell(candidates[Math.floor(Math.random() * candidates.length)])
   }
 
   // Auto Game: one random step every 600ms until bust / clear / toggled off
   useEffect(() => {
-    if (!autoOn || phase !== 'playing') return
+    if (!autoOn || phase !== 'playing' || busy) return
     const id = setTimeout(() => {
       const candidates = Array.from({ length: GRID }, (_, i) => i).filter(i => !revealed.includes(i))
-      if (candidates.length) revealCell(pickRandomFrom(candidates))
+      if (candidates.length) revealCell(candidates[Math.floor(Math.random() * candidates.length)])
     }, 600)
     return () => clearTimeout(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoOn, phase, revealed])
+  }, [autoOn, phase, revealed, busy])
 
   // ---------- visual layer (Spribe Mines 1:1, pitch green) ----------
   const circleBtn = {
@@ -331,6 +389,15 @@ export default function Mines({ balance, setBalance, onBack }) {
           padding: isMobile ? '12px 12px' : '14px 18px', boxSizing: 'border-box',
         }}>
 
+        {toastMsg && (
+          <div style={{
+            position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 10, padding: '6px 14px', borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.65)', color: '#ff8a8a',
+            fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap',
+          }}>{toastMsg}</div>
+        )}
+
         {/* ---- second row: Defenders selector + Next + progress strip ---- */}
         <div style={{ width: isMobile ? '100%' : 420, maxWidth: '100%', margin: '0 auto 10px', position: 'relative', zIndex: 3 }}>
           <div style={{
@@ -386,9 +453,9 @@ export default function Mines({ balance, setBalance, onBack }) {
         }}>
           {Array.from({ length: GRID }).map((_, i) => {
             const isRev = revealed.includes(i)
-            const isMine = mineSet?.has(i)
+            const isMine = minesRevealed?.includes(i) ?? false
             const kind = isRev ? (isMine ? (i === exploded ? 'boom' : 'tackle') : 'gold') : 'hidden'
-            const clickable = phase === 'playing' && !isRev && !cashedOut
+            const clickable = phase === 'playing' && !isRev && !cashedOut && !busy
             return (
               <button key={i} type="button" disabled={!clickable}
                 onClick={() => clickable && revealCell(i)}
@@ -412,19 +479,19 @@ export default function Mines({ balance, setBalance, onBack }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
           position: 'relative', zIndex: 1,
         }}>
-          <button type="button" disabled={phase !== 'playing'} onClick={randomPick} style={{
+          <button type="button" disabled={phase !== 'playing' || busy} onClick={randomPick} style={{
             flex: 1, maxWidth: 200, padding: '7px 0', borderRadius: RADIUS.pill,
             background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.55)',
             color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 1,
-            cursor: phase === 'playing' ? 'pointer' : 'not-allowed',
-            opacity: phase === 'playing' ? 1 : 0.6,
+            cursor: phase === 'playing' && !busy ? 'pointer' : 'not-allowed',
+            opacity: phase === 'playing' && !busy ? 1 : 0.6,
           }}>RANDOM</button>
-          <button type="button" disabled={phase !== 'playing'} onClick={randomPick} style={{
+          <button type="button" disabled={phase !== 'playing' || busy} onClick={randomPick} style={{
             width: 32, height: 32, borderRadius: RADIUS.pill,
             background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.4)',
             color: COLORS.white, fontSize: 14, fontWeight: 900,
-            cursor: phase === 'playing' ? 'pointer' : 'not-allowed',
-            opacity: phase === 'playing' ? 1 : 0.6,
+            cursor: phase === 'playing' && !busy ? 'pointer' : 'not-allowed',
+            opacity: phase === 'playing' && !busy ? 1 : 0.6,
           }}>⟳</button>
           <button type="button" onClick={() => setAutoOn(v => !v)} style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -444,6 +511,17 @@ export default function Mines({ balance, setBalance, onBack }) {
             <span style={{ color: autoOn ? COLORS.white : 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 800 }}>Auto Game</span>
           </button>
         </div>
+
+        {/* ---- 可验证公平：显示上一局的 serverSeed + commit hash，玩家可用
+             clientSeed/nonce/serverSeed 自行重算校验雷位置未被篡改 ---- */}
+        {proof && (proof.serverSeed || proof.commitHash) && (
+          <div style={{
+            textAlign: 'center', marginTop: 8, fontSize: 10, fontWeight: 600,
+            color: 'rgba(255,255,255,0.5)', wordBreak: 'break-all', position: 'relative', zIndex: 1,
+          }}>
+            可验证 · {proof.serverSeed ? `serverSeed: ${proof.serverSeed.slice(0, 16)}… · ` : ''}hash: {(proof.commitHash || '').slice(0, 16)}…
+          </div>
+        )}
 
         </div>{/* /middle zone */}
 
@@ -489,25 +567,25 @@ export default function Mines({ balance, setBalance, onBack }) {
             fontSize: 17, fontWeight: 900, cursor: 'not-allowed',
           }}>⟳</button>
           {phase === 'playing' ? (
-            <button type="button" onClick={cashOut} style={{
+            <button type="button" disabled={busy} onClick={cashOut} style={{
               minWidth: isMobile ? 170 : 230, padding: '7px 0', borderRadius: RADIUS.pill,
               background: MINES.cash, color: '#3a2c00',
               border: '1px solid rgba(255,255,255,0.4)',
               fontSize: 13, fontWeight: 900, letterSpacing: 0.5, lineHeight: 1.3,
-              cursor: 'pointer',
+              cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1,
               display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
             }}>
               <span>CASH OUT</span>
               <span style={{ fontSize: 12, opacity: 0.9 }}>{round2(bet * currentMult).toFixed(2)} USD</span>
             </button>
           ) : (
-            <button type="button" onClick={startGame} disabled={bet > balance || bet < 1} style={{
+            <button type="button" onClick={startGame} disabled={busy || bet > (serverBalance ?? 0) || bet < 1} style={{
               minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
               background: '#4a9b16', color: COLORS.white,
               border: '1px solid rgba(255,255,255,0.35)',
               fontSize: 14, fontWeight: 900, letterSpacing: 1,
-              cursor: bet > balance || bet < 1 ? 'not-allowed' : 'pointer',
-              opacity: bet > balance || bet < 1 ? 0.55 : 1,
+              cursor: busy || bet > (serverBalance ?? 0) || bet < 1 ? 'not-allowed' : 'pointer',
+              opacity: busy || bet > (serverBalance ?? 0) || bet < 1 ? 0.55 : 1,
             }}>▷ BET</button>
           )}
         </div>
@@ -530,7 +608,7 @@ export default function Mines({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Dribble</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 
