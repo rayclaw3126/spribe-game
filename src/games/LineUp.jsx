@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 import cardRedImg from '../assets/shared/card_red.png'
 import cardYellowImg from '../assets/shared/card_yellow.png'
 
@@ -110,8 +111,32 @@ const ANIM_GAP = 125      // 落格间隔（24×125+250 ≈ 3.25s 落完）
 const ANIM_FLASH = 320    // 落定前 0-9 快闪滚数窗口（80ms/帧 ≈ 4 帧）
 const ANIM_POP = 120      // 落格轻弹时长
 const ANIM_SLAM = 3600    // TOTAL 放大砸出时刻
-const VENUE = 'SAPPHIRE PARK'          // 架空场馆名（禁真实球场名）
+const VENUE = '蓝宝石球场'              // 架空场馆名（禁真实球场名）
 const ROUND_DATE = 'SP20260705'
+
+// 玩法说明文案（中文；盘口数字照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每期开出 25 个数字（0–9），排成 5×5 的方格。每个数字既是一张牌（红牌或黄牌），也参与各行和总和的计算。你可以押总盘或单独某一行的盘口。开球前下注，开奖后命中的盘口按赔率赔付。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 大 / 小：25 格总和，以 112 为界，大[≥113] / 小[≤112]，约 1.95 倍。\n· 单 / 双：按总和判定，约 1.95 倍。\n· 红牌多 / 黄牌多：数字 0,2,6,7,8 为红牌、1,3,4,5,9 为黄牌，哪种多押哪边，约 1.95 倍。\n· 高 / 低：数字 5-9 为高、0-4 为低，哪种多押哪边，约 1.95 倍。\n· 段位：按总和落在四个区间 —— 降级区[≤95] / 中游[96-112] / 欧战区[113-129] / 夺冠[≥130]，两端约 8 倍、中间约 2.5 倍。\n· 行式盘：单独押某一行（L1 锋线到 L5 后卫）的大小/单双/红黄，约 1.95 倍。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '25 个数字开出后计算各行和总和，命中的盘口立即结算，赔付直接入余额。每期独立，上期不影响下期。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。切换「全局 / L1-L5」维度选行式盘。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双红黄，中奖率约一半；想搏大赔押段位两端（降级 / 夺冠）。\n· 行式盘让你聚焦单行走势，玩法更细。\n· 本游戏理论返还率约 95%，属娱乐性质，理性游戏。',
+  },
+]
 const ROAD_CAP = 120
 const ROW_LABELS = ['锋线', '前腰', '中场', '后腰', '后卫']   // L1-L5
 
@@ -251,6 +276,7 @@ export default function LineUp({ balance, setBalance, onBack }) {
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [view, setView] = useState('A')       // 投注盘视图：A 列表 / B 矩阵
@@ -496,11 +522,12 @@ export default function LineUp({ balance, setBalance, onBack }) {
   )
   const topBar = (
     <GameTopBar
-      gameName="LINE UP"
+      gameName="首发阵容"
       venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
       phaseChip={phaseChipNode}
       onBack={onBack}
+      onHowTo={() => setRulesOpen(true)}
     />
   )
 
@@ -887,7 +914,7 @@ export default function LineUp({ balance, setBalance, onBack }) {
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input
               value={bet}
               disabled={!betting}
@@ -920,6 +947,8 @@ export default function LineUp({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="首发阵容 玩法说明" sections={RULES} />
     </Panel>
   )
 
