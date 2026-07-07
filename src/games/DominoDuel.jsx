@@ -765,7 +765,7 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
           height: LAYOUT.headerH, flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '0 16px', background: COLORS.panel, borderBottom: `1px solid ${COLORS.border}`,
         }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Domino Duel</strong>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>骨牌对决</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
@@ -783,7 +783,7 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
   }
 
   return (
-    <GameLayout title="Domino Duel" color={DERBY.sel}>
+    <GameLayout title="骨牌对决" color={DERBY.sel}>
       {gameCard}
     </GameLayout>
   )

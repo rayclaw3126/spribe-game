@@ -971,7 +971,7 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
           padding: '0 16px', background: COLORS.panel,
           borderBottom: `1px solid ${COLORS.border}`,
         }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Speed Grid</strong>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>极速方格</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
@@ -993,7 +993,7 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="Speed Grid" color={DERBY.sel}>
+    <GameLayout title="极速方格" color={DERBY.sel}>
       {gameCard}
     </GameLayout>
   )

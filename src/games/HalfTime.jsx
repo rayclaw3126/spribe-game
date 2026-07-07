@@ -870,7 +870,7 @@ export default function HalfTime({ balance, setBalance, onBack }) {
           padding: '0 16px', background: COLORS.panel,
           borderBottom: `1px solid ${COLORS.border}`,
         }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Half Time</strong>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>中场</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
@@ -894,7 +894,7 @@ export default function HalfTime({ balance, setBalance, onBack }) {
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="Half Time" color={HALFTIME.sel}>
+    <GameLayout title="中场" color={HALFTIME.sel}>
       <div ref={cardShakeRef}>
         {gameCard}
       </div>

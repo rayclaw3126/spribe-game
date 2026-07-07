@@ -1271,7 +1271,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
           padding: '0 16px', background: COLORS.panel,
           borderBottom: `1px solid ${COLORS.border}`,
         }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Hat Trick</strong>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>帽子戏法</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
@@ -1295,7 +1295,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="Hat Trick" color={HATTRICK.sel}>
+    <GameLayout title="帽子戏法" color={HATTRICK.sel}>
       <div ref={cardShakeRef}>
         {gameCard}
       </div>

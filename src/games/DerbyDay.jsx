@@ -1189,7 +1189,7 @@ export default function DerbyDay({ balance, setBalance, onBack }) {
           padding: '0 16px', background: COLORS.panel,
           borderBottom: `1px solid ${COLORS.border}`,
         }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Derby Day</strong>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>德比大战</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
@@ -1212,7 +1212,7 @@ export default function DerbyDay({ balance, setBalance, onBack }) {
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="Derby Day" color={DERBY.sel}>
+    <GameLayout title="德比大战" color={DERBY.sel}>
       {gameCard}
     </GameLayout>
   )
