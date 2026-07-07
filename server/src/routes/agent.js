@@ -247,4 +247,40 @@ router.get('/downline', async (req, res, next) => {
   }
 });
 
+// ------------------------------------------------------------------
+// GET /agent/me —— 登录代理自己的基础信息 + 额度 + 分成比例
+// ------------------------------------------------------------------
+router.get('/me', async (req, res, next) => {
+  try {
+    const meId = req.user.sub;
+    const result = await query(
+      `SELECT a.id, a.username, a.level, a.role, a.status,
+              cl.credit AS credit,
+              cc.win_loss_pct AS win_loss_pct,
+              cc.turnover_pct AS turnover_pct
+         FROM agents a
+         LEFT JOIN credit_lines cl ON cl.agent_id = a.id
+         LEFT JOIN commission_config cc ON cc.agent_id = a.id
+        WHERE a.id = $1::bigint`,
+      [meId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: '当前代理不存在' });
+    }
+    const row = result.rows[0];
+    return res.json({
+      id: row.id,
+      username: row.username,
+      level: row.level,
+      role: row.role,
+      status: row.status,
+      credit: row.credit,
+      winLossPct: row.win_loss_pct,
+      turnoverPct: row.turnover_pct,
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 export default router;
