@@ -51,3 +51,18 @@ SELECT a.id, 5.00, 0
 FROM agents a
 WHERE a.username = 'boss'
 ON CONFLICT (agent_id) DO NOTHING;
+
+-- 5. boss 的物化路径 path（顶级代理 = [自己id]）。
+--    path 为 TEXT[]，元素是 agent id 的文本；下级代理 path = 父.path || 自己id。
+--    幂等：顶级 path 恒等于 ARRAY[id]，直接覆盖设置无副作用。
+UPDATE agents
+SET path = ARRAY[id]::text[]
+WHERE username = 'boss';
+
+-- 6. boss 的初始额度线 credit_lines：10000.00（顶级代理可下发给下级的总额度）。
+--    可重复跑：已存在则保留现状（沿用本文件 ON CONFLICT DO NOTHING 约定）。
+INSERT INTO credit_lines (agent_id, credit, version)
+SELECT a.id, 10000.00, 0
+FROM agents a
+WHERE a.username = 'boss'
+ON CONFLICT (agent_id) DO NOTHING;

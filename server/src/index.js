@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import authRouter from './routes/auth.js';
 import roundRouter from './routes/round.js';
+import agentRouter from './routes/agent.js';
 
 const app = express();
 
@@ -37,6 +38,7 @@ app.get('/health', (req, res) => {
 
 app.use('/auth', authRouter);
 app.use('/round', roundRouter);
+app.use('/agent', agentRouter);
 
 // 404 兜底
 app.use((req, res) => {
