@@ -11,6 +11,11 @@ import GameTopBar from '../components/shell/GameTopBar'
 // 单P2: Free Kick gameplay — three risk tiers, binomial physics drop,
 // adjustable pins, RTP-calibrated paytables.
 //
+// 落点服务器算，不信前端：本文件的 multsFor/binomProbs 只用于 UI 展示三行赔率表，
+// 不参与结算；实际下注调 POST /round/plinko/play，path/bucket/mult/payout/余额
+// 全部以后端返回为准（后端 server/src/game/plinko.js 逐位照抄下面这套算法，
+// 两边保证一致，对拍过）。
+//
 // 赔率推导（禁拍脑袋）:
 //   N 行钉 → N+1 落格，落格 k 的概率是二项分布 p(k) = C(N,k) / 2^N
 //   （每行独立左右各 1/2，k = 向右次数 —— 落格与飞行路径同一映射）。
@@ -29,7 +34,6 @@ const TIERS = {
 const DROP_MS_TOTAL = 2500          // ~2.5s of row-by-row bouncing
 const PINS_MIN = 8
 const PINS_MAX = 16
-const round2 = x => Math.round(x * 100) / 100
 const roundMult = x => (x >= 10 ? Math.round(x) : Math.round(x * 10) / 10)
 
 function binomProbs(n) {
@@ -45,8 +49,8 @@ function multsFor(n, tier) {
   const s = RTP / raw.reduce((acc, r, k) => acc + probs[k] * r, 0)
   return raw.map(r => roundMult(s * r))
 }
-// module-level randomness: one L/R per pin row (event-time only)
-const randomPath = n => Array.from({ length: n }, () => (Math.random() < 0.5 ? 1 : 0))
+// 生成幂等键：优先用 crypto.randomUUID，不支持则退化拼接时间戳+随机数
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `plinko-${Date.now()}-${Math.random()}`)
 
 // ---------- audio (module-level, mechanical recipe + shared compressor bus) ----------
 function ensureAudio(audio) {
@@ -174,7 +178,7 @@ function Football({ size = 16 }) {
   )
 }
 
-export default function Plinko({ balance, setBalance, onBack }) {
+export default function Plinko({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
   const [pins, setPins] = useState(14)
@@ -184,6 +188,7 @@ export default function Plinko({ balance, setBalance, onBack }) {
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [toasts, setToasts] = useState([])
   const [flash, setFlash] = useState(null)         // { tier, k } landing cell glow
+  const [proof, setProof] = useState(null)         // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const ballsRef = useRef([])
   const rafRef = useRef(null)
@@ -220,10 +225,12 @@ export default function Plinko({ balance, setBalance, onBack }) {
   // Ball x walks the binomial path (±half-step per row), y hops row to row
   // with a small sine arc; the same path sum k picks the landing slot, so
   // the flight and the settlement can never disagree.
+  // path/k/mult/payout 全部来自后端 /round/plinko/play 的返回，本地不再算钱——
+  // 落定时只把 setServerBalance 设成后端给的 balanceAfter。
   function settleBall(ball) {
-    const payout = round2(ball.bet * ball.mult)
+    const payout = ball.payout
     sfxLand(audioRef.current)
-    if (payout > 0) setBalance(b => round2(b + payout))
+    setServerBalance(Number(ball.balanceAfter))
     if (ball.mult >= 1) pushToast(`${ball.mult}×`, payout)
     if (ball.mult >= 10) sfxChime(audioRef.current)
     setHistory(h => [{ v: String(ball.mult), c: ball.tier }, ...h].slice(0, 12))
@@ -234,6 +241,7 @@ export default function Plinko({ balance, setBalance, onBack }) {
     setFlash({ tier: ball.tier, k: ball.k })
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
     flashTimerRef.current = setTimeout(() => setFlash(null), 600)
+    setProof({ serverSeed: ball.serverSeed, commitHash: ball.commitHash })
   }
   function frame(now) {
     const list = ballsRef.current
@@ -272,17 +280,39 @@ export default function Plinko({ balance, setBalance, onBack }) {
     if (ballsRef.current.length) rafRef.current = requestAnimationFrame(frame)
     else rafRef.current = null
   }
-  function kick(tier) {
-    if (bet > balance || bet < 1) return
-    const path = randomPath(pins)   // path first — SFX jitter randoms must not sit ahead
-    setFeedBets(makeFeedBots())     // fresh fake round rides along (display only; after the roll)
+  // 落点服务器算，不信前端：只把下注参数（金额/档位/pins）传给后端，
+  // path/bucket/mult/payout/余额全部以后端返回为准，本地不再算一分钱。
+  async function kick(tier) {
+    if (bet < 1 || (serverBalance != null && bet > serverBalance)) return
+    const rows = pins   // 捕获此刻的 pins——等响应期间玩家切 pins 不影响本局
     ensureAudio(audioRef.current)
     sfxChip(audioRef.current)
-    setBalance(b => round2(b - bet))
-    const k = path.reduce((a, b) => a + b, 0)
+    setFeedBets(makeFeedBots())     // fresh fake round rides along (display only; after the roll)
+
+    const idempotencyKey = genIdemKey()
+
+    let data
+    try {
+      const resp = await fetch('/round/plinko/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+        body: JSON.stringify({ amount: bet, risk: tier, rows, idempotencyKey }),
+      })
+      data = await resp.json()
+      if (!resp.ok) {
+        pushToast(data?.error || '下注失败，请重试', 0)
+        return
+      }
+    } catch {
+      pushToast('网络异常，请稍后重试', 0)
+      return
+    }
+
+    const { path, bucket, mult, payout, balanceAfter, serverSeed, commitHash } = data
     const ball = {
-      id: ++ballIdRef.current, tier, bet, path, k, pins,
-      mult: TABLE[tier][k],       // captured now — pins switches can't retarget it
+      id: ++ballIdRef.current, tier, bet, path, k: bucket, pins: rows,
+      mult: Number(mult), payout: Number(payout), balanceAfter,
+      serverSeed, commitHash,
       start: null, seg: -1, rot: 0, node: null,
     }
     ballsRef.current = [...ballsRef.current, ball]
@@ -297,7 +327,7 @@ export default function Plinko({ balance, setBalance, onBack }) {
     border: '1px solid rgba(255,255,255,0.35)',
     fontSize: 15, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
   }
-  const locked = bet > balance || bet < 1
+  const locked = bet < 1 || (serverBalance != null && bet > serverBalance)
   const bigBtn = bg => ({
     minWidth: 96, padding: '11px 0', borderRadius: RADIUS.pill,
     background: bg, color: COLORS.white,
@@ -559,6 +589,17 @@ export default function Plinko({ balance, setBalance, onBack }) {
         </div>{/* /scaled footprint */}
         </div>{/* /middle zone */}
 
+        {/* ---- 可验证公平：显示上一局的 serverSeed + commit hash，玩家可用
+             clientSeed/nonce/serverSeed 自行重算校验 path 未被篡改 ---- */}
+        {proof && (
+          <div style={{
+            textAlign: 'center', padding: '2px 0', position: 'relative', zIndex: 1,
+            fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.4)', wordBreak: 'break-all',
+          }}>
+            可验证 · serverSeed: {proof.serverSeed?.slice(0, 16)}… · hash: {proof.commitHash?.slice(0, 16)}…
+          </div>
+        )}
+
         {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip ---- */}
         <div style={{
           flex: '0 0 auto',
@@ -622,7 +663,7 @@ export default function Plinko({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Free Kick</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 

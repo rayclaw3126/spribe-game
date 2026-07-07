@@ -1,8 +1,8 @@
 import { useState } from 'react'
 
-// 玩家登录页 —— 仅 Aviator 需要真实登录（余额以服务器为准）；其它 20 款游戏
-// 仍用本地模拟余额，不经过这里。登录成功后把 token/用户名交给 App，
-// App 负责写 localStorage 并把玩家放进 Aviator。
+// 玩家登录页 —— 仅接后端的即时游戏（Aviator/Dice/Plinko）需要真实登录
+// （余额以服务器为准）；其它游戏仍用本地模拟余额，不经过这里。
+// 登录成功后把 token/用户名交给 App，App 负责写 localStorage 并把玩家放进对应游戏。
 export default function GameLogin({ onLogin, onCancel }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -65,7 +65,7 @@ export default function GameLogin({ onLogin, onCancel }) {
             fontWeight: 800, fontSize: 22, color: '#e8edf2', margin: 0,
           }}>玩家登录</h1>
           <p style={{ color: '#8a97a6', fontSize: 13, marginTop: 8 }}>
-            Breakaway 由服务器实时驱动，登录后余额以服务器为准
+            本游戏由服务器实时驱动，登录后余额以服务器为准
           </p>
         </div>
 
