@@ -8,6 +8,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import BetButton from '../components/shell/BetButton'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 import car01 from '../assets/goldenboot/car_01.png'
 import car02 from '../assets/goldenboot/car_02.png'
 import car03 from '../assets/goldenboot/car_03.png'
@@ -95,8 +96,32 @@ const SETTLED_T = 6     // 3s
 const RACE_START = 500
 const SPRINT_BASE = 4800
 const RANK_GAP = 160
-const VENUE = 'RUBY SPEEDWAY'        // 架空赛道名（禁真实场地名）
+const VENUE = '红宝石赛道'           // 架空赛道名（禁真实场地名）
 const ROUND_DATE = '20260705'
+
+// 玩法说明文案（中文；盘口数字照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每期 10 辆车冲刺赛跑，决出 1–10 名。你可以押冠军是哪辆车、冠亚军点数之和、以及和值的大小单双。开赛前下注，冲线后命中的盘口按赔率赔付。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 冠军直选：押中冠军是哪辆车（1–10 号），约 9.60 倍。\n· 冠亚和：押冠军与亚军的车号之和（3–19），赔率随难度约 8.6 倍到 42.98 倍不等，越极端的和值赔越高。\n· 大 / 小：冠亚和以 11/12 为界，大[12-19] 约 2.15 倍 / 小[3-11] 约 1.72 倍。\n· 单 / 双：按冠亚和判定，单约 1.72 倍 / 双约 2.15 倍。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '10 辆车冲线决出名次，取冠军和冠亚军之和结算，命中的盘口立即结算，赔付直接入余额。每期独立，上期不影响下期。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押冠军直选或冠亚和两端。\n· 冠亚和押中间值（10、11、12）比押两端（3、19）容易得多。\n· 本游戏理论返还率约 95.5–96%，属娱乐性质，理性游戏。',
+  },
+]
 const ROAD_CAP = 120
 
 // 种子上期 + 种子历史（真开奖逐期顶掉）
@@ -106,6 +131,8 @@ const SEED_SUMS = [10, 9, 4, 13, 12, 16, 8, 14, 7, 11, 5, 15, 3, 9, 17, 10, 6, 1
 const SEED_HISTORY = SEED_WINNERS.map((w, i) => ({ winner: w, sum: SEED_SUMS[i] }))
 
 const ROAD_TABS = ['WINNER', 'SUM']
+// 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照先例分离）
+const ROAD_TAB_LABELS = { WINNER: '冠军', SUM: '冠亚和' }
 function beadFor(tab, h) {
   if (tab === 'WINNER') return { t: String(h.winner), c: h.winner <= 5 ? GOLDENBOOT.dragon : GOLDENBOOT.tiger }
   return h.sum >= 12 ? { t: 'B', c: GOLDENBOOT.dragon } : { t: 'S', c: GOLDENBOOT.tiger }
@@ -324,7 +351,7 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
         ctx.font = `900 ${Math.round(H * 0.34)}px 'Space Grotesk', sans-serif`
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 8 * dpr
-        ctx.fillText('GO!', W / 2, H / 2)
+        ctx.fillText('出发！', W / 2, H / 2)
         ctx.shadowBlur = 0
       }
       // 名次侧栏 — 撞线依次落位
@@ -363,8 +390,8 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
         const carS = bh * 0.27   // 约格高 54%，四周留白
         ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
         ;[
-          { label: '1st', num: race.winner, ry: by + bh * 0.29, c: GOLDENBOOT.gold },
-          { label: '2nd', num: race.runnerUp, ry: by + bh * 0.71, c: 'rgba(255,255,255,0.9)' },
+          { label: '冠军', num: race.winner, ry: by + bh * 0.29, c: GOLDENBOOT.gold },
+          { label: '亚军', num: race.runnerUp, ry: by + bh * 0.71, c: 'rgba(255,255,255,0.9)' },
         ].forEach(row => {
           drawCar(bx + bw * 0.27, row.ry, carS, row.num, { noBadge: true })
           ctx.fillStyle = row.c
@@ -401,7 +428,7 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
             <img src={CAR_SRC[n]} alt={`car ${n}`} style={{ height: 22, width: 'auto', display: 'block' }} />
           </span>
         ))}
-        <span style={{ color: GOLDENBOOT.gold, fontSize: 14, fontWeight: 900, marginLeft: 8 }}>1st #{race.winner} · 2nd #{race.runnerUp}</span>
+        <span style={{ color: GOLDENBOOT.gold, fontSize: 14, fontWeight: 900, marginLeft: 8 }}>冠军 #{race.winner} · 亚军 #{race.runnerUp}</span>
       </div>
     )
   }
@@ -414,6 +441,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [roadTab, setRoadTab] = useState('WINNER')
@@ -703,7 +731,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
             <span style={{
               color: ['#ffd54f', '#cfd6de', '#d9873f'][i], fontSize: isMobile ? 10 : 12, fontWeight: 900,
               fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap',
-            }}>{['1st', '2nd', '3rd'][i]}</span>
+            }}>{['冠', '亚', '季'][i]}</span>
             <CarImgBead num={n} size={isMobile ? 38 : 48} />
           </span>
         ))}
@@ -711,9 +739,9 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
     </span>
   )
   const topBar = (
-    <GameTopBar gameName="PK10 Speedy" band={GOLDENBOOT.band} venue={VENUE}
+    <GameTopBar gameName="PK10" band={GOLDENBOOT.band} venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} />
+      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
   )
 
   // ---- 珠盘路（真历史滚动，容量 6×20）----
@@ -733,7 +761,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
             color: roadTab === t ? '#083a1b' : GOLDENBOOT.dim,
             border: `1px solid ${roadTab === t ? GOLDENBOOT.sel : 'rgba(255,255,255,0.2)'}`,
             fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
-          }}>{t}</button>
+          }}>{ROAD_TAB_LABELS[t]}</button>
         ))}
       </div>
       <div style={{
@@ -840,7 +868,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
           borderRadius: 12, padding: isMobile ? 6 : 8,
           background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)',
         }}>
-          <div style={{ color: GOLDENBOOT.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 6 }}>WINNER · 冠军直选</div>
+          <div style={{ color: GOLDENBOOT.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 6 }}>冠军直选</div>
           <div style={{ display: 'flex', gap: isMobile ? 5 : 8, flexWrap: 'wrap' }}>
             {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
               <button key={n} type="button" className="gbCell" disabled={!betting} onClick={() => toggleSel(`w-${n}`)}
@@ -858,7 +886,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
           borderRadius: 12, padding: isMobile ? 6 : 8,
           background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)',
         }}>
-          <div style={{ color: GOLDENBOOT.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 6 }}>SPRINT SUM · 冠亚和</div>
+          <div style={{ color: GOLDENBOOT.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 6 }}>冠亚和</div>
           <div style={{ display: 'flex', gap: isMobile ? 4 : 5, flexWrap: 'wrap', marginBottom: isMobile ? 6 : 8 }}>
             {Object.keys(SUM_N).map(s => (
               <button key={s} type="button" className="gbCell" disabled={!betting} onClick={() => toggleSel(`sum-${s}`)}
@@ -871,10 +899,10 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
           </div>
           <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
             {[
-              { key: 's-big',   name: 'BIG',   range: '12–19', odds: ODDS.big },
-              { key: 's-small', name: 'SMALL', range: '3–11',  odds: ODDS.small },
-              { key: 's-odd',   name: 'ODD',   range: '和为单', odds: ODDS.odd },
-              { key: 's-even',  name: 'EVEN',  range: '和为双', odds: ODDS.even },
+              { key: 's-big',   name: '大', range: '12–19', odds: ODDS.big },
+              { key: 's-small', name: '小', range: '3–11',  odds: ODDS.small },
+              { key: 's-odd',   name: '单', range: '和为单', odds: ODDS.odd },
+              { key: 's-even',  name: '双', range: '和为双', odds: ODDS.even },
             ].map(m => (
               <button key={m.key} type="button" className="gbCell" disabled={!betting} onClick={() => toggleSel(m.key)} style={cellBtn(m.key)}>
                 <span style={cellName}>{m.name}</span>
@@ -919,7 +947,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
             borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
           </div>
@@ -943,6 +971,8 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="PK10 玩法说明" sections={RULES} />
     </Panel>
   )
 
@@ -960,7 +990,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
           padding: '0 16px', background: COLORS.panel,
           borderBottom: `1px solid ${COLORS.border}`,
         }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>PK10 Speedy</strong>
+          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>PK10</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
             {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
@@ -984,7 +1014,7 @@ export default function GoldenBoot({ balance, setBalance, onBack }) {
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="PK10 Speedy" color={GOLDENBOOT.gold}>
+    <GameLayout title="PK10" color={GOLDENBOOT.gold}>
       <div ref={cardShakeRef}>
         {gameCard}
       </div>
