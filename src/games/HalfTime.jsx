@@ -7,6 +7,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 import BetButton from '../components/shell/BetButton'
 import ballUrl from '../assets/covers/ball-3d.png'
 
@@ -95,8 +96,32 @@ const SETTLED_T = 6     // 3s
 const BALL_CADENCE = 400
 const BALL_FLIGHT = 530
 const FINALE_HOLD = 1000
-const VENUE = 'JADE STADIUM'          // 架空场馆名（禁真实球场名）
+const VENUE = '翡翠球场'               // 架空场馆名（禁真实球场名）
 const ROUND_DATE = '20260705'
+
+// 玩法说明文案（中文；盘口数字照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每期从 1–80 号池中抽 20 个球，20 球号码相加得到和值（范围 210–1410）。各盘口按和值判定。开球前下注，开奖后命中的盘口按赔率赔付。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 大 / 小：以 810 为界，大[≥811] 约 1.95 倍 / 小[≤810] 约 1.9 倍。\n· 单 / 双：按和值判定，约 1.95 倍。\n· 过关：大小和单双的组合（大单 / 大双 / 小单 / 小双），约 3.8 倍。\n· 段位：按和值落在五个区间分档 —— 乌龙[≤695] / 后防[696-763] / 中场[764-855] / 前锋[856-923] / 破门[≥924]，两端约 9.25 倍、中间约 2.46 倍。\n· 半场：数落在 1–40 区间的球有多少个，超过 10 个押上半场约 2.4 倍，少于 10 个押下半场约 2.4 倍，恰好 10 个押平约 4.7 倍。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '20 球开出后计算和值，命中的盘口立即结算，赔付直接入余额。每期独立，上期不影响下期。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押段位两端（乌龙 / 破门）。\n· 段位中间档（中场）覆盖最宽、最易中，赔率也最低。\n· 本游戏理论返还率约 95–96%，属娱乐性质，理性游戏。',
+  },
+]
 const ROAD_CAP = 120   // 珠盘路 6×20 滚动容量
 
 // 种子上期 + 种子历史（真开奖会逐期顶掉）
@@ -114,31 +139,33 @@ const ZONE_COLOR = { OG: HALFTIME.over, DF: HALFTIME.draw, MF: HALFTIME.sel, AT:
 
 // ---- 盘面（名称/区间展示；赔率一律读 ODDS）----
 const ROW1 = [
-  { key: 'over',  name: 'OVER',  range: '811–1410' },
-  { key: 'under', name: 'UNDER', range: '210–810' },
-  { key: 'odd',   name: 'ODD',   range: '和值为单' },
-  { key: 'even',  name: 'EVEN',  range: '和值为双' },
+  { key: 'over',  name: '大', range: '811–1410' },
+  { key: 'under', name: '小', range: '210–810' },
+  { key: 'odd',   name: '单', range: '和值为单' },
+  { key: 'even',  name: '双', range: '和值为双' },
 ]
 const PARLAY = [
-  { key: 'p-oo', name: 'O + ODD' },
-  { key: 'p-oe', name: 'O + EVEN' },
-  { key: 'p-uo', name: 'U + ODD' },
-  { key: 'p-ue', name: 'U + EVEN' },
+  { key: 'p-oo', name: '大单' },
+  { key: 'p-oe', name: '大双' },
+  { key: 'p-uo', name: '小单' },
+  { key: 'p-ue', name: '小双' },
 ]
 const ZONES = [
-  { key: 'og', name: 'OWN GOAL', range: '210–695' },
-  { key: 'df', name: 'DEFENSE',  range: '696–763' },
-  { key: 'mf', name: 'MIDFIELD', range: '764–855' },
-  { key: 'at', name: 'ATTACK',   range: '856–923' },
-  { key: 'gl', name: 'GOAL',     range: '924–1410' },
+  { key: 'og', name: '乌龙', range: '210–695' },
+  { key: 'df', name: '后防', range: '696–763' },
+  { key: 'mf', name: '中场', range: '764–855' },
+  { key: 'at', name: '前锋', range: '856–923' },
+  { key: 'gl', name: '破门', range: '924–1410' },
 ]
 const ROW3 = [
-  { key: 'h1',   name: '1ST HALF', range: 'MORE 1–40' },
-  { key: 'draw', name: 'DRAW',     range: '10 / 10' },
-  { key: 'h2',   name: '2ND HALF', range: 'MORE 41–80' },
+  { key: 'h1',   name: '上半场', range: '1-40 多' },
+  { key: 'draw', name: '平',     range: '10:10' },
+  { key: 'h2',   name: '下半场', range: '41-80 多' },
 ]
 
+// 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照 Derby 先例分离）
 const ROAD_TABS = ['O/U', 'ODD/EVEN', 'PARLAY', 'ZONE', 'HALF']
+const ROAD_TAB_LABELS = { 'O/U': '大小', 'ODD/EVEN': '单双', PARLAY: '过关', ZONE: '段位', HALF: '半场' }
 function beadFor(tab, sum, half) {
   const over = sum > 810
   const odd = sum % 2 === 1
@@ -343,7 +370,7 @@ function DrawStage({ round, height, shakeRef, sfx, onFinale }) {
         ctx.fillStyle = HALFTIME.gold
         ctx.font = `900 ${Math.round(H * 0.26)}px 'Space Grotesk', sans-serif`
         ctx.shadowColor = HALFTIME.gold; ctx.shadowBlur = 18 * dpr
-        ctx.fillText(`SCORE ${landedSum}`, W / 2, gy + gh * 0.48)
+        ctx.fillText(`和值 ${landedSum}`, W / 2, gy + gh * 0.48)
         ctx.shadowBlur = 0
       } else if (landedCount > 0) {
         ctx.fillStyle = HALFTIME.gold
@@ -382,7 +409,7 @@ function DrawStage({ round, height, shakeRef, sfx, onFinale }) {
             fontSize: 9, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}>{n}</span>
         ))}
-        <span style={{ color: HALFTIME.gold, fontSize: 20, fontWeight: 900, marginLeft: 10 }}>SCORE {round.sum}</span>
+        <span style={{ color: HALFTIME.gold, fontSize: 20, fontWeight: 900, marginLeft: 10 }}>和值 {round.sum}</span>
       </div>
     )
   }
@@ -395,6 +422,7 @@ export default function HalfTime({ balance, setBalance, onBack }) {
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)          // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())        // 待确认选格
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())   // key → 已下注额
   const [roadTab, setRoadTab] = useState('O/U')
@@ -648,13 +676,13 @@ export default function HalfTime({ balance, setBalance, onBack }) {
       <span style={{
         marginLeft: 'auto', flex: '0 0 auto', padding: '2px 12px', borderRadius: RADIUS.pill,
         background: HALFTIME.sel, color: '#083a1b', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>SCORE {lastDraw.sum}</span>
+      }}>和值 {lastDraw.sum}</span>
     </span>
   )
   const topBar = (
-    <GameTopBar gameName="HALF TIME" band={HALFTIME.band} venue={VENUE}
+    <GameTopBar gameName="中场" band={HALFTIME.band} venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} />
+      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
   )
 
   // ---- 珠盘路（真历史滚动，容量 6×20）----
@@ -674,7 +702,7 @@ export default function HalfTime({ balance, setBalance, onBack }) {
             color: roadTab === t ? '#083a1b' : HALFTIME.dim,
             border: `1px solid ${roadTab === t ? HALFTIME.sel : 'rgba(255,255,255,0.2)'}`,
             fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
-          }}>{t}</button>
+          }}>{ROAD_TAB_LABELS[t]}</button>
         ))}
       </div>
       <div style={{
@@ -799,7 +827,7 @@ export default function HalfTime({ balance, setBalance, onBack }) {
             borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
           </div>
@@ -823,6 +851,8 @@ export default function HalfTime({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="中场 玩法说明" sections={RULES} />
     </Panel>
   )
 
