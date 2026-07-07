@@ -5,6 +5,7 @@ import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { WebSocketServer } from 'ws';
 import authRouter from './routes/auth.js';
 import roundRouter from './routes/round.js';
@@ -13,7 +14,9 @@ import { startAviatorHub } from './ws/aviatorHub.js';
 
 const app = express();
 
-// CORS 白名单：从环境变量读取，逗号分隔支持多个来源
+// CORS 白名单：从环境变量读取，逗号分隔支持多个来源。
+// 这份数组是模块级共享变量，HTTP 层的 cors 中间件和下面 WS 握手的 origin 校验都用它，
+// 保证两条通道对「谁是合法来源」的判断口径一致。
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -30,10 +33,24 @@ const corsOptions = {
     }
     return callback(new Error('CORS: 该来源不在白名单内'));
   },
+  credentials: true,
 };
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// 登录限流：15 分钟内同一来源最多 20 次尝试，防暴力破解密码。
+// 只挂在 /auth/login 这一条路径上，其余接口（含 /auth 下其它路由，若未来新增）不受影响。
+// 注：express-rate-limit 默认用内存计数，单进程部署够用；后续如果多实例横向扩展，
+// 要换成 Redis 等共享存储的 store，否则各实例各算各的，限流会形同虚设。
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '登录尝试过于频繁，请稍后再试' },
+});
+app.use('/auth/login', loginLimiter);
 
 // 存活探针：不查数据库，纯进程健康检查
 app.get('/health', (req, res) => {
@@ -78,6 +95,15 @@ const wss = new WebSocketServer({ server, path: '/ws/aviator' });
 // 严禁在任何日志里打印 token 原文，认证失败静默关闭连接。
 wss.on('connection', (ws, req) => {
   try {
+    // Origin 校验：和 HTTP 层的 CORS 白名单共用同一份 allowedOrigins。
+    // 无 origin（node 脚本 / curl 直连 WS 本来就不带这个头）放行；
+    // 带了 origin 但不在白名单里的一律拒绝，防止恶意网页跨站发起 WS 连接。
+    const origin = req.headers.origin;
+    if (origin && !allowedOrigins.includes(origin)) {
+      ws.close(1008, '来源不允许');
+      return;
+    }
+
     const url = new URL(req.url, 'http://localhost');
     const token = url.searchParams.get('token');
     const payload = jwt.verify(token, process.env.JWT_SECRET); // 失败抛异常
