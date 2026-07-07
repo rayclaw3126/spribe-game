@@ -44,7 +44,7 @@ export default function BetPanel({ bet, setBet, inputDisabled, chipDisabled, but
           background: COLORS.bg, border: `1px solid ${COLORS.borderLight}`,
           borderRadius: RADIUS.pill, padding: 2,
         }}>
-          {[['bet', 'Bet'], ['auto', 'Auto']].map(([key, label]) => (
+          {[['bet', '投注'], ['auto', '自动']].map(([key, label]) => (
             <button key={key} type="button" onClick={() => setTab(key)} style={{
               padding: `3px ${SPACE.lg + 4}px`,
               borderRadius: RADIUS.pill,

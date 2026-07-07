@@ -5,15 +5,15 @@ import { useBgm } from './shell/bgmManager'
 
 const GAME_NAMES = {
   Aviator: 'Breakaway',
-  Dice: 'Total Goals',
-  Plinko: 'Free Kick',
-  Goal: 'Goal',
-  HiLo: 'Rating Hi-Lo',
-  Mines: 'Dribble',
-  Keno: 'Team Keno',
+  Dice: '总进球',
+  Plinko: '任意球',
+  Goal: '射门',
+  HiLo: '评分高低',
+  Mines: '盘带过人',
+  Keno: '球队基诺',
   Limbo: 'Odds Climb',
-  StreakRoll: 'Streak Roll',
-  MiniRoulette: 'Team Roulette',
+  StreakRoll: '连胜转盘',
+  MiniRoulette: '球队轮盘',
   Momentum: 'Momentum',
   HalfTime: '中场',
   GoldenBoot: 'PK10',
@@ -122,7 +122,7 @@ export default function Header({ balance, onHome, activeGame }) {
           }}>
             <button onClick={onHome} style={{
               background: 'none', color: '#8a97a6', fontSize: 13, padding: 0,
-            }}>Home</button>
+            }}>首页</button>
             <span>›</span>
             <span style={{ color: '#16c784', fontWeight: 700 }}>{GAME_NAMES[activeGame] || activeGame}</span>
           </div>

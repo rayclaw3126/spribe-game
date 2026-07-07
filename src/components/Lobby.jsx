@@ -22,28 +22,28 @@ import coverDominoDuel from '../assets/covers/cover-dominoduel.png'
 import { useIsMobile } from '../hooks/useMediaQuery'
 
 const GAMES = [
-  { id: 'Aviator',   name: 'Breakaway',  desc: "Cash out before you're tackled!", color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway, cat: 'instant' },
-  { id: 'Dice',      name: 'Total Goals',     desc: 'Over or under? Call the score.',   color: '#2563EB', bg: 'linear-gradient(135deg, #DBEAFE, #BFDBFE)', cover: coverTotalGoals, cat: 'instant' },
-  { id: 'Plinko',    name: 'Free Kick',   desc: 'Curl it into the zone!',         color: '#D97706', bg: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', cover: coverFreeKick, cat: 'instant' },
-  { id: 'Goal',      name: 'Goal',     desc: 'Score past the goalkeeper!',      color: '#059669', bg: 'linear-gradient(135deg, #D1FAE5, #A7F3D0)', cover: coverGoal, cat: 'instant' },
-  { id: 'HiLo',      name: 'Rating Hi-Lo',    desc: 'Higher or lower rating?',    color: '#DC2626', bg: 'linear-gradient(135deg, #FEE2E2, #FECACA)', cover: coverRatingHiLo, cat: 'instant' },
-  { id: 'Mines',     name: 'Dribble',    desc: 'Beat defenders, avoid tackles.', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverDribble, cat: 'instant' },
-  { id: 'Keno',      name: 'Team Keno', desc: 'Pick the winning teams!',        color: '#DB2777', bg: 'linear-gradient(135deg, #FCE7F3, #FBCFE8)', cover: coverTeamKeno, cat: 'instant' },
-  { id: 'Limbo',     name: 'Odds Climb', desc: 'Set target odds, kick off to climb!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverOddsClimb, cat: 'instant' },
-  { id: 'StreakRoll', name: 'Streak Roll', desc: 'Roll the strip, stop on a multiplier!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll, cat: 'instant' },
-  { id: 'MiniRoulette', name: 'Team Roulette', desc: 'Pick your team, spin the wheel!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette, cat: 'instant' },
-  { id: 'Momentum', name: 'Momentum', desc: 'Ride the surge, cash the peak!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum, cat: 'instant' },
-  { id: 'HalfTime', name: '中场', desc: 'Call the keno sum — over, under, zones!', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverHalfTime, cat: 'lottery' },
-  { id: 'GoldenBoot', name: 'PK10', desc: 'Ten cars, one finish line — call the order!', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverPk10, cat: 'lottery' },
-  { id: 'NumberUp', name: '号码王', desc: 'Pick the shirt number — 00 to 99!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverNumberUp, cat: 'lottery' },
+  { id: 'Aviator',   name: 'Breakaway',  desc: '抢在被扑倒前兑现！', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverBreakaway, cat: 'instant' },
+  { id: 'Dice',      name: '总进球',     desc: '大还是小？押总进球',   color: '#2563EB', bg: 'linear-gradient(135deg, #DBEAFE, #BFDBFE)', cover: coverTotalGoals, cat: 'instant' },
+  { id: 'Plinko',    name: '任意球',   desc: '弧线球射入死角！',         color: '#D97706', bg: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', cover: coverFreeKick, cat: 'instant' },
+  { id: 'Goal',      name: '射门',     desc: '射穿门将！',      color: '#059669', bg: 'linear-gradient(135deg, #D1FAE5, #A7F3D0)', cover: coverGoal, cat: 'instant' },
+  { id: 'HiLo',      name: '评分高低',    desc: '评分更高还是更低？',    color: '#DC2626', bg: 'linear-gradient(135deg, #FEE2E2, #FECACA)', cover: coverRatingHiLo, cat: 'instant' },
+  { id: 'Mines',     name: '盘带过人',    desc: '盘带过人，避开抢断', color: '#7C3AED', bg: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', cover: coverDribble, cat: 'instant' },
+  { id: 'Keno',      name: '球队基诺', desc: '选中获胜球队！',        color: '#DB2777', bg: 'linear-gradient(135deg, #FCE7F3, #FBCFE8)', cover: coverTeamKeno, cat: 'instant' },
+  { id: 'Limbo',     name: 'Odds Climb', desc: '设定目标赔率，开球攀升！', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverOddsClimb, cat: 'instant' },
+  { id: 'StreakRoll', name: '连胜转盘', desc: '转动号码带，停在倍数上！', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverStreakRoll, cat: 'instant' },
+  { id: 'MiniRoulette', name: '球队轮盘', desc: '选定球队，转动轮盘！', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTeamRoulette, cat: 'instant' },
+  { id: 'Momentum', name: 'Momentum', desc: '乘势而上，巅峰兑现！', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverMomentum, cat: 'instant' },
+  { id: 'HalfTime', name: '中场', desc: '押基诺总和——大/小/区间！', color: '#16C784', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverHalfTime, cat: 'lottery' },
+  { id: 'GoldenBoot', name: 'PK10', desc: '十车一线，押名次！', color: '#ffd54f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverPk10, cat: 'lottery' },
+  { id: 'NumberUp', name: '号码王', desc: '押球衣号码——00 到 99！', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverNumberUp, cat: 'lottery' },
   // TODO: 换 Codex 专属封面（暂借 Total Goals 封面占位）
-  { id: 'HatTrick', name: '帽子戏法', desc: 'Three dice — call the total!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals, cat: 'lottery' },
-  { id: 'DerbyDay', name: '德比大战', desc: 'Home vs away — back your side!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDerbyDay, cat: 'lottery' },
-  { id: 'LineUp', name: '首发阵容', desc: 'Five lines, 25 numbers — call the sums!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverLineUp, cat: 'lottery' },
-  { id: 'SpeedGrid', name: '极速方格', desc: '24 cars, one champion — call it!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverSpeedGrid, cat: 'lottery' },
-  { id: 'WuXing', name: '五行', desc: 'Twenty balls, five elements!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverWuXing, cat: 'lottery' },
-  { id: 'RollingBall', name: '滚球', desc: 'Three balls roll — call each one!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverRollingBall, cat: 'lottery' },
-  { id: 'DominoDuel', name: '骨牌对决', desc: 'Home vs away — dominoes decide!', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDominoDuel, cat: 'lottery' },
+  { id: 'HatTrick', name: '帽子戏法', desc: '三颗骰子，押总点数！', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverTotalGoals, cat: 'lottery' },
+  { id: 'DerbyDay', name: '德比大战', desc: '主客对决，押你的一方！', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDerbyDay, cat: 'lottery' },
+  { id: 'LineUp', name: '首发阵容', desc: '五行 25 号，押各行和！', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverLineUp, cat: 'lottery' },
+  { id: 'SpeedGrid', name: '极速方格', desc: '24 车争先，一押到底！', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverSpeedGrid, cat: 'lottery' },
+  { id: 'WuXing', name: '五行', desc: '二十球，五行归类！', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverWuXing, cat: 'lottery' },
+  { id: 'RollingBall', name: '滚球', desc: '三球滚动，逐球押注！', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverRollingBall, cat: 'lottery' },
+  { id: 'DominoDuel', name: '骨牌对决', desc: '主客对决，骨牌定胜负！', color: '#35d07f', bg: 'linear-gradient(135deg,#0f2a1e,#123a2a)', cover: coverDominoDuel, cat: 'lottery' },
 ]
 
 const TOP_IDS = ['RollingBall', 'WuXing', 'SpeedGrid', 'LineUp', 'DerbyDay']
@@ -122,7 +122,7 @@ export default function Lobby({ onSelect, balance }) {
 
       {/* Footer note */}
       <p style={{ textAlign: 'center', color: '#7d8a99', fontSize: 13, marginTop: 42 }}>
-        All games use demo balance — play responsibly and have fun!
+        所有游戏均为虚拟余额——理性游戏，享受乐趣！
       </p>
     </div>
   )

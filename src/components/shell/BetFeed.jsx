@@ -66,7 +66,7 @@ function BetFeed({ bets, myBets, online, maxHeight, fill = false }) {
       .slice(0, 10))
   }, [bets])
 
-  const tabs = [['all', 'All Bets'], ['my', 'My Bets'], ['top', 'Top']]
+  const tabs = [['all', '全部投注'], ['my', '我的投注'], ['top', '榜单']]
   return (
     <div style={{
       background: COLORS.panel,
