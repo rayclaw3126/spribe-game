@@ -1,11 +1,14 @@
 // 服务入口
 // 说明：/health 是纯进程存活探针；此外挂载登录鉴权（/auth）和一局协议（/round）路由。
 import 'dotenv/config';
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
+import { WebSocketServer } from 'ws';
 import authRouter from './routes/auth.js';
 import roundRouter from './routes/round.js';
 import agentRouter from './routes/agent.js';
+import { startAviatorHub } from './ws/aviatorHub.js';
 
 const app = express();
 
@@ -63,6 +66,13 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 4000;
 
-app.listen(PORT, () => {
+// HTTP + WebSocket 共用同一个端口：express app 挂在 http server 上，
+// Aviator 的实时通道走 /ws/aviator 这条独立 path，互不干扰。
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: '/ws/aviator' });
+startAviatorHub(wss);
+
+server.listen(PORT, () => {
   console.log(`spribe-server 已启动，监听端口 ${PORT}`);
+  console.log(`WebSocket 实时通道已就绪：ws://localhost:${PORT}/ws/aviator`);
 });
