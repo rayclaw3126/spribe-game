@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 import carSpritesImg from '../assets/speedgrid/car_sprites.png'
 
 // Speed Grid — DD24 结构 F1 皮（1-24 均匀抽 1 开冠军车号），第 18 卡。
@@ -73,8 +74,32 @@ const SETTLED_T = 8     // 4s
 const RACE_T = 3300     // 冲线时刻（车群段 0-2300 摆动，2300 起冠军脱出）
 const BREAK_T = 2300    // 冠军脱出起点
 const FREEZE_T = 3400   // 定格 + 冠军大牌弹出
-const VENUE = 'TOPAZ CIRCUIT'          // 架空赛道名（禁真实赛道名）
+const VENUE = '黄玉赛道'                // 架空赛道名（禁真实赛道名）
 const ROUND_DATE = 'TC20260705'
+
+// 玩法说明文案（中文；盘口数字/车号照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每期开出 1 辆冠军车，车号 1–24。你在开赛前对多个盘口下注，冲线揭晓冠军车号后，命中的盘口按赔率赔付。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 大 / 小：大[13-24] / 小[1-12]，约 1.95 倍。\n· 单 / 双 / 红 / 黑：按冠军车号判定，约 1.95 倍。\n· 三段：头排[1-8] / 中段[9-16] / 尾排[17-24]，约 2.9 倍。\n· 车队：按车号所属车队（每 6 号一队，共 4 队）押注，约 3.85 倍。\n· 车号直选：直接押中冠军车号（1–24），约 22.85 倍。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '开赛后车辆冲线，亮出冠军车号，命中的盘口立即结算，赔付直接入余额。每期独立，上期不影响下期。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双红黑，中奖率约一半；想搏大赔押车号直选。\n· 三段和车队是中等赔率，覆盖多个车号，命中率比直选高。\n· 本游戏理论返还率约 95%，属娱乐性质，理性游戏。',
+  },
+]
 const ROAD_CAP = 120
 const SEED_CHAMP = 17                   // 种子上局冠军（真开奖逐期顶掉）
 
@@ -349,6 +374,7 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [hasLast, setHasLast] = useState(false)
@@ -644,9 +670,9 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
     }}>{phaseChip.text}</span>
   )
   const topBar = (
-    <GameTopBar gameName="SPEED GRID" venue={VENUE}
+    <GameTopBar gameName="极速方格" venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} onBack={onBack} />
+      phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
   )
 
   // ---- ① 开奖区：冠军大牌 + 24 车号小网格（4 队涂装分组）----
@@ -893,7 +919,7 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input
               value={bet}
               disabled={!betting}
@@ -926,6 +952,8 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="极速方格 玩法说明" sections={RULES} />
     </Panel>
   )
 
