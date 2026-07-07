@@ -15,6 +15,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:4000',
         changeOrigin: true,
       },
+      // Dice 即时游戏下注接口：前端连相对路径 /round/dice/play，vite 转发到后端
+      // 4000 端口，同源代理下浏览器仍带真实 Origin，走后端 CORS 白名单放行。
+      '/round': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+      },
     },
   },
 })

@@ -21,8 +21,8 @@ const TARGET_MAX = 96
 const ROLL_MS = 1200
 const round2 = x => Math.round(x * 100) / 100
 const payoutFor = chance => round2(RTP * 100 / chance)
-// uniform 0–100 roll, 2 decimals (module-level: event-time randomness only)
-const rollPoint = () => round2(Math.random() * 100)
+// 生成幂等键：优先用 crypto.randomUUID，不支持则退化拼接时间戳+随机数
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `dice-${Date.now()}-${Math.random()}`)
 
 // slider handle: block-face football (white ball, black patches — no star)
 function BallHandle({ size = 24 }) {
@@ -38,7 +38,7 @@ function BallHandle({ size = 24 }) {
   )
 }
 
-export default function Dice({ balance, setBalance, onBack }) {
+export default function Dice({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
   const [target, setTarget] = useState(48.5)     // slider-set target line
@@ -47,6 +47,7 @@ export default function Dice({ balance, setBalance, onBack }) {
   const [history, setHistory] = useState([])     // real rolls {v, win}, newest first
   const [toasts, setToasts] = useState([])
   const [numColor, setNumColor] = useState(null) // null | 'win' | 'lose'
+  const [proof, setProof] = useState(null)       // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const audioRef = useRef({ ctx: null, bus: null, muted: false })
@@ -220,27 +221,48 @@ export default function Dice({ balance, setBalance, onBack }) {
     rafRef.current = requestAnimationFrame(step)
   }
 
-  function betOn(side) {
-    if (rolling || bet > balance || bet < 1) return
-    const roll = rollPoint()   // roll first — SFX jitter randoms must not sit ahead of it
+  // 开奖服务器算，不信前端：只把下注参数（金额/target/方向）传给后端，
+  // roll/win/payout/余额全部以后端返回为准，本地不再算一分钱。
+  async function betOn(side) {
+    // 余额以服务器为准：登录后尚未拿到过 balanceAfter 时 serverBalance 为 null——
+    // 此时不在前端拦截「余额不足」，交给后端 debit() 判断（真不够会返回 400，toast 会显示）。
+    if (rolling || bet < 1 || (serverBalance != null && bet > serverBalance)) return
     ensureAudio()
     playChip()
-    setBalance(b => round2(b - bet))
     setRolling(true)
     setResult(null)
     setNumColor(null)
     if (lossTimerRef.current) clearTimeout(lossTimerRef.current)
-
     setFeedBets(makeFeedBots())   // fresh fake round rides along (display only; after the roll)
-    const chance = side === 'under' ? underChance : overChance
-    // 边界: 两侧都用严格不等号 —— roll 恰等于 target 时两边都输
-    const win = side === 'under' ? roll < target : roll > target
-    const mult = payoutFor(chance)
-    const pay = round2(bet * mult)
+
+    const idempotencyKey = genIdemKey()
+
+    let data
+    try {
+      const resp = await fetch('/round/dice/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+        body: JSON.stringify({ amount: bet, target, direction: side, idempotencyKey }),
+      })
+      data = await resp.json()
+      if (!resp.ok) {
+        setRolling(false)
+        pushToast(data?.error || '下注失败，请重试', 0)
+        return
+      }
+    } catch {
+      setRolling(false)
+      pushToast('网络异常，请稍后重试', 0)
+      return
+    }
+
+    const { roll, win, payout, balanceAfter, serverSeed, commitHash } = data
+    const pay = Number(payout)
 
     animateRoll(roll, () => {
+      setServerBalance(Number(balanceAfter))   // 余额只认后端 balanceAfter，不本地加减
+      setProof({ serverSeed, commitHash })
       if (win) {
-        setBalance(b => round2(b + pay))
         pushToast(`开点 ${roll.toFixed(2)}`, pay)
         setNumColor('win')
         playWin()
@@ -279,7 +301,7 @@ export default function Dice({ balance, setBalance, onBack }) {
     cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.55 : 1,
     display: 'inline-flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.3,
   })
-  const locked = rolling || bet > balance || bet < 1
+  const locked = rolling || bet < 1 || (serverBalance != null && bet > serverBalance)
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
 
@@ -498,6 +520,17 @@ export default function Dice({ balance, setBalance, onBack }) {
           </div>
         </div>
 
+        {/* ---- 可验证公平：显示上一局的 serverSeed + commit hash，玩家可用
+             clientSeed/nonce/serverSeed 自行重算校验 roll 未被篡改 ---- */}
+        {proof && (
+          <div style={{
+            textAlign: 'center', marginTop: 8, fontSize: 10, fontWeight: 600,
+            color: 'rgba(255,255,255,0.4)', wordBreak: 'break-all',
+          }}>
+            可验证 · serverSeed: {proof.serverSeed?.slice(0, 16)}… · hash: {proof.commitHash?.slice(0, 16)}…
+          </div>
+        )}
+
         </div>{/* /middle zone */}
 
         {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip
@@ -571,7 +604,7 @@ export default function Dice({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Total Goals</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 

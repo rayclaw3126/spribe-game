@@ -51,24 +51,26 @@ export default function App() {
     setServerBalance(null)
   }
 
-  // 仅 Aviator 需要真实玩家登录；其它 20 款游戏照旧免登录、本地模拟余额。
-  const isAviator = activeGame === 'Aviator'
-  const needsAviatorLogin = isAviator && !playerToken
+  // 服务器接后端的即时游戏需要真实玩家登录、余额以服务器为准；
+  // 其它游戏照旧免登录、本地模拟余额。
+  const NEEDS_LOGIN = ['Aviator', 'Dice']
+  const isServerGame = NEEDS_LOGIN.includes(activeGame)
+  const needsLogin = isServerGame && !playerToken
 
   return (
     <div style={{ minHeight: '100vh', background: '#0e1520' }}>
-      {!needsAviatorLogin && (
+      {!needsLogin && (
         <Header
-          balance={isAviator ? (serverBalance ?? 0) : balance}
+          balance={isServerGame ? (serverBalance ?? 0) : balance}
           onHome={() => setActiveGame(null)}
           activeGame={activeGame}
         />
       )}
-      <main style={{ paddingTop: needsAviatorLogin ? 0 : '60px' }}>
-        {needsAviatorLogin ? (
+      <main style={{ paddingTop: needsLogin ? 0 : '60px' }}>
+        {needsLogin ? (
           <GameLogin onLogin={handlePlayerLogin} onCancel={() => setActiveGame(null)} />
-        ) : isAviator ? (
-          <Aviator
+        ) : isServerGame ? (
+          <GameComponent
             serverBalance={serverBalance}
             setServerBalance={setServerBalance}
             playerToken={playerToken}
