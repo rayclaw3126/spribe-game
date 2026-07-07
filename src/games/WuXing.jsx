@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 
 // 五行 WuXing — KENO 20 球快开五项皮（80 池无放回抽 20 比总和），第 19 卡。
 // X2：结算引擎 + 轮次状态机 + 赔率定稿（官方原生赔率 14 键出带 → 单据逐档调价，
@@ -110,8 +111,32 @@ const ANIM_WX = 3600       // 五行段亮灯 + 短哨
 const WX_BOUNDS = [695, 763, 855, 923]   // 五行段分界（±30 慢放判定）
 
 // ---------- 静态种子数据（纯展示，零随机数）----------
-const VENUE = 'GARNET PAVILION'        // 架空馆名（对齐 AMBER DOME 系，禁真实场馆名）
+const VENUE = '石榴石殿'                // 架空馆名（对齐 AMBER DOME 系，禁真实场馆名）
 const ROUND_DATE = 'GP20260706'
+
+// 玩法说明文案（中文；盘口数字照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每期从 1–80 号池中抽 20 个球，20 球号码相加得到总和（范围 210–1410）。各盘口按这个总和以及派生数值判定。开球前下注，开奖后命中的盘口按赔率赔付。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 大 / 小：以 810 为界，大[≥811]约 1.95 倍 / 小[≤810]约 1.92 倍。\n· 单 / 双：按总和判定，约 1.95 倍。\n· 龙 / 虎 / 和：比较总和的十位数与个位数。十位大押龙约 2.13 倍，个位大押虎约 9.55 倍，相等押和约 9.55 倍。\n· 上 / 下 / 和：数落在 1–40 区间的球有多少个，超过 10 个押上约 2.4 倍，少于 10 个押下约 2.4 倍，恰好 10 个押和约 4.7 倍。\n· 过关：大小和单双的组合（大单 / 小单 / 大双 / 小双），约 3.82 倍。\n· 五行：按总和落在五个区间分金木水火土 —— 金[≤695] / 木[696-763] / 水[764-855] / 火[856-923] / 土[≥924]，赔率约 2.46 至 9.35 倍不等，越窄的区间赔越高。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '20 球开出后计算总和及派生数值，命中的盘口立即结算，赔付直接入余额。龙虎、上下的胜负盘遇「和」按输处理（不退本金）。每期独立。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押龙虎和、五行金土。\n· 龙虎、上下的胜负盘遇「和」算输，若担心可加押「和」对冲。\n· 本游戏理论返还率约 95–96%，属娱乐性质，理性游戏。',
+  },
+]
 // 种子上局 = 规则页官方示例局：总和 693 → 小/单/龙9虎3(龙)/上13下7(上)/小单/金
 // （真开奖逐期顶掉）
 const SEED_LAST = deriveRound([1, 4, 5, 10, 11, 13, 20, 27, 30, 32, 33, 36, 40, 47, 54, 59, 61, 64, 67, 79])
@@ -244,6 +269,7 @@ export default function WuXing({ balance, setBalance, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [hasLast, setHasLast] = useState(false)
@@ -500,9 +526,9 @@ export default function WuXing({ balance, setBalance, onBack }) {
     }}>{phaseChip.text}</span>
   )
   const topBar = (
-    <GameTopBar gameName="WU XING" venue={VENUE}
+    <GameTopBar gameName="五行" venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} onBack={onBack} />
+      phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
   )
 
   // ---- ① 开奖区：20 球两行×10 + 龙虎/上下计数 + 总和大字 ----
@@ -765,7 +791,7 @@ export default function WuXing({ balance, setBalance, onBack }) {
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input
               value={bet}
               disabled={!betting}
@@ -798,6 +824,8 @@ export default function WuXing({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="五行 玩法说明" sections={RULES} />
     </Panel>
   )
 
