@@ -1,11 +1,13 @@
 // 代理树 + 额度下发接口
 // 说明：本文件只负责「建下级代理」「上下级之间的额度发放/收回」「查子树/查直属下级」
-// 这几个协议层接口。所有额度变动只通过 lib/credit.js 的 transfer，本文件不直接
-// UPDATE credit_lines。越权访问（操作不在自己子树内的代理）一律 403 拒绝。
+// 「占成设置」「玩家上下分」这几个协议层接口。所有额度变动只通过 lib/credit.js 的
+// transfer/spend/topup，本文件不直接 UPDATE credit_lines。越权访问（操作不在自己
+// 子树内的代理，或目标玩家不在自己线下）一律 403 拒绝。
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { query, withTransaction } from '../db.js';
-import { transfer } from '../lib/credit.js';
+import { transfer, spend, topup } from '../lib/credit.js';
+import * as wallet from '../lib/wallet.js';
 import { requireAuth, requireType } from '../middleware/auth.js';
 
 const router = Router();
@@ -39,6 +41,30 @@ async function isDescendant(client, meId, targetAgentId) {
   );
   // rowCount = 0 表示：目标代理不存在，或者目标就是自己 —— 两种情况都不算「在子树内」
   return result.rowCount > 0 && result.rows[0].is_descendant === true;
+}
+
+/**
+ * 判断玩家 playerId 是否在 meId 的线下（即 meId 是玩家所属代理的祖先，或就是其直属代理）。
+ * 玩家直属代理的 path 本身就包含它自己，所以「玩家直属代理 === meId」时 path 也会含 meId，
+ * 这里不像 isDescendant 那样排除「target===me」的情况，天然覆盖了「玩家就在我自己名下」。
+ * 必须传入事务内的 client（deposit/withdraw 都在 withTransaction 里调用本函数）。
+ * @param {import('pg').PoolClient} client
+ * @param {number|string} meId
+ * @param {number|string} playerId
+ * @returns {Promise<{ok:boolean, agentId:(number|null)}>} - ok=是否在线下；agentId=玩家所属代理 id（玩家不存在则为 null）
+ */
+async function isPlayerInDownline(client, meId, playerId) {
+  const result = await client.query(
+    `SELECT p.agent_id AS agent_id, ($1::text = ANY(a.path)) AS is_in_downline
+       FROM players p
+       JOIN agents a ON a.id = p.agent_id
+      WHERE p.id = $2::bigint`,
+    [meId, playerId]
+  );
+  if (result.rowCount === 0) {
+    return { ok: false, agentId: null };
+  }
+  return { ok: result.rows[0].is_in_downline === true, agentId: result.rows[0].agent_id };
 }
 
 // ------------------------------------------------------------------
@@ -231,13 +257,14 @@ router.get('/downline', async (req, res, next) => {
   try {
     const meId = req.user.sub;
     const result = await query(
-      `SELECT id, username, level, role, status, 'agent'::text AS kind
+      `SELECT id, username, level, role, status, 'agent'::text AS kind, NULL::numeric AS balance
          FROM agents
         WHERE parent_id = $1::bigint
        UNION ALL
-       SELECT id, username, NULL::integer AS level, NULL::text AS role, status, 'player'::text AS kind
-         FROM players
-        WHERE agent_id = $1::bigint
+       SELECT p.id, p.username, NULL::integer AS level, NULL::text AS role, p.status, 'player'::text AS kind, w.balance
+         FROM players p
+         LEFT JOIN wallets w ON w.player_id = p.id
+        WHERE p.agent_id = $1::bigint
        ORDER BY kind, id`,
       [meId]
     );
@@ -279,6 +306,185 @@ router.get('/me', async (req, res, next) => {
       turnoverPct: row.turnover_pct,
     });
   } catch (err) {
+    return next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// POST /agent/commission/config —— 给子树内的下级代理设占成比例
+// ------------------------------------------------------------------
+router.post('/commission/config', async (req, res, next) => {
+  try {
+    const meId = req.user.sub;
+    const { agentId, winLossPct, turnoverPct } = req.body || {};
+
+    if (!agentId || winLossPct === undefined || winLossPct === null || turnoverPct === undefined || turnoverPct === null) {
+      return res.status(400).json({ error: '参数不完整：agentId / winLossPct / turnoverPct 均为必填' });
+    }
+
+    const result = await withTransaction(async (client) => {
+      const ok = await isDescendant(client, meId, agentId);
+      if (!ok) {
+        throw httpError(403, '目标不在你的线下');
+      }
+
+      // 自己无 commission_config 记录时，视为上限 100.00（顶级代理没有上级约束）
+      const selfResult = await client.query(
+        'SELECT win_loss_pct, turnover_pct FROM commission_config WHERE agent_id = $1',
+        [meId]
+      );
+      const selfWin = selfResult.rowCount > 0 ? selfResult.rows[0].win_loss_pct : '100.00';
+      const selfTurn = selfResult.rowCount > 0 ? selfResult.rows[0].turnover_pct : '100.00';
+
+      const withinLimitResult = await client.query(
+        'SELECT $1::numeric <= $2::numeric AS win_ok, $3::numeric <= $4::numeric AS turn_ok',
+        [winLossPct, selfWin, turnoverPct, selfTurn]
+      );
+      const { win_ok: winOk, turn_ok: turnOk } = withinLimitResult.rows[0];
+      if (!winOk || !turnOk) {
+        throw httpError(400, '占成不能超过上级');
+      }
+
+      await client.query(
+        `INSERT INTO commission_config (agent_id, win_loss_pct, turnover_pct)
+         VALUES ($1, $2::numeric, $3::numeric)
+         ON CONFLICT (agent_id) DO UPDATE
+           SET win_loss_pct = $2::numeric, turnover_pct = $3::numeric, updated_at = now()`,
+        [agentId, winLossPct, turnoverPct]
+      );
+
+      await client.query(
+        `INSERT INTO audit_log (actor_agent, action, detail)
+         VALUES ($1, 'commission_config', $2::jsonb)`,
+        [meId, JSON.stringify({ targetAgent: agentId, winLossPct, turnoverPct })]
+      );
+
+      return { agentId, winLossPct, turnoverPct };
+    });
+
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// POST /agent/player/deposit —— 玩家上分（额度 -> 玩家余额）
+// ------------------------------------------------------------------
+router.post('/player/deposit', async (req, res, next) => {
+  try {
+    const meId = req.user.sub;
+    const { playerId, amount, idempotencyKey } = req.body || {};
+
+    if (!playerId || !amount || !idempotencyKey) {
+      return res.status(400).json({ error: '参数不完整：playerId / amount / idempotencyKey 均为必填' });
+    }
+
+    const result = await withTransaction(async (client) => {
+      // 幂等：同一个 idempotencyKey 已经处理过，直接把当时的结果原样返回，不重复扣额度/加余额
+      const existing = await client.query('SELECT balance_after FROM ledger WHERE idempotency_key = $1', [
+        idempotencyKey,
+      ]);
+      if (existing.rowCount > 0) {
+        return { playerBalanceAfter: existing.rows[0].balance_after, agentCreditAfter: null, idempotent: true };
+      }
+
+      const { ok, agentId } = await isPlayerInDownline(client, meId, playerId);
+      if (!ok) {
+        throw httpError(403, '目标不在你的线下');
+      }
+
+      const spendResult = await spend(client, { agentId: meId, amount, type: 'player_deposit' });
+      const creditResult = await wallet.credit(client, {
+        playerId,
+        amount,
+        type: 'deposit',
+        idempotencyKey,
+      });
+
+      await client.query(
+        `INSERT INTO audit_log (actor_agent, action, target_player, amount, detail)
+         VALUES ($1, 'player_deposit', $2::bigint, $3::numeric, $4::jsonb)`,
+        [meId, playerId, amount, JSON.stringify({ agentCreditAfter: spendResult.creditAfter, targetAgent: agentId })]
+      );
+
+      return {
+        playerBalanceAfter: creditResult.balanceAfter,
+        agentCreditAfter: spendResult.creditAfter,
+        idempotent: false,
+      };
+    });
+
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.message === '额度不足') {
+      return res.status(400).json({ error: err.message });
+    }
+    return next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// POST /agent/player/withdraw —— 玩家下分（玩家余额 -> 额度）
+// ------------------------------------------------------------------
+router.post('/player/withdraw', async (req, res, next) => {
+  try {
+    const meId = req.user.sub;
+    const { playerId, amount, idempotencyKey } = req.body || {};
+
+    if (!playerId || !amount || !idempotencyKey) {
+      return res.status(400).json({ error: '参数不完整：playerId / amount / idempotencyKey 均为必填' });
+    }
+
+    const result = await withTransaction(async (client) => {
+      // 幂等：同一个 idempotencyKey 已经处理过，直接把当时的结果原样返回，不重复扣余额/加额度
+      const existing = await client.query('SELECT balance_after FROM ledger WHERE idempotency_key = $1', [
+        idempotencyKey,
+      ]);
+      if (existing.rowCount > 0) {
+        return { playerBalanceAfter: existing.rows[0].balance_after, agentCreditAfter: null, idempotent: true };
+      }
+
+      const { ok, agentId } = await isPlayerInDownline(client, meId, playerId);
+      if (!ok) {
+        throw httpError(403, '目标不在你的线下');
+      }
+
+      const debitResult = await wallet.debit(client, {
+        playerId,
+        amount,
+        type: 'withdraw',
+        idempotencyKey,
+      });
+      const topupResult = await topup(client, { agentId: meId, amount, type: 'player_withdraw' });
+
+      await client.query(
+        `INSERT INTO audit_log (actor_agent, action, target_player, amount, detail)
+         VALUES ($1, 'player_withdraw', $2::bigint, $3::numeric, $4::jsonb)`,
+        [meId, playerId, amount, JSON.stringify({ agentCreditAfter: topupResult.creditAfter, targetAgent: agentId })]
+      );
+
+      return {
+        playerBalanceAfter: debitResult.balanceAfter,
+        agentCreditAfter: topupResult.creditAfter,
+        idempotent: false,
+      };
+    });
+
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.message === '余额不足') {
+      return res.status(400).json({ error: err.message });
+    }
     return next(err);
   }
 });

@@ -84,3 +84,18 @@ export function grantCredit(toAgent, amount) {
 export function reclaimCredit(fromAgent, amount) {
   return request('/agent/credit/reclaim', { method: 'POST', body: { fromAgent, amount } })
 }
+
+export function setCommissionConfig(agentId, winLossPct, turnoverPct) {
+  return request('/agent/commission/config', {
+    method: 'POST',
+    body: { agentId, winLossPct, turnoverPct },
+  })
+}
+
+export function deposit(playerId, amount, idempotencyKey) {
+  return request('/agent/player/deposit', { method: 'POST', body: { playerId, amount, idempotencyKey } })
+}
+
+export function withdraw(playerId, amount, idempotencyKey) {
+  return request('/agent/player/withdraw', { method: 'POST', body: { playerId, amount, idempotencyKey } })
+}

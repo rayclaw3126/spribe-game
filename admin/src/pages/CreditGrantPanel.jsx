@@ -5,7 +5,7 @@ import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
 import { useAgentTree } from '../state/AgentContext.jsx'
 import { useToast } from '../state/ToastContext.jsx'
 import { grantCredit, reclaimCredit } from '../api/client.js'
-import PlaceholderBadge from '../components/PlaceholderBadge.jsx'
+import CommissionConfigForm from '../components/CommissionConfigForm.jsx'
 
 export default function CreditGrantPanel() {
   const { downlineOfSelf, refresh } = useAgentTree()
@@ -152,30 +152,7 @@ export default function CreditGrantPanel() {
         </div>
       </div>
 
-      <div
-        style={{
-          background: COLORS.panel,
-          border: `1px solid ${COLORS.border}`,
-          borderRadius: RADIUS.md,
-          padding: SPACE.lg,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: SPACE.md,
-          opacity: 0.55,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: 14.5, fontWeight: 600, color: COLORS.text }}>占成设置</div>
-          <PlaceholderBadge text="设置接口待单6" />
-        </div>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 13, color: COLORS.textMuted }}>下级占成比例（%）</span>
-          <input type="number" disabled placeholder="待接口开放" style={disabledInputStyle} />
-        </label>
-        <button type="button" disabled style={disabledButtonStyle}>
-          保存设置
-        </button>
-      </div>
+      <CommissionConfigForm />
     </div>
   )
 }
@@ -194,23 +171,3 @@ function actionButtonStyle(bg, busy) {
   }
 }
 
-const disabledInputStyle = {
-  padding: '9px 10px',
-  fontSize: 14,
-  color: COLORS.textFaint,
-  background: COLORS.surface,
-  border: `1px solid ${COLORS.border}`,
-  borderRadius: RADIUS.sm,
-  cursor: 'not-allowed',
-}
-
-const disabledButtonStyle = {
-  padding: '9px 16px',
-  fontSize: 13.5,
-  fontWeight: 600,
-  color: COLORS.textFaint,
-  background: 'transparent',
-  border: `1px solid ${COLORS.border}`,
-  borderRadius: RADIUS.sm,
-  cursor: 'not-allowed',
-}
