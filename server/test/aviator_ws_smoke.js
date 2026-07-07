@@ -13,8 +13,9 @@ import WebSocket from 'ws';
 import crypto from 'crypto';
 import { generateCrash } from '../src/game/aviator.js';
 
-const WS_URL = 'ws://127.0.0.1:4000/ws/aviator';
-const TIMEOUT_MS = 20000;
+const HTTP_BASE = 'http://127.0.0.1:4000';
+const WS_BASE = 'ws://127.0.0.1:4000/ws/aviator';
+const TIMEOUT_MS = 40000; // 中途连上需先等当前局结束、再跟完整一局，放宽到 40s
 
 function fail(msg) {
   console.error(`❌ 断言失败：${msg}`);
@@ -25,8 +26,23 @@ function assert(cond, msg) {
   if (!cond) fail(msg);
 }
 
+// 第2批给 WS 加了 ?token= 认证：不带 token 会被 close(1008) 直接踢掉。
+// 先用玩家账号登录拿 token，再带上连 WS，commit-reveal 公平验证才能真正跑起来。
+async function login() {
+  const res = await fetch(`${HTTP_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'alice', password: 'alice123', type: 'player' }),
+  });
+  if (!res.ok) fail(`登录失败：HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.token) fail('登录响应里没有 token');
+  return data.token;
+}
+
 async function main() {
-  const ws = new WebSocket(WS_URL);
+  const token = await login();
+  const ws = new WebSocket(`${WS_BASE}?token=${encodeURIComponent(token)}`);
 
   let betting = null; // { roundId, nonce, clientSeed, commitHash, waitMs }
   const ticks = [];
@@ -36,7 +52,13 @@ async function main() {
   const timeoutHandle = setTimeout(() => {
     fail(`超时（${TIMEOUT_MS}ms）：没能在限定时间内走完一整局`);
   }, TIMEOUT_MS);
-  timeoutHandle.unref?.();
+  // 注意：不再 unref() —— 之前 unref 让超时不阻塞进程，一旦连接被 close（如认证失败）
+  // 进程会静默 exit 0 假装通过。现在保留超时 + 下面的 close 兜底，异常必 exit 1。
+
+  // 走完一局之前若连接被关闭（认证失败/被踢），判定失败，避免静默假通过。
+  ws.on('close', (code, reason) => {
+    if (!crashed) fail(`WS 在走完一局前被关闭：code=${code} reason=${reason.toString()}`);
+  });
 
   ws.on('message', (raw) => {
     let msg;
@@ -48,6 +70,9 @@ async function main() {
     }
 
     if (msg.type === 'crashed') {
+      // 中途连上时可能先撞见「当前局」的 crashed（还没追踪到它的 betting）——
+      // 跳过它，等下一局从 betting 开始的完整一局，才能做 commit-reveal 校验。
+      if (!betting || msg.nonce !== betting.nonce) return;
       crashed = msg;
       finish();
       return;
