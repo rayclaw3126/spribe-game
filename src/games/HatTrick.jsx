@@ -7,6 +7,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 import BetButton from '../components/shell/BetButton'
 
 // Hat Trick — 快3三骰彩（三骰和值 + 豹子 + 对子），第 15 卡。
@@ -106,8 +107,32 @@ const DIE_START = [0, 250, 500]       // 各骰抛入时刻
 const DIE_LOCK = [2600, 3500, 4500]   // 各骰定格时刻（第1骰 2.6s / 第2骰 3.5s / 第3骰 4.5s）
 const FALL_DUR = 500                  // 抛物线下坠段
 const TOTAL_LOCK = 5100               // TOTAL 大字滚动累加后定格金闪
-const VENUE = 'AMBER DOME'          // 架空场馆名（禁真实球场名）
+const VENUE = '琥珀穹顶'             // 架空场馆名（禁真实球场名）
 const ROUND_DATE = '20260705'
+
+// 玩法说明文案（中文；盘口数字照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每期掷 3 颗骰子（各 1–6），根据点数和、豹子、对子等结果判定盘口。开球前下注，开奖后命中的盘口按赔率赔付。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 和值：押 3 颗骰子的点数总和（4–17），赔率随难度从约 7.6 倍到 68.76 倍不等，越极端的和值赔越高。\n· 大 / 小 / 单 / 双：大[11-17] / 小[4-10]，按总和判定，约 1.96 倍。注意开出豹子时这四个盘口全输。\n· 任意豹子：3 颗骰子点数全相同（不限哪个点），约 34.38 倍。\n· 指定豹子：押中开出的具体豹子点数（如三个 5），约 206.28 倍。\n· 指定对子：押的点数至少出现两次（含该点豹子），约 12.89 倍。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '3 颗骰子掷出后计算总和及豹子/对子，命中的盘口立即结算，赔付直接入余额。开豹子时大小单双四个盘口全输（豹子通杀）。每期独立。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双，中奖率约一半，但小心豹子通杀；想搏大赔押指定豹子。\n· 和值押中间值（10、11）比押两端（4、17）容易得多。\n· 本游戏理论返还率约 95.5%，属娱乐性质，理性游戏。',
+  },
+]
 const ROAD_CAP = 120
 
 // 种子历史（新→旧；真开奖逐期顶掉。含 2 期豹子：[2,2,2]、[6,6,6]）
@@ -121,10 +146,10 @@ const SEED_RECENT = SEED_ROUNDS.slice(0, 5).map(sumOf)
 const SEED_HISTORY = [...SEED_ROUNDS].reverse()   // 珠盘路旧→新
 
 const SIDES = [
-  { key: 's-big',   name: 'BIG',   range: '11–17' },
-  { key: 's-small', name: 'SMALL', range: '4–10' },
-  { key: 's-odd',   name: 'ODD',   range: '和值单' },
-  { key: 's-even',  name: 'EVEN',  range: '和值双' },
+  { key: 's-big',   name: '大', range: '11–17' },
+  { key: 's-small', name: '小', range: '4–10' },
+  { key: 's-odd',   name: '单', range: '和值单' },
+  { key: 's-even',  name: '双', range: '和值双' },
 ]
 
 // ---------- 骰面（CSS 点阵，size 参数化；禁 emoji 禁图）----------
@@ -157,6 +182,8 @@ function DieFace({ v, size = 18 }) {
 
 // ---------- 珠盘路 ----------
 const ROAD_TABS = ['TOTAL', 'B-S', 'TRIPLE']
+// 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照 Derby/HalfTime 先例分离）
+const ROAD_TAB_LABELS = { TOTAL: '和值', 'B-S': '大小', TRIPLE: '豹子' }
 function beadFor(tab, dice) {
   const s = sumOf(dice)
   const triple = dice[0] === dice[1] && dice[1] === dice[2]
@@ -390,7 +417,7 @@ function DiceStage({ roll, height, shakeRef, sfx, onFinale, onLastSuspense, winT
         }
         ctx.fillStyle = isLockT ? HATTRICK.gold : 'rgba(255,255,255,0.85)'
         ctx.font = `900 ${Math.round(H * 0.2)}px 'Space Grotesk', sans-serif`
-        ctx.fillText(roll.isTriple && isLockT ? `TRIPLE ${roll.tripleFace}` : `TOTAL ${shown}`, W / 2, H * 0.85)
+        ctx.fillText(roll.isTriple && isLockT ? `豹子 ${roll.tripleFace}` : `和值 ${shown}`, W / 2, H * 0.85)
         ctx.shadowBlur = 0
       }
 
@@ -407,13 +434,13 @@ function DiceStage({ roll, height, shakeRef, sfx, onFinale, onLastSuspense, winT
           ctx.shadowColor = HATTRICK.gold; ctx.shadowBlur = 28 * dpr
           ctx.fillStyle = HATTRICK.gold
           ctx.font = `900 ${Math.round(H * 0.17)}px 'Space Grotesk', sans-serif`
-          ctx.fillText('HAT-TRICK!', 0, 0)
+          ctx.fillText('帽子戏法！', 0, 0)
         } else {
           ctx.shadowColor = '#35d07f'; ctx.shadowBlur = 18 * dpr
           ctx.fillStyle = '#fff'
           ctx.font = `900 ${Math.round(H * 0.13)}px 'Space Grotesk', sans-serif`
           const wt = cbRef.current.winTotal
-          ctx.fillText(wt > 0 ? `GOAL!  +$${wt.toFixed(2)}` : 'GOAL!', 0, 0)
+          ctx.fillText(wt > 0 ? `进球！ +$${wt.toFixed(2)}` : '进球！', 0, 0)
         }
         ctx.shadowBlur = 0
         ctx.restore()
@@ -457,7 +484,7 @@ function DiceStage({ roll, height, shakeRef, sfx, onFinale, onLastSuspense, winT
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
         {roll.dice.map((v, i) => <DieFace key={i} v={v} size={34} />)}
         <span style={{ color: HATTRICK.gold, fontSize: 18, fontWeight: 900 }}>
-          {roll.isTriple ? `TRIPLE ${roll.tripleFace}` : `TOTAL ${roll.total}`}
+          {roll.isTriple ? `豹子 ${roll.tripleFace}` : `和值 ${roll.total}`}
         </span>
       </div>
     )
@@ -470,6 +497,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [roadTab, setRoadTab] = useState('TOTAL')
@@ -914,13 +942,13 @@ export default function HatTrick({ balance, setBalance, onBack }) {
       <span style={{
         marginLeft: 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
         background: HATTRICK.gold, color: '#3a2c00', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>{lastRoll.isTriple ? `TRIPLE ${lastRoll.tripleFace}` : `TOTAL ${lastRoll.total}`}</span>
+      }}>{lastRoll.isTriple ? `豹子 ${lastRoll.tripleFace}` : `和值 ${lastRoll.total}`}</span>
     </span>
   )
   const topBar = (
-    <GameTopBar gameName="HAT TRICK" band={HATTRICK.band} venue={VENUE}
+    <GameTopBar gameName="帽子戏法" band={HATTRICK.band} venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} />
+      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
   )
 
   // ---- 珠盘路（真历史滚动，容量 6×20）----
@@ -939,7 +967,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
             color: roadTab === t ? '#083a1b' : HATTRICK.dim,
             border: `1px solid ${roadTab === t ? HATTRICK.sel : 'rgba(255,255,255,0.2)'}`,
             fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
-          }}>{t}</button>
+          }}>{ROAD_TAB_LABELS[t]}</button>
         ))}
       </div>
       <div style={{
@@ -1074,7 +1102,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
             <span style={{
               color: HATTRICK.gold, fontSize: isMobile ? 16 : 20, fontWeight: 900,
               fontFamily: "'Space Grotesk', sans-serif",
-            }}>{lastRoll.isTriple ? `TRIPLE ${lastRoll.tripleFace}` : `TOTAL ${lastRoll.total}`}</span>
+            }}>{lastRoll.isTriple ? `豹子 ${lastRoll.tripleFace}` : `和值 ${lastRoll.total}`}</span>
           </div>
         )}
       </div>
@@ -1089,7 +1117,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
         <WinToast toasts={toasts} />
         {/* 行① TOTAL：4–17 十四小格 + 大小单双四大格（豹子通杀） */}
         <div style={secBox}>
-          <div style={secHead}>TOTAL · 和值 4–17</div>
+          <div style={secHead}>和值 4-17</div>
           <div style={{
             display: 'grid',
             gridTemplateColumns: isMobile ? 'repeat(7, 1fr)' : 'repeat(14, 1fr)',
@@ -1103,7 +1131,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
                 <span style={cellName}>{m.name}</span>
                 <span style={cellRange}>{m.range}</span>
                 <span className={fxCls(m.key)} style={{ ...cellOdds, fontSize: isMobile ? 10 : 11.5, whiteSpace: 'nowrap' }}>{betsPlaced.has(m.key) ? winTxt(m.key, MARKETS[m.key].odds) : ODDS.side.toFixed(2)}</span>
-                <span style={{ color: HATTRICK.dim, fontSize: isMobile ? 7.5 : 8.5, fontWeight: 700, whiteSpace: 'nowrap' }}>Triple loses</span>
+                <span style={{ color: HATTRICK.dim, fontSize: isMobile ? 7.5 : 8.5, fontWeight: 700, whiteSpace: 'nowrap' }}>豹子通杀</span>
                 {stakeChip(m.key)}
                 {nearBadge(m.key)}
               </button>
@@ -1113,12 +1141,11 @@ export default function HatTrick({ balance, setBalance, onBack }) {
 
         {/* 行② HAT TRICK：任意豹子 + 指定三同六格 */}
         <div style={secBox}>
-          <div style={secHead}>HAT TRICK · 豹子</div>
+          <div style={secHead}>豹子</div>
           <div style={{ display: 'flex', gap: isMobile ? 5 : 8, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
             <button type="button" className={cellCls('tr-any')} disabled={!betting} onClick={() => toggleSel('tr-any')}
               style={{ ...cellBtn('tr-any'), ...(isMobile ? { flex: '1 1 100%' } : { flex: 1.6 }) }}>
-              <span style={cellName}>ANY TRIPLE</span>
-              <span style={cellRange}>任意豹子</span>
+              <span style={cellName}>任意豹子</span>
               <span className={fxCls('tr-any')} style={{ ...cellOdds, whiteSpace: 'nowrap' }}>{betsPlaced.has('tr-any') ? winTxt('tr-any', MARKETS['tr-any'].odds) : ODDS.anyTriple.toFixed(2)}</span>
               {stakeChip('tr-any')}
             </button>
@@ -1137,7 +1164,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
 
         {/* 行③ DOUBLE：指定对子六格（含该面豹子） */}
         <div style={secBox}>
-          <div style={secHead}>DOUBLE · 对子</div>
+          <div style={secHead}>对子</div>
           <div style={{ display: 'flex', gap: isMobile ? 5 : 8, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
             {Array.from({ length: 6 }, (_, i) => i + 1).map(v => (
               <button key={v} type="button" className={cellCls(`d-${v}`)} disabled={!betting} onClick={() => toggleSel(`d-${v}`)}
@@ -1192,7 +1219,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input
               value={bet}
               disabled={!betting}
@@ -1225,6 +1252,8 @@ export default function HatTrick({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="帽子戏法 玩法说明" sections={RULES} />
     </Panel>
   )
 
