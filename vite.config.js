@@ -21,6 +21,11 @@ export default defineConfig({
         target: 'http://127.0.0.1:4000',
         changeOrigin: true,
       },
+      // 玩家余额只读查询：前端刷新后 fetch /player/me 恢复 serverBalance，同源代理转发。
+      '/player': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+      },
     },
   },
 })

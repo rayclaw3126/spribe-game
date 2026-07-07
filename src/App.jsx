@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Lobby from './components/Lobby'
 import Header from './components/Header'
 import GameLogin from './pages/GameLogin'
@@ -53,6 +53,22 @@ export default function App() {
     setPlayerToken('')
     setServerBalance(null)
   }
+
+  // 已登录（token 在 localStorage）刷新页面时，主动拉一次玩家余额作为 serverBalance 初值，
+  // 让即时游戏（Dice/Aviator）首屏就能显示真实余额，不必等第一次下注。token 失效则登出。
+  useEffect(() => {
+    if (!playerToken) return
+    let cancelled = false
+    fetch('/player/me', { headers: { Authorization: `Bearer ${playerToken}` } })
+      .then(async (resp) => {
+        if (resp.status === 401) { handlePlayerLogout(); return }
+        if (!resp.ok) return
+        const data = await resp.json()
+        if (!cancelled && data.balance != null) setServerBalance(Number(data.balance))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [playerToken])
 
   // 服务器接后端的即时游戏需要真实玩家登录、余额以服务器为准；
   // 其它游戏照旧免登录、本地模拟余额。
