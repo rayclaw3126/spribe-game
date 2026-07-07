@@ -7,6 +7,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 import BetButton from '../components/shell/BetButton'
 
 // Number Up — 两位数球衣号码彩（00–49）。
@@ -65,8 +66,32 @@ const SETTLED_T = 6     // 3s
 const BOARD_RISE = 800
 const TENS_LOCK = 2500
 const ONES_LOCK = 4300
-const VENUE = 'OPAL COURT'          // 架空场馆名（禁真实球场名）
+const VENUE = '蛋白石球场'          // 架空场馆名（禁真实球场名）
 const ROUND_DATE = '20260705'
+
+// 玩法说明文案（中文；盘口数字照实）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每期开出一个 00–49 的号码。你在下注截止前选号下注，开奖后按押中的盘口赔付。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 直选：押中开出的整个两位数，约 47.5 倍。\n· 首位：押中十位数（0–4），约 4.75 倍。\n· 尾数：押中个位数（0–9），约 9.5 倍。\n· 大 / 小：大[25–49] / 小[00–24]，约 1.91 倍。\n· 单 / 双：按开出号码判定，约 1.91 倍。',
+  },
+  {
+    icon: '🎬', title: '开奖与结算',
+    body: '换人牌翻出十位与个位组成本期号码，命中的盘口高亮并即时结算，赔付直接入余额。每期独立，上期不影响下期。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押直选。\n· 首位和尾数是中等赔率，比直选好中。\n· 本游戏理论返还率约 95%，属娱乐性质，理性游戏。',
+  },
+]
 const ROAD_CAP = 120
 
 // 种子上期 + 种子历史（值域 0–49，真开奖逐期顶掉）
@@ -79,13 +104,15 @@ const SEED_HISTORY = [
 ]
 
 const SIDES = [
-  { key: 's-high', name: 'HIGH', range: '25–49' },
-  { key: 's-low',  name: 'LOW',  range: '00–24' },
-  { key: 's-odd',  name: 'ODD',  range: '尾数单' },
-  { key: 's-even', name: 'EVEN', range: '尾数双' },
+  { key: 's-high', name: '大', range: '25–49' },
+  { key: 's-low',  name: '小', range: '00–24' },
+  { key: 's-odd',  name: '单', range: '尾数单' },
+  { key: 's-even', name: '双', range: '尾数双' },
 ]
 
+// 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照 Derby/HalfTime 先例分离）
 const ROAD_TABS = ['NUMBER', 'DIGIT', 'H-L']
+const ROAD_TAB_LABELS = { NUMBER: '号码', DIGIT: '位数', 'H-L': '大小' }
 function beadFor(tab, n) {
   if (tab === 'NUMBER') return { t: pad2(n), c: n >= 25 ? NUMBERUP.hi : NUMBERUP.lo }
   if (tab === 'DIGIT') { const d = n % 10; return { t: String(d), c: d % 2 ? NUMBERUP.hi : NUMBERUP.lo } }
@@ -283,6 +310,7 @@ export default function NumberUp({ balance, setBalance, onBack }) {
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [roadTab, setRoadTab] = useState('NUMBER')
@@ -564,13 +592,13 @@ export default function NumberUp({ balance, setBalance, onBack }) {
       <span style={{
         marginLeft: 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
         background: NUMBERUP.gold, color: '#3a2c00', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>NUMBER {pad2(lastNum.num)}</span>
+      }}>号码 {pad2(lastNum.num)}</span>
     </span>
   )
   const topBar = (
-    <GameTopBar gameName="NUMBER UP" band={NUMBERUP.band} venue={VENUE}
+    <GameTopBar gameName="号码王" band={NUMBERUP.band} venue={VENUE}
       roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} />
+      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
   )
 
   // ---- 珠盘路（真历史滚动，容量 6×20）----
@@ -590,7 +618,7 @@ export default function NumberUp({ balance, setBalance, onBack }) {
             color: roadTab === t ? '#083a1b' : NUMBERUP.dim,
             border: `1px solid ${roadTab === t ? NUMBERUP.sel : 'rgba(255,255,255,0.2)'}`,
             fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
-          }}>{t}</button>
+          }}>{ROAD_TAB_LABELS[t]}</button>
         ))}
       </div>
       <div style={{
@@ -644,7 +672,7 @@ export default function NumberUp({ balance, setBalance, onBack }) {
           <span style={{
             padding: '2px 14px', borderRadius: RADIUS.pill,
             background: NUMBERUP.gold, color: '#3a2c00', fontSize: 13, fontWeight: 900, whiteSpace: 'nowrap',
-          }}>NUMBER {pad2(lastNum.num)}</span>
+          }}>号码 {pad2(lastNum.num)}</span>
         </div>
       )}
     </div>
@@ -681,7 +709,7 @@ export default function NumberUp({ balance, setBalance, onBack }) {
           background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)',
           boxSizing: 'border-box',
         }}>
-          <div style={secHead}>PICK 00–49 · 直选 · 赔率 {ODDS.pick.toFixed(2)}</div>
+          <div style={secHead}>直选 · 赔率 {ODDS.pick.toFixed(2)}</div>
           <div style={{
             display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)',
             gap: isMobile ? 3 : 3,
@@ -699,8 +727,8 @@ export default function NumberUp({ balance, setBalance, onBack }) {
           flexDirection: isMobile ? 'column' : 'row',
         }}>
           {[
-            { pre: 'fd', label: `FIRST DIGIT · 首位 · ${ODDS.firstDigit.toFixed(2)}`, count: 5 },
-            { pre: 'ld', label: `LAST DIGIT · 尾数 · ${ODDS.lastDigit.toFixed(2)}`, count: 10 },
+            { pre: 'fd', label: `首位 · ${ODDS.firstDigit.toFixed(2)}`, count: 5 },
+            { pre: 'ld', label: `尾数 · ${ODDS.lastDigit.toFixed(2)}`, count: 10 },
           ].map(g => (
             <div key={g.pre} style={{ flex: 1, minWidth: 0 }}>
               <div style={secHead}>{g.label}</div>
@@ -766,7 +794,7 @@ export default function NumberUp({ balance, setBalance, onBack }) {
             borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
           }}>
-            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>USD</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
           </div>
@@ -790,6 +818,8 @@ export default function NumberUp({ balance, setBalance, onBack }) {
           </div>
         </div>
       </div>
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={VENUE} title="号码王 玩法说明" sections={RULES} />
     </Panel>
   )
 
