@@ -38,10 +38,13 @@ export default function App() {
 
   const GameComponent = activeGame ? GAMES[activeGame] : null
 
-  function handlePlayerLogin({ token, username }) {
+  function handlePlayerLogin({ token, username, balance }) {
     localStorage.setItem(TOKEN_KEY, token)
     if (username) localStorage.setItem(NAME_KEY, username)
     setPlayerToken(token)
+    // 登录接口已带回玩家钱包余额：立即作为 serverBalance 初值，
+    // 即时游戏（Dice/Aviator）首屏就能显示真实余额，不再是 0。
+    if (balance != null) setServerBalance(Number(balance))
   }
 
   function handlePlayerLogout() {

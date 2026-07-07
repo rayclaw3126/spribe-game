@@ -57,7 +57,15 @@ router.post('/login', async (req, res, next) => {
       [actorAgentId, JSON.stringify({ type, username: account.username })]
     );
 
-    return res.json({ token, type, id: account.id, username: account.username });
+    // 玩家登录时带上钱包余额，供前端即时游戏（Dice/Aviator）登录后直接展示初值，
+    // 避免首屏 serverBalance 未知而显示为 0。代理登录无此需求，balance 返回 null。
+    let balance = null;
+    if (type === 'player') {
+      const walletRes = await query('SELECT balance FROM wallets WHERE player_id = $1', [account.id]);
+      balance = walletRes.rowCount > 0 ? walletRes.rows[0].balance : '0.00';
+    }
+
+    return res.json({ token, type, id: account.id, username: account.username, balance });
   } catch (err) {
     return next(err);
   }

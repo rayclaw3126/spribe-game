@@ -29,7 +29,7 @@ export default function GameLogin({ onLogin, onCancel }) {
         setLoading(false)
         return
       }
-      onLogin({ token: data.token, username: data.username })
+      onLogin({ token: data.token, username: data.username, balance: data.balance })
     } catch {
       setError('网络异常，请稍后重试')
       setLoading(false)
