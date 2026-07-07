@@ -33,6 +33,7 @@ const state = {
   commitHash: null,
   crashPoint: null,
   flyStart: null,
+  bettingStart: null, // betting 阶段开始时间戳（ms）—— 支撑中途加入时的 snapshot 剩余时间计算
   // 本局下注表：key = playerId（字符串，来自 JWT payload.sub），
   // value = { amount, cashedOut, betId, agentId, payout }。
   // 每局 betting 阶段开始时清空（runWaitingPhase），crashed 阶段结算时读取。
@@ -107,6 +108,7 @@ async function runWaitingPhase(wss) {
   state.crashPoint = crashPoint;
   state.nonce = nonce;
   state.roundId = null;
+  state.bettingStart = Date.now(); // 支撑 snapshot 里 betting 阶段的剩余时间计算
   // 新的一局开始：清空上一局的下注表，避免残留上一局玩家的 cashedOut/payout 状态。
   state.bets.clear();
 
@@ -380,6 +382,71 @@ async function handleCashout(ws) {
 }
 
 /**
+ * 组装「当前局的公开快照」，供新连接和客户端主动 {type:'sync'} 请求使用。
+ * 严守不变量：betting/flying 阶段绝不包含 serverSeed/crashPoint；
+ * crashed 阶段的 serverSeed 早已随 crashed 广播 reveal 过，snapshot 里带出来不算破例。
+ */
+function buildSnapshot() {
+  if (state.phase === 'betting') {
+    const waitMs = BETTING_MS;
+    const elapsed = state.bettingStart ? Date.now() - state.bettingStart : 0;
+    const remainingMs = Math.max(0, waitMs - elapsed);
+    return {
+      type: 'snapshot',
+      phase: 'betting',
+      roundId: state.roundId,
+      nonce: state.nonce,
+      clientSeed: state.clientSeed,
+      commitHash: state.commitHash,
+      waitMs,
+      remainingMs,
+    };
+  }
+
+  if (state.phase === 'flying') {
+    const elapsed = state.flyStart ? (Date.now() - state.flyStart) / 1000 : 0;
+    return {
+      type: 'snapshot',
+      phase: 'flying',
+      roundId: state.roundId,
+      nonce: state.nonce,
+      clientSeed: state.clientSeed,
+      commitHash: state.commitHash,
+      elapsed,
+      multiplier: multiplierAt(elapsed),
+    };
+  }
+
+  // crashed —— serverSeed 已经 reveal 过，可以带出来
+  return {
+    type: 'snapshot',
+    phase: 'crashed',
+    roundId: state.roundId,
+    nonce: state.nonce,
+    clientSeed: state.clientSeed,
+    commitHash: state.commitHash,
+    crashPoint: state.crashPoint,
+    serverSeed: state.serverSeed,
+  };
+}
+
+/**
+ * 连接建立时查该玩家当前余额，供前端把 serverBalance 初始化到位。
+ * 查询失败（钱包不存在/DB 异常）不阻断连接，balance 发 null。
+ * @param {string} playerId
+ * @returns {Promise<string|null>}
+ */
+async function fetchPlayerBalance(playerId) {
+  try {
+    const result = await query('SELECT balance FROM wallets WHERE player_id = $1', [playerId]);
+    return result.rows[0]?.balance ?? null;
+  } catch (err) {
+    console.error('[aviatorHub] 查询玩家余额失败：', err.message);
+    return null;
+  }
+}
+
+/**
  * 启动 Aviator 全局房间的状态机循环，并挂上新连接的 hello 快照。
  * 模块级单例：重复调用会被忽略，避免起两个并行的房间循环。
  * @param {import('ws').WebSocketServer} wss
@@ -392,9 +459,16 @@ export function startAviatorHub(wss) {
   started = true;
 
   wss.on('connection', (ws) => {
-    // 新连接进来时给一个最简快照，至少不报错；不在这里补发完整的
-    // betting/flying 现场数据（那些数据会随下一次 broadcast 自然到达）。
-    ws.send(JSON.stringify({ type: 'hello', phase: state.phase }));
+    // 未认证成功的连接这一刻已经被 index.js 的握手 handler close 掉，ws.playerId
+    // 也不会挂上；显式跳过，不查余额、不发 hello/snapshot。
+    if (ws.playerId) {
+      fetchPlayerBalance(ws.playerId).then((balance) => {
+        sendJSON(ws, { type: 'hello', phase: state.phase, balance });
+        sendJSON(ws, buildSnapshot());
+      }).catch((err) => {
+        console.error('[aviatorHub] 连接初始化异常：', err.message);
+      });
+    }
 
     // 下注/兑现走这里：ws.playerId 由 index.js 里更早注册的认证 handler 挂好，
     // 没认证成功的连接此时已经被 close，不会走到这个消息处理逻辑
@@ -420,6 +494,12 @@ export function startAviatorHub(wss) {
         handleCashout(ws).catch((err) => {
           console.error('[aviatorHub] handleCashout 未捕获异常：', err.message);
         });
+        return;
+      }
+
+      if (msg.type === 'sync') {
+        // 断线重连 / 中途加入主动请求当前局快照，补发的字段和连接时一致。
+        sendJSON(ws, buildSnapshot());
       }
     });
   });

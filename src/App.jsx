@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Lobby from './components/Lobby'
 import Header from './components/Header'
+import GameLogin from './pages/GameLogin'
 import Aviator from './games/Aviator'
 import Dice from './games/Dice'
 import Plinko from './games/Plinko'
@@ -25,17 +26,56 @@ import DominoDuel from './games/DominoDuel'
 
 const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum, HalfTime, GoldenBoot, NumberUp, HatTrick, DerbyDay, LineUp, SpeedGrid, WuXing, RollingBall, DominoDuel }
 
+const TOKEN_KEY = 'spribe_player_token'
+const NAME_KEY = 'spribe_player_username'
+
 export default function App() {
   const [balance, setBalance] = useState(1000)
   const [activeGame, setActiveGame] = useState(null)
+  // Aviator 专用：服务器权威余额（其它 20 款游戏继续用上面的本地 balance，不受影响）。
+  const [serverBalance, setServerBalance] = useState(null)
+  const [playerToken, setPlayerToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '')
 
   const GameComponent = activeGame ? GAMES[activeGame] : null
 
+  function handlePlayerLogin({ token, username }) {
+    localStorage.setItem(TOKEN_KEY, token)
+    if (username) localStorage.setItem(NAME_KEY, username)
+    setPlayerToken(token)
+  }
+
+  function handlePlayerLogout() {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(NAME_KEY)
+    setPlayerToken('')
+    setServerBalance(null)
+  }
+
+  // 仅 Aviator 需要真实玩家登录；其它 20 款游戏照旧免登录、本地模拟余额。
+  const isAviator = activeGame === 'Aviator'
+  const needsAviatorLogin = isAviator && !playerToken
+
   return (
     <div style={{ minHeight: '100vh', background: '#0e1520' }}>
-      <Header balance={balance} onHome={() => setActiveGame(null)} activeGame={activeGame} />
-      <main style={{ paddingTop: '60px' }}>
-        {GameComponent ? (
+      {!needsAviatorLogin && (
+        <Header
+          balance={isAviator ? (serverBalance ?? 0) : balance}
+          onHome={() => setActiveGame(null)}
+          activeGame={activeGame}
+        />
+      )}
+      <main style={{ paddingTop: needsAviatorLogin ? 0 : '60px' }}>
+        {needsAviatorLogin ? (
+          <GameLogin onLogin={handlePlayerLogin} onCancel={() => setActiveGame(null)} />
+        ) : isAviator ? (
+          <Aviator
+            serverBalance={serverBalance}
+            setServerBalance={setServerBalance}
+            playerToken={playerToken}
+            onLogout={handlePlayerLogout}
+            onBack={() => setActiveGame(null)}
+          />
+        ) : GameComponent ? (
           <GameComponent balance={balance} setBalance={setBalance} onBack={() => setActiveGame(null)} />
         ) : (
           <Lobby onSelect={setActiveGame} balance={balance} />

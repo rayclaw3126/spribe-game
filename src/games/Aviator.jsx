@@ -14,31 +14,29 @@ import bayBgUrl from '../assets/shared/bay_bg.png'
 
 const GREEN = '#16C784'
 const HISTORY_SEED = [1.42, 2.81, 1.06, 5.24, 1.88, 3.37, 9.12, 1.19, 2.05, 4.63]
-// Betting window — the countdown, the waiting-bay progress bar and auto-bet
-// all pace off this single constant.
+// Betting window — matches the server's aviatorHub.js BETTING_MS. The server
+// is the source of truth (waitMs on every `betting` message); this constant
+// is only the fallback/default used before the first message arrives.
 const BETTING_MS = 5000
 const BETTING_S = BETTING_MS / 1000
-
-function generateCrash() {
-  const r = Math.random()
-  if (r < 0.01) return 1
-  return Math.max(1, 0.99 / (1 - r))
-}
 
 function rand(min, max) {
   return min + Math.random() * (max - min)
 }
 
 function money(n) {
-  return Number(n).toFixed(2)
+  return Number(n || 0).toFixed(2)
 }
 
-// One bet bay's full state — both panels share the same money path.
+// One bet bay's full state. Only bay 0 is wired to the server this round —
+// bay 1 stays in the panels array (unused/未渲染) for the multi-bet feature.
 function makePanel() {
   return {
     bet: 10,
     playerBet: null,
     cashedOut: null,
+    pending: false,        // bet 已发送、等待 bet_ack/bet_rejected
+    cashoutPending: false, // cashout 已发送、等待 cashout_ok/cashout_rejected
     autoBet: false,
     autoCashOn: false,
     autoCashMult: 2.0,
@@ -47,7 +45,7 @@ function makePanel() {
   }
 }
 
-export default function Aviator({ balance, setBalance }) {
+export default function Aviator({ serverBalance, setServerBalance, playerToken, onLogout }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const canvasRef = useRef(null)
@@ -55,23 +53,27 @@ export default function Aviator({ balance, setBalance }) {
   const frameRef = useRef(null)
   const phaseRef = useRef('betting')
   const countdownRef = useRef(BETTING_S)
-  const startRef = useRef(0)
-  const crashRef = useRef(2)
+  const launchAtRef = useRef(0)
   const multRef = useRef(1)
+  const maxMultRef = useRef(6) // 曲线纵向缩放上限——只增不减，跟着当前倍数走（不再知道 crashPoint）
+  const flyingStartedRef = useRef(false)
   const particlesRef = useRef([])
   const burstRef = useRef(false)
   const flashRef = useRef(0)
   const audioRef = useRef({ ctx: null, muted: false, engine: null })
-  // Synchronous mirrors — actions guard/settle through these so rapid clicks,
-  // the rAF loop and timers all see committed values instantly (race safety).
+  // Synchronous mirror — actions guard/settle through this so rapid clicks
+  // and the rAF loop all see committed values instantly (race safety).
   const panelsRef = useRef(null)
-  const balanceRef = useRef(balance)
   // Backdrop FX + waiting-ceremony timing (pure visuals)
   const fxRef = useRef(null)
   const bettingStartRef = useRef(0)
-  const launchAtRef = useRef(0)
+  const bettingDeadlineRef = useRef(performance.now() + BETTING_MS)
   const roundIdRef = useRef(0)   // keys the player's feed row per round
   const crashAtRef = useRef(0)   // crash timestamp — drives the ball fly-out
+  // WebSocket 连接 —— 唯一数值/资金来源
+  const wsRef = useRef(null)
+  const reconnectAttemptRef = useRef(0)
+  const reconnectTimerRef = useRef(null)
   if (fxRef.current === null) fxRef.current = createArenaFx()
 
   function pushToast(mult, win) {
@@ -94,20 +96,17 @@ export default function Aviator({ balance, setBalance }) {
   const [muted, setMuted] = useState(false)
   const [bgmOn, toggleBgm] = useBgm()
   const [message, setMessage] = useState('')
+  // 公平校验字段：commitHash/clientSeed 下注阶段就有，serverSeed 崩盘 reveal 后才有。
+  const [roundMeta, setRoundMeta] = useState({ roundId: null, nonce: null, clientSeed: '', commitHash: '' })
+  const [serverSeedReveal, setServerSeedReveal] = useState(null)
+  // 连接状态：connecting | open | reconnecting | closed —— 纯 UI 提示，不驱动相位。
+  const [connStatus, setConnStatus] = useState('connecting')
 
   if (panelsRef.current === null) panelsRef.current = panels
-
-  useEffect(() => { balanceRef.current = balance }, [balance])
 
   function updatePanel(i, patch) {
     panelsRef.current = panelsRef.current.map((p, j) => (j === i ? { ...p, ...patch } : p))
     setPanels(panelsRef.current)
-  }
-
-  // Single money path — every balance change in the game goes through here.
-  function credit(delta) {
-    balanceRef.current = Number((balanceRef.current + delta).toFixed(2))
-    setBalance(b => Number((b + delta).toFixed(2)))
   }
 
   const displayPlayers = useMemo(() => {
@@ -232,110 +231,230 @@ export default function Aviator({ balance, setBalance }) {
     whistle.stop(ctx.currentTime + 0.5)
   }
 
-  function resetRound() {
+  // ---- 自动下注：每局 betting 开始时，若上一局勾了「自动下注」就立即发一次 ----
+  function autoBetOnRoundStart() {
+    const p = panelsRef.current[0]
+    if (!p.autoBet) return
+    if (!(p.bet >= 1)) {
+      updatePanel(0, { autoBet: false, autoNote: '下注金额无效，自动下注已停' })
+      return
+    }
+    placeBetFor(0)
+  }
+
+  // ---- WS 消息驱动的相位切换 ----
+  function onBettingMsg(msg) {
     phaseRef.current = 'betting'
+    flyingStartedRef.current = false
     bettingStartRef.current = performance.now()
     roundIdRef.current += 1
     multRef.current = 1
+    maxMultRef.current = 6
     particlesRef.current = []
     burstRef.current = false
     flashRef.current = 0
     setPhase('betting')
-    countdownRef.current = BETTING_S
-    setCountdown(BETTING_S)
     setMultiplier(1)
     setCrashPoint(null)
-    panelsRef.current = panelsRef.current.map(p => ({ ...p, playerBet: null, cashedOut: null, note: '' }))
-    setPanels(panelsRef.current)
+    setServerSeedReveal(null)
+    setRoundMeta({
+      roundId: msg.roundId ?? null,
+      nonce: msg.nonce ?? null,
+      clientSeed: msg.clientSeed || '',
+      commitHash: msg.commitHash || '',
+    })
+    const waitMs = msg.waitMs || BETTING_MS
+    bettingDeadlineRef.current = performance.now() + waitMs
+    countdownRef.current = Math.ceil(waitMs / 1000)
+    setCountdown(countdownRef.current)
+    updatePanel(0, { playerBet: null, cashedOut: null, pending: false, cashoutPending: false, note: '' })
     setPlayers(makeFeedBots())
     setMessage('')
     stopEngine()
-    autoBetsOnRoundStart()
+    autoBetOnRoundStart()
   }
 
-  function launchRound() {
-    const cp = Number(generateCrash().toFixed(2))
-    crashRef.current = cp
-    startRef.current = performance.now()
-    launchAtRef.current = performance.now()
-    phaseRef.current = 'flying'
-    setPhase('flying')
-    setCrashPoint(cp)
-    setMessage('')
-    startEngine()
+  function onTickMsg(msg) {
+    if (!flyingStartedRef.current) {
+      flyingStartedRef.current = true
+      phaseRef.current = 'flying'
+      launchAtRef.current = performance.now()
+      setPhase('flying')
+      setCrashPoint(null)
+      setMessage('')
+      startEngine()
+    }
+    const m = Number(msg.multiplier)
+    multRef.current = m
+    maxMultRef.current = Math.min(18, Math.max(maxMultRef.current, m * 1.35, 6))
+    setMultiplier(Number(m.toFixed(2)))
+    updateEngine(m)
+    // 假 bots 的兑现动画 —— 纯展示，不影响真实结算
+    setPlayers(list => {
+      let changed = false
+      const next = list.map(p => {
+        if (p.status !== 'live') return p
+        if (m >= p.target) {
+          changed = true
+          const payout = Number((p.bet * p.target).toFixed(2))
+          return { ...p, status: 'cashed', payout, target: Number(p.target.toFixed(2)) }
+        }
+        return p
+      })
+      return changed ? next : list
+    })
+    // auto-cashout：达到目标倍数就发一次 cashout（幂等由 cashoutPending 守卫）
+    const p0 = panelsRef.current[0]
+    if (p0.autoCashOn && p0.playerBet && !p0.cashedOut && !p0.cashoutPending && m >= p0.autoCashMult) {
+      updatePanel(0, { cashoutPending: true })
+      wsRef.current?.send(JSON.stringify({ type: 'cashout' }))
+    }
   }
 
-  function crashRound() {
+  function onCrashedMsg(msg) {
     phaseRef.current = 'crashed'
+    flyingStartedRef.current = false
     crashAtRef.current = performance.now()
     flashRef.current = 0.7
     stopEngine()
     playCrash()
     setPhase('crashed')
-    setCrashPoint(crashRef.current)
-    setHistory(h => [Number(crashRef.current.toFixed(2)), ...h].slice(0, 20))
+    const cp = Number(msg.crashPoint)
+    multRef.current = cp
+    maxMultRef.current = Math.min(18, Math.max(maxMultRef.current, cp * 1.35, 6))
+    setMultiplier(cp)
+    setCrashPoint(cp)
+    setServerSeedReveal(msg.serverSeed || null)
+    setHistory(h => [Number(cp.toFixed(2)), ...h].slice(0, 20))
     setPlayers(list => list.map(p => p.status === 'live' ? { ...p, status: 'crashed' } : p))
-    // record the player's lost stake in the feed's My Bets (display only)
-    panelsRef.current.forEach(p => {
-      if (p.playerBet && !p.cashedOut) {
-        setMyBets(m => [{ bet: p.playerBet.amount, mult: 0, win: 0 }, ...m].slice(0, 20))
-      }
+
+    const p0 = panelsRef.current[0]
+    if (p0.playerBet && !p0.cashedOut) {
+      setMyBets(m => [{ bet: p0.playerBet.amount, mult: 0, win: 0 }, ...m].slice(0, 20))
+    }
+    if (cp <= 1.05) {
+      setMessage(`本局 ${cp.toFixed(2)}× 秒崩`)
+    } else if (p0.playerBet && !p0.cashedOut) {
+      setMessage(`本轮 ${cp.toFixed(2)}× 飞了，没能及时兑现`)
+    } else {
+      setMessage(`本轮 ${cp.toFixed(2)}× 飞了`)
+    }
+  }
+
+  function onSnapshot(msg) {
+    setRoundMeta({
+      roundId: msg.roundId ?? null,
+      nonce: msg.nonce ?? null,
+      clientSeed: msg.clientSeed || '',
+      commitHash: msg.commitHash || '',
     })
-    setMessage(`本轮 ${crashRef.current.toFixed(2)}× 飞了`)
-    setTimeout(resetRound, 2200)
+    if (msg.phase === 'betting') {
+      phaseRef.current = 'betting'
+      flyingStartedRef.current = false
+      setPhase('betting')
+      multRef.current = 1
+      maxMultRef.current = 6
+      setMultiplier(1)
+      setCrashPoint(null)
+      setServerSeedReveal(null)
+      const remaining = msg.remainingMs ?? msg.waitMs ?? BETTING_MS
+      bettingStartRef.current = performance.now() - (BETTING_MS - remaining)
+      bettingDeadlineRef.current = performance.now() + remaining
+      countdownRef.current = Math.max(0, Math.ceil(remaining / 1000))
+      setCountdown(countdownRef.current)
+    } else if (msg.phase === 'flying') {
+      phaseRef.current = 'flying'
+      flyingStartedRef.current = true
+      setPhase('flying')
+      const m = Number(msg.multiplier || 1)
+      multRef.current = m
+      maxMultRef.current = Math.min(18, Math.max(m * 1.35, 6))
+      setMultiplier(Number(m.toFixed(2)))
+      setCrashPoint(null)
+      launchAtRef.current = performance.now() - (Number(msg.elapsed) || 0) * 1000
+      startEngine()
+    } else if (msg.phase === 'crashed') {
+      phaseRef.current = 'crashed'
+      flyingStartedRef.current = false
+      setPhase('crashed')
+      const cp = Number(msg.crashPoint)
+      multRef.current = cp
+      maxMultRef.current = Math.min(18, Math.max(cp * 1.35, 6))
+      setMultiplier(cp)
+      setCrashPoint(cp)
+      setServerSeedReveal(msg.serverSeed || null)
+    }
   }
 
-  function placeBetFor(i, { auto = false } = {}) {
-    const p = panelsRef.current[i]
-    if (phaseRef.current !== 'betting' || p.playerBet || p.bet < 1 || p.bet > balanceRef.current) return
-    if (!auto) ensureAudio()
-    const amount = Number(p.bet)
-    updatePanel(i, { playerBet: { amount }, note: `已下注 $${money(amount)}，本轮生效` })
-    credit(-amount)
+  function onBetAck(msg) {
+    if (msg.balanceAfter !== undefined && msg.balanceAfter !== null) {
+      setServerBalance(Number(msg.balanceAfter))
+    }
+    updatePanel(0, {
+      pending: false,
+      playerBet: { amount: Number(msg.amount) },
+      note: `已下注 $${money(msg.amount)}，本轮生效`,
+    })
   }
 
-  function cancelBetFor(i) {
-    const p = panelsRef.current[i]
-    if (phaseRef.current !== 'betting' || !p.playerBet) return
-    const amount = p.playerBet.amount
-    updatePanel(i, { playerBet: null, note: '已取消下注' })
-    credit(amount)
+  function onBetRejected(msg) {
+    const p0 = panelsRef.current[0]
+    if (p0.autoBet) {
+      updatePanel(0, { pending: false, autoBet: false, autoNote: msg.reason || '下注失败，自动下注已停', note: '' })
+    } else {
+      updatePanel(0, { pending: false, note: msg.reason || '下注失败' })
+    }
   }
 
-  // Manual cashout settles at the current multiplier; auto passes its target
-  // and settles at exactly that (not the trigger frame's multiplier).
-  function cashOutFor(i, targetMult = null) {
-    const p = panelsRef.current[i]
-    if (phaseRef.current !== 'flying' || !p.playerBet || p.cashedOut) return
-    if (!targetMult) ensureAudio()
-    const mult = targetMult ?? Number(multRef.current.toFixed(2))
-    const win = Number((p.playerBet.amount * mult).toFixed(2))
-    updatePanel(i, {
+  function onCashoutOk(msg) {
+    const p0 = panelsRef.current[0]
+    const mult = Number(msg.multiplier)
+    const win = Number(msg.payout)
+    updatePanel(0, {
+      cashoutPending: false,
       cashedOut: { mult, win },
-      note: `已${targetMult ? '自动兑现' : '套现'} ${mult.toFixed(2)}× — +$${money(win)}`,
+      note: `已套现 ${mult.toFixed(2)}× — +$${money(win)}`,
     })
-    credit(win)
-    setMyBets(m => [{ bet: p.playerBet.amount, mult, win }, ...m].slice(0, 20))
+    setServerBalance(Number(msg.balanceAfter))
+    setMyBets(m => [{ bet: p0.playerBet?.amount ?? 0, mult, win }, ...m].slice(0, 20))
     pushToast(mult, win)
     playDing()
   }
 
-  function toggleAutoBet(i) {
-    const p = panelsRef.current[i]
-    const next = !p.autoBet
-    updatePanel(i, { autoBet: next, autoNote: '' })
-    if (next && phaseRef.current === 'betting' && !p.playerBet) placeBetFor(i, { auto: true })
+  function onCashoutRejected(msg) {
+    updatePanel(0, { cashoutPending: false, note: msg.reason || '兑现失败' })
   }
 
-  function autoBetsOnRoundStart() {
-    panelsRef.current.forEach((p, i) => {
-      if (!p.autoBet) return
-      if (p.bet < 1 || p.bet > balanceRef.current) {
-        updatePanel(i, { autoBet: false, autoNote: '余额不足，自动下注已停' })
-        return
-      }
-      placeBetFor(i, { auto: true })
-    })
+  function placeBetFor(i) {
+    if (i !== 0) return // 第二注位本批不接服务器，禁用
+    const p = panelsRef.current[0]
+    if (phaseRef.current !== 'betting' || p.playerBet || p.pending || !(p.bet >= 1)) return
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      updatePanel(0, { note: '未连接服务器，请稍候重试' })
+      return
+    }
+    ensureAudio()
+    const amount = Number(p.bet)
+    updatePanel(0, { pending: true, note: '下注提交中…' })
+    wsRef.current.send(JSON.stringify({ type: 'bet', amount }))
+  }
+
+  function cashOutFor(i) {
+    if (i !== 0) return
+    const p = panelsRef.current[0]
+    if (phaseRef.current !== 'flying' || !p.playerBet || p.cashedOut || p.cashoutPending) return
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    ensureAudio()
+    updatePanel(0, { cashoutPending: true })
+    wsRef.current.send(JSON.stringify({ type: 'cashout' }))
+  }
+
+  function toggleAutoBet(i) {
+    if (i !== 0) return
+    const p = panelsRef.current[0]
+    const next = !p.autoBet
+    updatePanel(0, { autoBet: next, autoNote: '' })
+    if (next && phaseRef.current === 'betting' && !p.playerBet && !p.pending) placeBetFor(0)
   }
 
   function drawArena(current, mode = phaseRef.current) {
@@ -356,7 +475,7 @@ export default function Aviator({ balance, setBalance }) {
 
     const pad = W * 0.08
     const baseY = H - H * 0.12
-    const maxMult = Math.max(6, Math.min(crashRef.current * 1.35, 18))
+    const maxMult = maxMultRef.current
     const progress = Math.min(Math.log(Math.max(current, 1)) / Math.log(maxMult), 1)
     const x = pad + progress * (W * 0.66)
     const y = baseY - Math.pow(progress, 1.45) * (H * 0.58)
@@ -491,10 +610,6 @@ export default function Aviator({ balance, setBalance }) {
   }, [])
 
   useEffect(() => {
-    phaseRef.current = phase
-  }, [phase])
-
-  useEffect(() => {
     audioRef.current.muted = muted
     if (muted) stopEngine()
     if (!muted && phaseRef.current === 'flying') startEngine()
@@ -509,49 +624,118 @@ export default function Aviator({ balance, setBalance }) {
     return () => clearInterval(onlineTimer)
   }, [])
 
+  // ---- WebSocket 连接：唯一的相位/数值/资金来源 ----
   useEffect(() => {
-    resetRound()
-    const countdownTimer = setInterval(() => {
-      if (phaseRef.current !== 'betting') return
-      // Tick through a ref, then set state — calling launchRound() inside the
-      // setCountdown updater made StrictMode double-invoke it (two crash rolls).
-      const next = countdownRef.current - 1
-      countdownRef.current = Math.max(0, next)
-      setCountdown(countdownRef.current)
-      if (next <= 0) launchRound()
-    }, 1000)
+    if (!playerToken) return undefined
+    let cancelled = false
 
+    function dispatch(msg) {
+      switch (msg.type) {
+        case 'hello':
+          if (msg.balance !== undefined && msg.balance !== null) setServerBalance(Number(msg.balance))
+          break
+        case 'snapshot':
+          onSnapshot(msg)
+          break
+        case 'betting':
+          onBettingMsg(msg)
+          break
+        case 'tick':
+          onTickMsg(msg)
+          break
+        case 'crashed':
+          onCrashedMsg(msg)
+          break
+        case 'bet_ack':
+          onBetAck(msg)
+          break
+        case 'bet_rejected':
+          onBetRejected(msg)
+          break
+        case 'cashout_ok':
+          onCashoutOk(msg)
+          break
+        case 'cashout_rejected':
+          onCashoutRejected(msg)
+          break
+        default:
+          break
+      }
+    }
+
+    function connect() {
+      if (cancelled) return
+      // 守卫：已有连接处于 OPEN/CONNECTING 就不重复建（StrictMode 双 invoke 防重连）。
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+        return
+      }
+      setConnStatus(reconnectAttemptRef.current > 0 ? 'reconnecting' : 'connecting')
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const ws = new WebSocket(`${proto}://${window.location.host}/ws/aviator?token=${encodeURIComponent(playerToken)}`)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        const wasReconnect = reconnectAttemptRef.current > 0
+        reconnectAttemptRef.current = 0
+        setConnStatus('open')
+        if (wasReconnect) {
+          ws.send(JSON.stringify({ type: 'sync' }))
+        }
+      }
+
+      ws.onmessage = event => {
+        let msg
+        try {
+          msg = JSON.parse(event.data)
+        } catch {
+          return
+        }
+        dispatch(msg)
+      }
+
+      ws.onclose = () => {
+        if (cancelled) return
+        setConnStatus('closed')
+        const attempt = reconnectAttemptRef.current + 1
+        reconnectAttemptRef.current = attempt
+        const delay = Math.min(10000, 1000 * Math.pow(2, attempt - 1))
+        reconnectTimerRef.current = setTimeout(connect, delay)
+      }
+
+      ws.onerror = () => {
+        // 交给 onclose 统一走重连退避，这里不重复处理。
+      }
+    }
+
+    connect()
+
+    return () => {
+      cancelled = true
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+      if (wsRef.current) {
+        wsRef.current.onclose = null
+        wsRef.current.onerror = null
+        wsRef.current.onmessage = null
+        wsRef.current.close()
+      }
+    }
+    // dispatch/on* 闭包读取的是本次 effect 作用域内定义的 handler，重连逻辑只依赖 token。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerToken])
+
+  // ---- rAF 渲染循环：只画画 + 走本地倒计时显示，相位切换完全交给上面的 WS 分发 ----
+  useEffect(() => {
     const animate = now => {
-      if (phaseRef.current === 'flying') {
-        const seconds = (now - startRef.current) / 1000
-        const next = Math.exp(0.17 * seconds)
-        const capped = Math.min(next, crashRef.current)
-        multRef.current = capped
-        setMultiplier(Number(capped.toFixed(2)))
-        updateEngine(capped)
-        setPlayers(list => {
-          // same computation as before, but keep the array identity when no
-          // row changed so the feed doesn't re-render every frame
-          let changed = false
-          const next = list.map(p => {
-            if (p.status !== 'live') return p
-            if (capped >= p.target && capped < crashRef.current) {
-              changed = true
-              const payout = Number((p.bet * p.target).toFixed(2))
-              return { ...p, status: 'cashed', payout, target: Number(p.target.toFixed(2)) }
-            }
-            return p
-          })
-          return changed ? next : list
-        })
-        // Auto-cashout — settles at the panel's target multiplier. capped never
-        // exceeds the crash point, so this only fires when target ≤ crash.
-        panelsRef.current.forEach((p, i) => {
-          if (p.autoCashOn && p.playerBet && !p.cashedOut && capped >= p.autoCashMult) {
-            cashOutFor(i, p.autoCashMult)
-          }
-        })
-        if (next >= crashRef.current) crashRound()
+      if (phaseRef.current === 'betting') {
+        const remain = Math.max(0, bettingDeadlineRef.current - now)
+        const remainS = Math.ceil(remain / 1000)
+        if (remainS !== countdownRef.current) {
+          countdownRef.current = remainS
+          setCountdown(remainS)
+        }
       }
       drawArena(multRef.current)
       frameRef.current = requestAnimationFrame(animate)
@@ -559,11 +743,9 @@ export default function Aviator({ balance, setBalance }) {
     frameRef.current = requestAnimationFrame(animate)
 
     return () => {
-      clearInterval(countdownTimer)
       cancelAnimationFrame(frameRef.current)
       stopEngine()
     }
-    // The arena loop owns round transitions through refs; restarting it on render would duplicate timers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -573,28 +755,37 @@ export default function Aviator({ balance, setBalance }) {
     : multiplier < 2.5 ? '#16C784' : multiplier < 6 ? '#e0b100' : '#e2564a'
   const bigValue = phase === 'crashed' ? (crashPoint?.toFixed(2) || multiplier.toFixed(2)) : multiplier.toFixed(2)
   const topTag = phase === 'betting' ? '下一轮' : phase === 'flying' ? '飞行中' : '本轮结束'
-  const statusText = phase === 'betting'
-    ? `下一轮 ${countdown}s…`
-    : phase === 'flying'
-      ? '飞行中 — 及时套现!'
-      : '球飞了 — 下一轮马上来'
+  const statusText = connStatus !== 'open'
+    ? (connStatus === 'reconnecting' ? '连接已断开，正在重连…' : '正在连接服务器…')
+    : phase === 'betting'
+      ? `下一轮 ${countdown}s…`
+      : phase === 'flying'
+        ? '飞行中 — 及时套现!'
+        : '球飞了 — 下一轮马上来'
   // Shell BetButton state per bay — mapped from phase/playerBet/cashedOut only.
   function panelButton(i) {
     const p = panels[i]
+    if (i !== 0) {
+      return { state: 'waiting', label: '多注功能下批开放', disabled: true }
+    }
     if (phase === 'flying') {
       if (!p.playerBet) return { state: 'waiting', label: '等待下一局', disabled: true }
       if (p.cashedOut) return { state: 'waiting', label: '已兑现', sub: `$${money(p.cashedOut.win)}`, disabled: true }
-      return { state: 'cashout', label: '兑现', sub: `$${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(i), disabled: false }
+      if (p.cashoutPending) return { state: 'cashout', label: '兑现中…', disabled: true }
+      return { state: 'cashout', label: '兑现', sub: `$${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(0), disabled: false }
+    }
+    if (p.pending) {
+      return { state: 'waiting', label: '下注提交中…', disabled: true }
     }
     if (canBetPhase && p.playerBet) {
-      return { state: 'cancel', label: '取消', sub: `$${money(p.playerBet.amount)}`, onClick: () => cancelBetFor(i), disabled: false }
+      return { state: 'waiting', label: '已下注', sub: `$${money(p.playerBet.amount)}`, disabled: true }
     }
     return {
       state: 'bet',
       label: '下注',
       sub: `$${money(p.bet)}`,
-      onClick: () => placeBetFor(i),
-      disabled: !canBetPhase || !!p.playerBet || p.bet > balance,
+      onClick: () => placeBetFor(0),
+      disabled: !canBetPhase || connStatus !== 'open' || !!p.playerBet || p.bet > (serverBalance ?? 0) || !(p.bet >= 1),
     }
   }
 
@@ -658,6 +849,30 @@ export default function Aviator({ balance, setBalance }) {
 
           {/* Cash-out toast stack — top center of the arena */}
           <WinToast toasts={toasts} />
+
+          {/* 公平校验角标 —— betting/flying 显 commitHash，crashed 后显 reveal 的种子 */}
+          {(phase === 'betting' || phase === 'flying') && roundMeta.commitHash && (
+            <div style={{
+              position: 'absolute', left: 10, top: 10,
+              fontSize: 10, color: '#7d8a99', background: 'rgba(10,17,25,0.72)',
+              padding: '4px 8px', borderRadius: 8, maxWidth: 210,
+              fontFamily: 'monospace', letterSpacing: 0.3, lineHeight: 1.5,
+            }}>
+              <span style={{ color: '#5DCAA5', fontWeight: 700 }}>可验证公平</span>{' '}
+              哈希 {roundMeta.commitHash.slice(0, 10)}…
+            </div>
+          )}
+          {phase === 'crashed' && serverSeedReveal && (
+            <div style={{
+              position: 'absolute', left: 10, top: 10,
+              fontSize: 10, color: '#7d8a99', background: 'rgba(10,17,25,0.72)',
+              padding: '4px 8px', borderRadius: 8, maxWidth: 240,
+              fontFamily: 'monospace', letterSpacing: 0.3, lineHeight: 1.5,
+            }}>
+              <span style={{ color: '#5DCAA5', fontWeight: 700 }}>已开奖种子</span>{' '}
+              {serverSeedReveal.slice(0, 10)}…（可自行 sha256 校验哈希）
+            </div>
+          )}
 
           {/* BGM toggle — canvas top-right (left of mute) */}
           <button
@@ -726,15 +941,16 @@ export default function Aviator({ balance, setBalance }) {
       </Panel>
   )
 
-  // Single bet bay — dual-bay panel architecture retained, only bay 0 rendered.
+  // Single bet bay — dual-bay panel architecture retained, only bay 0 rendered
+  // and only bay 0 talks to the server (一局一注协议，双注会幂等冲突)。
   const p0 = panels[0]
-  const locked0 = !canBetPhase || !!p0.playerBet
+  const locked0 = !canBetPhase || !!p0.playerBet || p0.pending
   const bay = (
     <BetPanel
       bare={isDesk}
       bet={p0.bet}
       setBet={next => setBetFor(0, next)}
-      max={balance}
+      max={serverBalance ?? 0}
       inputDisabled={locked0}
       chipDisabled={locked0}
       button={panelButton(0)}
@@ -758,7 +974,7 @@ export default function Aviator({ balance, setBalance }) {
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
         background: COLORS.bg,
       }}>
-        {/* a. full-width in-game header: name left, balance right */}
+        {/* a. full-width in-game header: name left, balance + 退出登录 right */}
         <div style={{
           height: LAYOUT.headerH, flex: '0 0 auto',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -766,9 +982,17 @@ export default function Aviator({ balance, setBalance }) {
           borderBottom: `1px solid ${COLORS.border}`,
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Breakaway</strong>
-          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {money(balance)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
+              {money(serverBalance ?? 0)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            </span>
+            {onLogout && (
+              <button type="button" onClick={onLogout} style={{
+                background: 'none', color: COLORS.textMuted, fontSize: 12, fontWeight: 700,
+                border: `1px solid ${COLORS.border}`, borderRadius: 999, padding: '5px 12px',
+              }}>退出登录</button>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -806,6 +1030,17 @@ export default function Aviator({ balance, setBalance }) {
   // ---- stacked layout (<1024): unchanged mobile arrangement ----
   return (
     <GameLayout title="Breakaway" color={GREEN}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <span style={{ color: '#8a97a6', fontSize: 13, fontWeight: 700 }}>
+          余额 ${money(serverBalance ?? 0)}
+        </span>
+        {onLogout && (
+          <button type="button" onClick={onLogout} style={{
+            background: 'none', color: '#8a97a6', fontSize: 12, fontWeight: 700,
+            border: '1px solid #232c39', borderRadius: 999, padding: '5px 12px',
+          }}>退出登录</button>
+        )}
+      </div>
       {arena}
       <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bay}</div>
       <div style={{ marginTop: 14 }}>
