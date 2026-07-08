@@ -10,7 +10,9 @@
 set -e
 
 BASE="${BASE:-http://localhost:4000}"
-DB_URL="${DB_URL:-postgres://spribe_app:spribe_dev_2026@127.0.0.1:5432/spribe?options=-c%20search_path%3Dspribe_dev}"
+# 数据库连接：密码从环境变量读取，脚本不再硬编码明文凭据。
+# 运行前先设置：export PGPASSWORD=<数据库密码>   （或直接 export DB_URL=<完整连接串> 覆盖整串）
+DB_URL="${DB_URL:-postgres://spribe_app:${PGPASSWORD}@127.0.0.1:5432/spribe?options=-c%20search_path%3Dspribe_dev}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$(dirname "$SCRIPT_DIR")"
 

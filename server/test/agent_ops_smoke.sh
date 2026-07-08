@@ -7,7 +7,9 @@
 set -e
 
 BASE="${BASE:-http://localhost:4000}"
-PSQL_CONN="${PSQL_CONN:-postgres://spribe_app:spribe_dev_2026@127.0.0.1:5432/spribe?options=-c%20search_path%3Dspribe_dev}"
+# 数据库连接：密码从环境变量读取，脚本不再硬编码明文凭据。
+# 运行前先设置：export PGPASSWORD=<数据库密码>   （或直接 export PSQL_CONN=<完整连接串> 覆盖整串）
+PSQL_CONN="${PSQL_CONN:-postgres://spribe_app:${PGPASSWORD}@127.0.0.1:5432/spribe?options=-c%20search_path%3Dspribe_dev}"
 
 # 提取 JSON 字段的小工具：优先尝试用 grep -o（不依赖 jq），
 # 兼容形如 "key":"value" 或 "key":123 或 "key":true/false 的简单场景。
