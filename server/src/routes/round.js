@@ -46,6 +46,15 @@ import {
   MAX_MULT as LIMBO_MAX_MULT,
   TARGET_MIN as LIMBO_TARGET_MIN,
 } from '../game/limbo.js';
+import {
+  judge as judgeHiLo,
+  deriveCard,
+  stepMult,
+  hashSeed as hashSeedHiLo,
+  newServerSeed as newServerSeedHiLo,
+  newClientSeed as newClientSeedHiLo,
+  SKIPS_PER_ROUND,
+} from '../game/hilo.js';
 
 const router = Router();
 
@@ -1106,6 +1115,379 @@ router.post('/mines/cashout', requireAuth, requireType('player'), async (req, re
         serverSeed: round.server_seed,
         clientSeed: round.client_seed,
         nonce: r.nonce,
+      };
+    });
+
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return next(err);
+  }
+});
+
+/** 按幂等键查询已存在的 hilo 局（跨事务的普通查询，不加锁），只用于 start 的幂等返回 */
+async function findHiloBetByIdempotencyKey(idempotencyKey) {
+  const result = await query(
+    `SELECT b.id AS bet_id, b.round_id, b.player_id,
+            r.result, r.result_hash, r.status
+       FROM bets b
+       JOIN rounds r ON r.id = b.round_id
+      WHERE b.idempotency_key = $1 AND r.game = 'hilo'`,
+    [idempotencyKey]
+  );
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+/** 按 roundId 取一局 hilo，行锁 FOR UPDATE，并校验所属玩家 */
+async function lockHiloRound(client, roundId, playerId) {
+  const result = await client.query('SELECT * FROM rounds WHERE id = $1 FOR UPDATE', [roundId]);
+  if (result.rowCount === 0) {
+    throw httpError(404, '该局不存在');
+  }
+  const round = result.rows[0];
+  if (round.game !== 'hilo') {
+    throw httpError(400, '该局不是 hilo 游戏');
+  }
+  if (String(round.player_id) !== String(playerId)) {
+    throw httpError(403, '无权访问该局');
+  }
+  return round;
+}
+
+// ------------------------------------------------------------------
+// POST /round/hilo/start —— Rating Hi-Lo（评分高低）开局：服务器发第一张明牌 + 建有状态会话
+// 说明：牌序不信前端 —— 每一步的牌都由 serverSeed（后端私密）+ clientSeed + nonce
+// + step 确定性派生（见 game/hilo.js deriveCard），reveal 前绝不返回给前端。之后的
+// guess/skip/cashout 都要对同一个 roundId 行锁（FOR UPDATE）操作，防并发/重复。
+// ------------------------------------------------------------------
+router.post('/hilo/start', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { amount, clientSeed, idempotencyKey } = req.body || {};
+
+    const amountNum = Number(amount);
+
+    if (!idempotencyKey) {
+      return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
+    }
+    if (!amountNum || !(amountNum > 0)) {
+      return res.status(400).json({ error: '下注金额必须大于 0' });
+    }
+
+    // 1. 幂等先查：命中则直接返回旧局，不重复扣钱
+    const existing = await findHiloBetByIdempotencyKey(idempotencyKey);
+    if (existing) {
+      return res.json({
+        roundId: existing.round_id,
+        card: existing.result?.card,
+        commitHash: existing.result_hash,
+        balanceAfter: await getBalance(playerId),
+        idempotent: true,
+      });
+    }
+
+    try {
+      const result = await withTransaction(async (client) => {
+        // 2. 生成本局开局种子并派生首张明牌（全部在扣钱之前算好，与「余额是否充足」无关，
+        //    后续牌只落库，绝不放进本次响应）
+        const serverSeed = newServerSeedHiLo();
+        const seedForCard = clientSeed || newClientSeedHiLo();
+        const nonce = crypto.randomBytes(8).toString('hex');
+        const commitHash = hashSeedHiLo(serverSeed);
+        const firstCard = deriveCard(serverSeed, seedForCard, nonce, 0);
+
+        const amountStr = amountNum.toFixed(2);
+
+        // 3. 建 round：有状态会话，status='playing'，result 里存 step/明牌/累乘/skip 次数/历史/nonce
+        const roundResult = await client.query(
+          `INSERT INTO rounds (game, player_id, bet_amount, client_seed, server_seed, result_hash, payout, status, result)
+           VALUES ('hilo', $1, $2::numeric, $3, $4, $5, NULL, 'playing', $6::jsonb)
+           RETURNING id`,
+          [
+            playerId,
+            amountStr,
+            seedForCard,
+            serverSeed,
+            commitHash,
+            JSON.stringify({
+              step: 0,
+              card: firstCard,
+              cum: 1,
+              skips: SKIPS_PER_ROUND,
+              history: [],
+              nonce,
+              status: 'playing',
+            }),
+          ]
+        );
+        const roundId = roundResult.rows[0].id;
+
+        // 4. 扣钱（资金唯一出入口）
+        const { balanceAfter } = await debit(client, {
+          playerId,
+          amount: amountStr,
+          type: 'hilo_bet',
+          idempotencyKey,
+          roundId,
+        });
+
+        // 5. 建 bet（本局尚未结算，outcome 先记 pending）
+        await client.query(
+          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome)
+           VALUES ($1, $2, $3::numeric, $4, 'pending')`,
+          [roundId, playerId, amountStr, idempotencyKey]
+        );
+
+        // 6. 绝不返回 serverSeed / 后续牌
+        return { roundId, card: firstCard, commitHash, balanceAfter };
+      });
+
+      return res.json({ ...result, idempotent: false });
+    } catch (err) {
+      // 唯一索引兜底：并发下第二次请求会撞上 bets 的幂等键唯一索引冲突（23505），
+      // 事务已被 withTransaction 自动 ROLLBACK，这里回查已提交的旧记录，视为幂等命中
+      if (err.code === '23505') {
+        const existingAfterConflict = await findHiloBetByIdempotencyKey(idempotencyKey);
+        if (existingAfterConflict) {
+          return res.json({
+            roundId: existingAfterConflict.round_id,
+            card: existingAfterConflict.result?.card,
+            commitHash: existingAfterConflict.result_hash,
+            balanceAfter: await getBalance(playerId),
+            idempotent: true,
+          });
+        }
+      }
+      throw err;
+    }
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// POST /round/hilo/guess —— 猜下一张「高/同 或 低/同」：判定不信前端，服务器用
+// deriveCard 派生下一张牌、judge 判定（等于两方向都算赢）。猜对累乘继续（全精度，
+// 不提前 round），猜错（bust）终局、全额下注进入链式分成、此刻才 reveal serverSeed。
+// ------------------------------------------------------------------
+router.post('/hilo/guess', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { roundId, dir } = req.body || {};
+
+    if (!roundId) {
+      return res.status(400).json({ error: '参数不完整：roundId 必填' });
+    }
+    if (!['high', 'low'].includes(dir)) {
+      return res.status(400).json({ error: 'dir 必须是 high 或 low' });
+    }
+
+    const result = await withTransaction(async (client) => {
+      const round = await lockHiloRound(client, roundId, playerId);
+      const r = round.result || {};
+
+      // 已终局：bust 幂等返回当前终局状态（不重复分成），cashed 拒绝
+      if (round.status !== 'playing') {
+        if (round.status === 'bust') {
+          return {
+            card: r.card,
+            correct: false,
+            serverSeed: round.server_seed,
+            clientSeed: round.client_seed,
+            nonce: r.nonce,
+            roundId: round.id,
+            alreadyDone: true,
+          };
+        }
+        throw httpError(400, '该局已兑现结束，无法猜测');
+      }
+
+      const nextStep = r.step + 1;
+      // 牌序不信前端：下一张牌由 serverSeed + clientSeed + nonce + step 确定性派生
+      const next = deriveCard(round.server_seed, round.client_seed, r.nonce, nextStep);
+      const correct = judgeHiLo(dir, r.card, next);
+
+      if (correct) {
+        // 对：累乘（JS 全精度，别提前 round），落地继续，不 reveal seed
+        const mult = stepMult(dir, r.card);
+        const newCum = r.cum * mult;
+        const newResult = {
+          ...r,
+          step: nextStep,
+          card: next,
+          cum: newCum,
+          history: [...(r.history || []), { n: next, dir, correct: true }],
+          status: 'playing',
+        };
+        await client.query(`UPDATE rounds SET result = $2::jsonb WHERE id = $1`, [round.id, JSON.stringify(newResult)]);
+
+        return { card: next, correct: true, cum: newCum, stepMult: mult, dir };
+      }
+
+      // 错（bust）：终局输，全额下注进入链式分成，此刻才 reveal seed
+      const newResult = {
+        ...r,
+        step: nextStep,
+        card: next,
+        history: [...(r.history || []), { n: next, dir, correct: false }],
+        bustAt: next,
+        status: 'bust',
+      };
+      await client.query(
+        `UPDATE rounds SET status = 'bust', result = $2::jsonb, payout = '0.00' WHERE id = $1`,
+        [round.id, JSON.stringify(newResult)]
+      );
+      await client.query(`UPDATE bets SET outcome = 'lose' WHERE round_id = $1`, [round.id]);
+
+      const playerResult = await client.query('SELECT agent_id FROM players WHERE id = $1', [playerId]);
+      const agentId = playerResult.rows[0]?.agent_id;
+      if (agentId) {
+        await distributeLoss(client, {
+          playerId,
+          agentId,
+          roundId: round.id,
+          lossAmount: round.bet_amount,
+        });
+      }
+
+      return {
+        card: next,
+        correct: false,
+        serverSeed: round.server_seed,
+        clientSeed: round.client_seed,
+        nonce: r.nonce,
+        roundId: round.id,
+      };
+    });
+
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// POST /round/hilo/skip —— 换一张明牌：从同一牌序取下一张（step 前进），不结算、
+// 累乘不变，限 SKIPS_PER_ROUND 次；不 reveal serverSeed/后续牌。
+// ------------------------------------------------------------------
+router.post('/hilo/skip', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { roundId } = req.body || {};
+
+    if (!roundId) {
+      return res.status(400).json({ error: '参数不完整：roundId 必填' });
+    }
+
+    const result = await withTransaction(async (client) => {
+      const round = await lockHiloRound(client, roundId, playerId);
+      const r = round.result || {};
+
+      if (round.status !== 'playing') {
+        throw httpError(400, '该局已结束，无法 skip');
+      }
+      if (!(Number(r.skips) > 0)) {
+        throw httpError(400, 'skip 次数已用完');
+      }
+
+      const nextStep = r.step + 1;
+      const newCard = deriveCard(round.server_seed, round.client_seed, r.nonce, nextStep);
+      const newSkips = r.skips - 1;
+      const newResult = {
+        ...r,
+        step: nextStep,
+        card: newCard,
+        skips: newSkips,
+        history: [...(r.history || []), { n: newCard, dir: 'skip', correct: null }],
+        status: 'playing',
+      };
+      await client.query(`UPDATE rounds SET result = $2::jsonb WHERE id = $1`, [round.id, JSON.stringify(newResult)]);
+
+      return { card: newCard, skipsLeft: newSkips, cum: r.cum };
+    });
+
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// POST /round/hilo/cashout —— 任意步兑现：payout = round2(bet_amount × cum)，
+// cum=1（没猜过就兑现）时 payout=bet，等同退注，允许。
+// ------------------------------------------------------------------
+router.post('/hilo/cashout', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { roundId } = req.body || {};
+
+    if (!roundId) {
+      return res.status(400).json({ error: '参数不完整：roundId 必填' });
+    }
+
+    const result = await withTransaction(async (client) => {
+      const round = await lockHiloRound(client, roundId, playerId);
+      const r = round.result || {};
+
+      if (round.status === 'bust') {
+        throw httpError(400, '该局已猜错结束，无法兑现');
+      }
+
+      if (round.status === 'cashed') {
+        // 已兑现过：幂等返回旧结果，不重复加钱
+        return {
+          payout: round.payout,
+          balanceAfter: await getBalance(playerId),
+          cum: r.cum,
+          serverSeed: round.server_seed,
+          clientSeed: round.client_seed,
+          nonce: r.nonce,
+          roundId: round.id,
+          alreadyDone: true,
+        };
+      }
+
+      // status === 'playing'：正常兑现，SQL numeric 做乘法+round，禁 JS 浮点做金额计算
+      const payoutResult = await client.query(
+        'SELECT round($1::numeric * $2::numeric, 2) AS payout',
+        [round.bet_amount, r.cum]
+      );
+      const payout = payoutResult.rows[0].payout;
+
+      const { balanceAfter } = await credit(client, {
+        playerId,
+        amount: payout,
+        type: 'hilo_payout',
+        idempotencyKey: `hilo-cash-${round.id}`,
+        roundId: round.id,
+      });
+
+      const newResult = { ...r, status: 'cashed' };
+      await client.query(
+        `UPDATE rounds SET status = 'cashed', payout = $2::numeric, result = $3::jsonb WHERE id = $1`,
+        [round.id, payout, JSON.stringify(newResult)]
+      );
+      await client.query(`UPDATE bets SET outcome = 'win' WHERE round_id = $1`, [round.id]);
+
+      return {
+        payout,
+        balanceAfter,
+        cum: r.cum,
+        serverSeed: round.server_seed,
+        clientSeed: round.client_seed,
+        nonce: r.nonce,
+        roundId: round.id,
       };
     });
 

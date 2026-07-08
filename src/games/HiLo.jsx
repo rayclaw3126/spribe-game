@@ -18,12 +18,11 @@ import ballUrl from '../assets/covers/ball-3d.png'
 //   LOW P=1 → 0.97× —— 两钮都正常可押。
 //   猜对倍数累乘（内部保留全精度，显示才 round2），CASHOUT = 注金 × 累乘。
 const RTP = 0.97
-const SKIPS_PER_ROUND = 3   // 每局 skip 限次（可调）
+const SKIPS_PER_ROUND = 3   // 每局 skip 限次（后端 game/hilo.js SKIPS_PER_ROUND 同步）
 const round2 = x => Math.round(x * 100) / 100
 const pHigh = n => (14 - n) / 13
 const pLow = n => n / 13
-// uniform 1..13 draw (module-level: event-time randomness only)
-const drawCard = () => 1 + Math.floor(Math.random() * 13)
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `hilo-${Date.now()}-${Math.random()}`)
 
 // flat block-style football jersey: body + sleeves + collar, deep green,
 // big squad number (1–13) on the chest
@@ -137,27 +136,54 @@ function DealAnim({ num, kind, dx, w, h, onFlip, onReveal, onDone }) {
   )
 }
 
-export default function HiLo({ balance, setBalance, onBack }) {
+export default function HiLo({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const [bet, setBet] = useState(10)
   const [phase, setPhase] = useState('idle')   // idle | playing | done
-  const [card, setCard] = useState(null)       // current face-up number 1..13
+  const [roundId, setRoundId] = useState(null)
+  const [card, setCard] = useState(null)       // current face-up number 1..13 — server-issued
   const [flipping, setFlipping] = useState(false)
+  const [busy, setBusy] = useState(false)      // await 期间禁重复点（一次只允许一次在途请求）
   const [skips, setSkips] = useState(SKIPS_PER_ROUND)
-  const [cum, setCum] = useState(1)            // display copy of the running product
+  const [cum, setCum] = useState(1)            // server-returned running multiplier（不再本地累乘）
   const [steps, setSteps] = useState([])       // this round's flips {n, dir, correct}
   const [cardFlash, setCardFlash] = useState(null)   // 'win' | 'lose' | null
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
+  const [proof, setProof] = useState(null)     // 最近一局：{ commitHash, serverSeed, clientSeed } 供玩家自行验证
+  const [toastMsg, setToastMsg] = useState('')
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
-  const cumRef = useRef(1)                     // full-precision running product
   const audioRef = useRef({ ctx: null, muted: false })
+  const toastTimer = useRef(null)
   const timersRef = useRef([])
   const [anim, setAnim] = useState(null)       // { id, num, kind, onReveal } — presentation only
   const animIdRef = useRef(0)
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
   function later(fn, ms) { const id = setTimeout(fn, ms); timersRef.current.push(id); return id }
+
+  function pushToast(msg) {
+    setToastMsg(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToastMsg(''), 3000)
+  }
+
+  // ---------- server API (服务器权威：牌序/判定/累乘/派彩全部以后端返回为准，
+  // 前端不再自己发牌/算钱) ----------
+  async function apiPost(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) {
+      const err = new Error(data?.error || '请求失败，请重试')
+      err.data = data
+      throw err
+    }
+    return data
+  }
 
   // ---------- audio ----------
   function ensureAudio() {
@@ -221,7 +247,10 @@ export default function HiLo({ balance, setBalance, onBack }) {
     g.gain.exponentialRampToValueAtTime(0.12, t + 0.03); g.gain.exponentialRampToValueAtTime(0.001, t + 0.42)
   }
 
-  useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
+  useEffect(() => () => {
+    timersRef.current.forEach(clearTimeout)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+  }, [])
 
   // Kick off the deal animation. The number is already decided by the caller;
   // this layer only replays it visually. Starting a new deal replaces the anim
@@ -237,58 +266,81 @@ export default function HiLo({ balance, setBalance, onBack }) {
     setAnim({ id: ++animIdRef.current, num, kind, onReveal })
   }
 
-  // ---------- game ----------
-  function startGame() {
-    if (phase === 'playing' || bet > balance || bet < 1) return
-    const first = drawCard()   // draw first — SFX noise randoms must not sit ahead
-    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
+  // ---------- game (服务器权威：牌序/判定/累乘/派彩以后端为准，本地不再发牌/算钱) ----------
+  async function startGame() {
+    if (phase === 'playing' || busy || bet > (serverBalance ?? 0) || bet < 1) return
     ensureAudio()
-    setBalance(b => round2(b - bet))
-    cumRef.current = 1
-    setCum(1)
-    setCard(first)
-    setSteps([])
-    setSkips(SKIPS_PER_ROUND)
-    setCardFlash(null)
-    setFlipping(false)
-    setPhase('playing')
-    beginDeal(first, 'deal', null)   // state committed above — anim is a visual replay
-  }
-
-  function guess(dir) {   // dir: 'high' | 'low' — both include SAME
-    if (phase !== 'playing' || flipping) return
-    const next = drawCard()   // result decided BEFORE the animation starts
-    const p = dir === 'high' ? pHigh(card) : pLow(card)
-    const correct = dir === 'high' ? next >= card : next <= card
-    setFlipping(true)
-
-    // Same settle block as before — now triggered by the flip's animationend
-    // (reveal) instead of the old 620ms timer. Money path untouched.
-    beginDeal(next, correct ? 'win' : 'lose', () => {
-      setSteps(s => [...s, { n: next, dir, correct }].slice(-10))
-      setCard(next)
-      if (correct) {
-        cumRef.current *= RTP / p        // full precision; round only at display/settle
-        setCum(cumRef.current)
-        setCardFlash('win')
-        playCorrect()
-      } else {
-        setCardFlash('lose')
-        setPhase('done')                 // stake already deducted — round over
-        settleFeed()
-        playWrong()
-      }
+    setBusy(true)
+    try {
+      const idempotencyKey = genIdemKey()
+      const data = await apiPost('/round/hilo/start', { amount: bet, idempotencyKey })
+      setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
+      setServerBalance(Number(data.balanceAfter))
+      setRoundId(data.roundId)
+      setCum(1)
+      setCard(data.card)            // server-issued first card
+      setSteps([])
+      setSkips(SKIPS_PER_ROUND)
+      setCardFlash(null)
       setFlipping(false)
-      later(() => setCardFlash(null), 700)
-    })
+      setProof({ commitHash: data.commitHash })
+      setPhase('playing')
+      beginDeal(data.card, 'deal', null)   // state committed above — anim is a visual replay
+    } catch (err) {
+      pushToast(err.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
-  function skip() {   // swap the face card, no settle, streak keeps (limited per round)
-    if (phase !== 'playing' || flipping || skips <= 0) return
-    const next = drawCard()
-    setSkips(k => k - 1)
-    setCard(next)   // committed instantly, exactly as before — spam-safe
-    beginDeal(next, 'skip', null)
+  async function guess(dir) {   // dir: 'high' | 'low' — both include SAME; 判定由后端 judge 决定
+    if (phase !== 'playing' || flipping || busy) return
+    setBusy(true)
+    try {
+      const data = await apiPost('/round/hilo/guess', { roundId, dir })
+      const { card: next, correct } = data
+      setFlipping(true)
+
+      // Same settle block as before — now triggered by the flip's animationend
+      // (reveal) instead of the old 620ms timer. Money already server-settled;
+      // this only replays the already-decided result visually.
+      beginDeal(next, correct ? 'win' : 'lose', () => {
+        setSteps(s => [...s, { n: next, dir, correct }].slice(-10))
+        setCard(next)
+        if (correct) {
+          setCum(data.cum)          // server-returned running product, full precision
+          setCardFlash('win')
+          playCorrect()
+        } else {
+          setCardFlash('lose')
+          setPhase('done')          // stake already deducted at start — round over
+          settleFeed()
+          playWrong()
+          setProof(p => ({ ...p, serverSeed: data.serverSeed, clientSeed: data.clientSeed }))
+        }
+        setFlipping(false)
+        later(() => setCardFlash(null), 700)
+      })
+    } catch (err) {
+      pushToast(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function skip() {   // swap the face card, no settle, streak keeps (limited per round)
+    if (phase !== 'playing' || flipping || busy || skips <= 0) return
+    setBusy(true)
+    try {
+      const data = await apiPost('/round/hilo/skip', { roundId })
+      setSkips(data.skipsLeft)     // server-authoritative remaining skips
+      setCard(data.card)           // committed instantly, exactly as before — spam-safe
+      beginDeal(data.card, 'skip', null)
+    } catch (err) {
+      pushToast(err.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   // fake feed rows settle for the round: ~45% cash green, the rest grey out
@@ -298,14 +350,23 @@ export default function HiLo({ balance, setBalance, onBack }) {
       : { ...b, status: 'crashed' }))
   }
 
-  // single money path: every payout goes through here
-  function cashOut() {
-    if (phase !== 'playing' || flipping) return
-    const payout = round2(bet * cumRef.current)
-    setBalance(b => round2(b + payout))
-    setPhase('done')
-    settleFeed()
-    playCash()
+  // single money path: every payout goes through here — server computes
+  // payout = round2(bet_amount × cum) and returns the authoritative balance
+  async function cashOut() {
+    if (phase !== 'playing' || flipping || busy) return
+    setBusy(true)
+    try {
+      const data = await apiPost('/round/hilo/cashout', { roundId })
+      setServerBalance(Number(data.balanceAfter))
+      setProof(p => ({ ...p, serverSeed: data.serverSeed, clientSeed: data.clientSeed }))
+      setPhase('done')
+      settleFeed()
+      playCash()
+    } catch (err) {
+      pushToast(err.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   // ---------- visual layer (Spribe Hi Lo 1:1, pitch green) ----------
@@ -503,13 +564,13 @@ export default function HiLo({ balance, setBalance, onBack }) {
               <div style={{ position: 'absolute', left: 0, top: 0 }}><CardBack w={CW} h={CH} /></div>
             </div>
             <button type="button" onClick={skip}
-              disabled={phase !== 'playing' || flipping || skips <= 0}
+              disabled={phase !== 'playing' || flipping || busy || skips <= 0}
               title={`换一张（剩 ${skips} 次）`} style={{
                 minWidth: 48, height: 36, borderRadius: RADIUS.pill,
                 background: 'rgba(0,0,0,0.35)', color: COLORS.white,
                 border: '1px solid rgba(255,255,255,0.35)',
                 fontSize: 13, fontWeight: 900,
-                cursor: phase === 'playing' && skips > 0 && !flipping ? 'pointer' : 'not-allowed',
+                cursor: phase === 'playing' && skips > 0 && !flipping && !busy ? 'pointer' : 'not-allowed',
                 opacity: phase === 'playing' && skips > 0 ? 1 : 0.5,
               }}>⟲ {skips}</button>
           </div>
@@ -521,20 +582,40 @@ export default function HiLo({ balance, setBalance, onBack }) {
           position: 'relative', zIndex: 1, flexWrap: 'wrap',
         }}>
           <div style={{ textAlign: 'center' }}>
-            <button type="button" onClick={() => guess('low')} disabled={phase !== 'playing' || flipping}
-              style={choicePill(HILO.low, phase !== 'playing' || flipping)}>⌄ LOW OR SAME</button>
+            <button type="button" onClick={() => guess('low')} disabled={phase !== 'playing' || flipping || busy}
+              style={choicePill(HILO.low, phase !== 'playing' || flipping || busy)}>⌄ LOW OR SAME</button>
             <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
               {round2(RTP / pLow(card ?? 9)).toFixed(2)}x
             </div>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <button type="button" onClick={() => guess('high')} disabled={phase !== 'playing' || flipping}
-              style={choicePill(HILO.high, phase !== 'playing' || flipping)}>⌃ HIGH OR SAME</button>
+            <button type="button" onClick={() => guess('high')} disabled={phase !== 'playing' || flipping || busy}
+              style={choicePill(HILO.high, phase !== 'playing' || flipping || busy)}>⌃ HIGH OR SAME</button>
             <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
               {round2(RTP / pHigh(card ?? 9)).toFixed(2)}x
             </div>
           </div>
         </div>
+
+        {/* ---- 可验证公平：显示本局的 commit hash / serverSeed（reveal 后），
+             玩家可用 clientSeed/nonce/step 自行用 deriveCard 重算校验牌序未被篡改 ---- */}
+        {proof && (proof.serverSeed || proof.commitHash) && (
+          <div style={{
+            textAlign: 'center', marginTop: 8, fontSize: 10, fontWeight: 600,
+            color: 'rgba(255,255,255,0.5)', wordBreak: 'break-all', position: 'relative', zIndex: 1,
+          }}>
+            可验证 · {proof.serverSeed ? `serverSeed: ${proof.serverSeed.slice(0, 16)}… · ` : ''}hash: {(proof.commitHash || '').slice(0, 16)}…
+          </div>
+        )}
+
+        {toastMsg && (
+          <div style={{
+            position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 10, padding: '6px 14px', borderRadius: RADIUS.pill,
+            background: 'rgba(0,0,0,0.65)', color: '#ff8a8a',
+            fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap',
+          }}>{toastMsg}</div>
+        )}
 
         </div>{/* /middle zone */}
 
@@ -574,25 +655,25 @@ export default function HiLo({ balance, setBalance, onBack }) {
           </button>
           <button type="button" disabled={phase === 'playing'} onClick={() => setBet(b => b + 10)} style={{ ...circleBtn, opacity: phase === 'playing' ? 0.5 : 1, cursor: phase === 'playing' ? 'not-allowed' : 'pointer' }}>+</button>
           {phase === 'playing' ? (
-            <button type="button" onClick={cashOut} disabled={flipping} style={{
+            <button type="button" onClick={cashOut} disabled={flipping || busy} style={{
               minWidth: isMobile ? 170 : 230, padding: '7px 0', borderRadius: RADIUS.pill,
               background: HILO.cashout, color: COLORS.white,
               border: '1px solid rgba(255,255,255,0.4)',
               fontSize: 13, fontWeight: 900, letterSpacing: 0.5, lineHeight: 1.3,
-              cursor: flipping ? 'not-allowed' : 'pointer', opacity: flipping ? 0.6 : 1,
+              cursor: flipping || busy ? 'not-allowed' : 'pointer', opacity: flipping || busy ? 0.6 : 1,
               display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
             }}>
               <span>CASHOUT</span>
               <span style={{ fontSize: 12, opacity: 0.92 }}>{round2(bet * cum).toFixed(2)} USD</span>
             </button>
           ) : (
-            <button type="button" onClick={startGame} disabled={bet > balance || bet < 1} style={{
+            <button type="button" onClick={startGame} disabled={busy || bet > (serverBalance ?? 0) || bet < 1} style={{
               minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
               background: HILO.bet, color: COLORS.white,
               border: '1px solid rgba(255,255,255,0.35)',
               fontSize: 14, fontWeight: 900, letterSpacing: 1,
-              cursor: bet > balance || bet < 1 ? 'not-allowed' : 'pointer',
-              opacity: bet > balance || bet < 1 ? 0.55 : 1,
+              cursor: busy || bet > (serverBalance ?? 0) || bet < 1 ? 'not-allowed' : 'pointer',
+              opacity: busy || bet > (serverBalance ?? 0) || bet < 1 ? 0.55 : 1,
             }}>▷ BET</button>
           )}
         </div>
@@ -615,7 +696,7 @@ export default function HiLo({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Rating Hi-Lo</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 
