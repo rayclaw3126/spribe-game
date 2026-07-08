@@ -9,6 +9,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import ballUrl from '../assets/covers/ball-3d.png'
 import { useBgm } from '../components/shell/bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import WinToast from '../components/shell/WinToast'
 import badgeWinUrl from '../assets/shared/badge_win.png'
 import badgeLoseUrl from '../assets/shared/badge_lose.png'
 import bayBgUrl from '../assets/shared/bay_bg.png'
@@ -38,13 +39,17 @@ function easeOutCubic(p) {
   return 1 - Math.pow(1 - p, 3)
 }
 
-export default function Limbo({ balance, setBalance }) {
+// 生成幂等键：优先用 crypto.randomUUID，不支持则退化拼接时间戳+随机数
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `limbo-${Date.now()}-${Math.random()}`)
+
+export default function Limbo({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const canvasRef = useRef(null)
   const ballRef = useRef(null)
   const frameRef = useRef(null)
   const phaseRef = useRef('idle')          // idle | climbing | done
   const animRef = useRef(null)             // { to, start, bet, t }
+  const pendingRef = useRef(null)          // 本局后端已返回的结算结果，settle() 落定时消费
   const multRef = useRef(1)
   const targetRef = useRef(2)
   const particlesRef = useRef([])
@@ -52,6 +57,7 @@ export default function Limbo({ balance, setBalance }) {
   const bounceRef = useRef(0)              // loss bounce start timestamp
   const isMobileRef = useRef(false)
   const audioRef = useRef({ ctx: null, muted: false, engine: null })
+  const toastIdRef = useRef(0)
 
   const [bet, setBet] = useState(10)
   const [target, setTarget] = useState(2.0)
@@ -61,7 +67,15 @@ export default function Limbo({ balance, setBalance }) {
   const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round, newest first
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [muted, setMuted] = useState(false)
+  const [toasts, setToasts] = useState([])
+  const [proof, setProof] = useState(null)   // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
   const [bgmOn, toggleBgm] = useBgm()
+
+  function pushToast(label) {
+    const id = ++toastIdRef.current
+    setToasts(t => [...t, { id, label, win: 0 }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
+  }
 
   const t = Math.max(1.01, target || 1.01)
   const winChance = Math.min(99, (HOUSE_EDGE / t) * 100)
@@ -162,13 +176,37 @@ export default function Limbo({ balance, setBalance }) {
     osc.stop(ctx.currentTime + 0.55)
   }
 
-  function play() {
-    if (bet > balance || rolling) return
-    setBalance(b => parseFloat((b - bet).toFixed(2)))
+  // 开奖服务器算，不信前端：只把下注参数（金额/target）传给后端，
+  // finalMult/win/payout/余额全部以后端返回为准，本地不再算一分钱。
+  // 现有滚动动画照旧播放，只是动画滚到的目标值换成了后端返回的 finalMult。
+  async function play() {
+    if (bet < 1 || bet > (serverBalance ?? 0) || rolling) return
     setResult(null)
     setRolling(true)
-    const r = Math.random()
-    const finalMult = Math.min(MAX_MULT, Math.max(1, parseFloat((HOUSE_EDGE / r).toFixed(2))))
+
+    const idempotencyKey = genIdemKey()
+    let data
+    try {
+      const resp = await fetch('/round/limbo/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+        body: JSON.stringify({ amount: bet, target: t, idempotencyKey }),
+      })
+      data = await resp.json()
+      if (!resp.ok) {
+        setRolling(false)
+        pushToast(data?.error || '下注失败，请重试')
+        return
+      }
+    } catch {
+      setRolling(false)
+      pushToast('网络异常，请稍后重试')
+      return
+    }
+
+    const { finalMult, win, payout, balanceAfter, serverSeed, commitHash } = data
+    pendingRef.current = { win, payout: Number(payout), balanceAfter, serverSeed, commitHash }
+
     setFeedBets(makeFeedBots())   // fresh fake round rides along (display only; after the roll)
     animRef.current = { to: finalMult, start: performance.now(), bet, t }
     particlesRef.current = []
@@ -182,13 +220,16 @@ export default function Limbo({ balance, setBalance }) {
   }
 
   function settle() {
-    const { to, bet: b, t: tt } = animRef.current
+    const { to } = animRef.current
+    const pending = pendingRef.current || {}
     phaseRef.current = 'done'
     multRef.current = to
     setMultiplier(to)
-    const win = to >= tt
-    const profit = win ? parseFloat((b * tt).toFixed(2)) : 0
-    if (win) setBalance(bb => parseFloat((bb + profit).toFixed(2)))
+    const win = !!pending.win
+    const profit = win ? pending.payout : 0
+    // 余额只认后端 balanceAfter，不本地加减
+    if (pending.balanceAfter != null) setServerBalance(Number(pending.balanceAfter))
+    if (pending.serverSeed) setProof({ serverSeed: pending.serverSeed, commitHash: pending.commitHash })
     setResult({ mult: to, win, profit })
     setRoundHistory(h => [to, ...h].slice(0, 20))
     // fake feed rows settle for the round: ~45% cash green, the rest grey out
@@ -520,6 +561,7 @@ export default function Limbo({ balance, setBalance }) {
           padding: isMobile ? 12 : 18, boxSizing: 'border-box',
         }}>
         {!isDesk && <div style={{ marginBottom: 12 }}><RoundHistoryBar rounds={roundHistory} /></div>}
+        <WinToast toasts={toasts} />
         <style>{`
           @keyframes ocFlash {
             0%, 100% { color: #EF4444; }
@@ -590,6 +632,14 @@ export default function Limbo({ balance, setBalance }) {
             </p>
           </div>
         </div>
+        {proof && (
+          <div style={{
+            textAlign: 'center', marginTop: 8, fontSize: 10, fontWeight: 600,
+            color: 'rgba(255,255,255,0.4)', wordBreak: 'break-all',
+          }}>
+            可验证 · serverSeed: {proof.serverSeed?.slice(0, 16)}… · hash: {proof.commitHash?.slice(0, 16)}…
+          </div>
+        )}
         </div>{/* /middle zone */}
       </Panel>
   )
@@ -600,13 +650,13 @@ export default function Limbo({ balance, setBalance }) {
           bare={isDesk}
           bet={bet}
           setBet={setBet}
-          max={balance}
+          max={serverBalance ?? 0}
           inputDisabled={rolling}
           chipDisabled={rolling}
           showAuto={false}
           button={rolling
             ? { state: 'waiting', label: '结算中…', disabled: true }
-            : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: play, disabled: bet > balance || bet < 1 }}
+            : { state: 'bet', label: `下注 $${bet.toFixed(2)}`, onClick: play, disabled: bet > (serverBalance ?? 0) || bet < 1 }}
         />
   )
 
@@ -626,7 +676,7 @@ export default function Limbo({ balance, setBalance }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Odds Climb</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 

@@ -37,6 +37,15 @@ import {
   MINES_MIN,
   MINES_MAX,
 } from '../game/mines.js';
+import {
+  deriveMult,
+  judge as judgeLimbo,
+  hashSeed as hashSeedLimbo,
+  newServerSeed as newServerSeedLimbo,
+  newClientSeed as newClientSeedLimbo,
+  MAX_MULT as LIMBO_MAX_MULT,
+  TARGET_MIN as LIMBO_TARGET_MIN,
+} from '../game/limbo.js';
 
 const router = Router();
 
@@ -551,6 +560,177 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
             path: oldResult.path,
             bucket: oldResult.bucket,
             mult: oldResult.mult,
+            payout: existingAfterConflict.payout,
+            balanceAfter: await getBalance(playerId),
+            serverSeed: existingAfterConflict.server_seed,
+            clientSeed: existingAfterConflict.client_seed,
+            nonce: oldResult.nonce,
+            commitHash: existingAfterConflict.result_hash,
+            roundId: existingAfterConflict.round_id,
+            idempotent: true,
+          });
+        }
+      }
+      throw err;
+    }
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/** 按幂等键查询已存在的 limbo 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
+async function findLimboBetByIdempotencyKey(idempotencyKey) {
+  const result = await query(
+    `SELECT b.id AS bet_id, b.round_id, b.player_id,
+            r.result, r.payout, r.server_seed, r.client_seed, r.result_hash
+       FROM bets b
+       JOIN rounds r ON r.id = b.round_id
+      WHERE b.idempotency_key = $1 AND r.game = 'limbo'`,
+    [idempotencyKey]
+  );
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+// ------------------------------------------------------------------
+// POST /round/limbo/play —— Limbo（Odds Climb）即时下注 + 服务器开奖（仅玩家）
+// 说明：开奖不信前端 —— finalMult 由 serverSeed（后端私密）+ clientSeed + nonce
+// 派生，公式逐位照抄前端 Limbo.jsx line 171 真实代码 HOUSE_EDGE/r（旧注释
+// `/(1-r)` 过时且错误，不采用）。payout = amount × target（不是 × finalMult），
+// 前端传入的任何 finalMult/payout 一律忽略。
+// 钱走 lib/wallet.js 唯一路径，输局（finalMult < target）触发 lib/commission.js
+// 链式分成，lossAmount = amount 全额。
+// ------------------------------------------------------------------
+router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { amount, target, clientSeed, idempotencyKey } = req.body || {};
+
+    const amountNum = Number(amount);
+    const targetNum = Number(target);
+
+    if (!idempotencyKey) {
+      return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
+    }
+    if (!amountNum || !(amountNum > 0)) {
+      return res.status(400).json({ error: '下注金额必须大于 0' });
+    }
+    if (!(targetNum >= LIMBO_TARGET_MIN && targetNum <= LIMBO_MAX_MULT)) {
+      return res.status(400).json({ error: `target 必须在 ${LIMBO_TARGET_MIN}–${LIMBO_MAX_MULT} 之间` });
+    }
+
+    // 1. 幂等先查：命中则直接返回旧的开奖结果，不重复扣钱
+    const existing = await findLimboBetByIdempotencyKey(idempotencyKey);
+    if (existing) {
+      const oldResult = existing.result || {};
+      return res.json({
+        finalMult: oldResult.finalMult,
+        win: oldResult.win,
+        payout: existing.payout,
+        balanceAfter: await getBalance(playerId),
+        serverSeed: existing.server_seed,
+        clientSeed: existing.client_seed,
+        nonce: oldResult.nonce,
+        commitHash: existing.result_hash,
+        roundId: existing.round_id,
+        idempotent: true,
+      });
+    }
+
+    try {
+      const result = await withTransaction(async (client) => {
+        // 2. 生成本局开奖种子并算出 finalMult/胜负/派彩（全部在扣钱之前算好，
+        //    与「余额是否充足」无关，前端传入的任何 finalMult/payout 一律忽略）
+        const serverSeed = newServerSeedLimbo();
+        const seedForMult = clientSeed || newClientSeedLimbo();
+        const nonce = crypto.randomBytes(8).toString('hex');
+        const commitHash = hashSeedLimbo(serverSeed);
+
+        const finalMult = deriveMult(serverSeed, seedForMult, nonce);
+        const win = judgeLimbo(finalMult, targetNum);
+
+        const amountStr = amountNum.toFixed(2);
+        // payout = amount × target（不是 × finalMult），SQL numeric 计算、禁 JS 浮点
+        let payout = '0.00';
+        if (win) {
+          const payoutResult = await client.query(
+            'SELECT trunc($1::numeric * $2::numeric, 2) AS payout',
+            [amountStr, targetNum]
+          );
+          payout = payoutResult.rows[0].payout;
+        }
+
+        // 3. 建 round（含开奖结果，settled 状态——Limbo 是即时游戏，下注即结算）
+        const roundResult = await client.query(
+          `INSERT INTO rounds (game, player_id, bet_amount, client_seed, server_seed, result_hash, payout, status, result)
+           VALUES ('limbo', $1, $2::numeric, $3, $4, $5, $6::numeric, 'settled', $7::jsonb)
+           RETURNING id`,
+          [
+            playerId,
+            amountStr,
+            seedForMult,
+            serverSeed,
+            commitHash,
+            payout,
+            JSON.stringify({ finalMult, target: targetNum, win, nonce }),
+          ]
+        );
+        const roundId = roundResult.rows[0].id;
+
+        // 4. 扣钱（资金唯一出入口）
+        const { balanceAfter: balanceAfterDebit } = await debit(client, {
+          playerId,
+          amount: amountStr,
+          type: 'limbo_bet',
+          idempotencyKey,
+          roundId,
+        });
+
+        let balanceAfter = balanceAfterDebit;
+        if (win) {
+          // 5a. 赢：派彩加钱（资金唯一出入口）
+          const creditResult = await credit(client, {
+            playerId,
+            amount: payout,
+            type: 'limbo_payout',
+            idempotencyKey: `limbo-payout-${roundId}`,
+            roundId,
+          });
+          balanceAfter = creditResult.balanceAfter;
+        } else {
+          // 5b. 输：本局下注金额全额进入链式分成（佣金唯一入口）
+          const playerResult = await client.query('SELECT agent_id FROM players WHERE id = $1', [playerId]);
+          const agentId = playerResult.rows[0]?.agent_id;
+          if (agentId) {
+            await distributeLoss(client, {
+              playerId,
+              agentId,
+              roundId,
+              lossAmount: amountStr,
+            });
+          }
+        }
+
+        // 6. 建 bet
+        await client.query(
+          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome)
+           VALUES ($1, $2, $3::numeric, $4, $5)`,
+          [roundId, playerId, amountStr, idempotencyKey, win ? 'win' : 'lose']
+        );
+
+        return { finalMult, win, payout, balanceAfter, serverSeed, clientSeed: seedForMult, nonce, commitHash, roundId };
+      });
+
+      return res.json({ ...result, idempotent: false });
+    } catch (err) {
+      // 唯一索引兜底：并发下第二次请求会撞上 bets 的幂等键唯一索引冲突（23505），
+      // 事务已被 withTransaction 自动 ROLLBACK，这里回查已提交的旧记录，视为幂等命中
+      if (err.code === '23505') {
+        const existingAfterConflict = await findLimboBetByIdempotencyKey(idempotencyKey);
+        if (existingAfterConflict) {
+          const oldResult = existingAfterConflict.result || {};
+          return res.json({
+            finalMult: oldResult.finalMult,
+            win: oldResult.win,
             payout: existingAfterConflict.payout,
             balanceAfter: await getBalance(playerId),
             serverSeed: existingAfterConflict.server_seed,
