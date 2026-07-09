@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { query, withTransaction } from '../db.js';
 import { debit, credit } from '../lib/wallet.js';
 import { assertBetWithinLimits, assertPayoutCap } from '../lib/risk.js';
+import { ensureActiveSeed, claimNonce } from '../lib/seeds.js';
 import { distributeLoss } from '../lib/commission.js';
 import { requireAuth, requireType } from '../middleware/auth.js';
 import {
@@ -263,7 +264,8 @@ async function findDiceBetByIdempotencyKey(idempotencyKey) {
 router.post('/dice/play', requireAuth, requireType('player'), async (req, res, next) => {
   try {
     const playerId = req.user.sub;
-    const { amount, target, direction, clientSeed, idempotencyKey } = req.body || {};
+    // clientSeed 不再从请求体收（模型 A：用玩家 active 种子里固定的 client_seed）
+    const { amount, target, direction, idempotencyKey } = req.body || {};
 
     const amountNum = Number(amount);
     const targetNum = Number(target);
@@ -293,10 +295,9 @@ router.post('/dice/play', requireAuth, requireType('player'), async (req, res, n
         win: oldResult.win,
         payout: existing.payout,
         balanceAfter: await getBalance(playerId),
-        serverSeed: existing.server_seed,
         clientSeed: existing.client_seed,
         nonce: oldResult.nonce,
-        commitHash: existing.result_hash,
+        serverSeedHash: existing.result_hash,
         roundId: existing.round_id,
         idempotent: true,
       });
@@ -304,14 +305,12 @@ router.post('/dice/play', requireAuth, requireType('player'), async (req, res, n
 
     try {
       const result = await withTransaction(async (client) => {
-        // 2. 生成本局开奖种子并算出 roll/胜负/赔率/派彩（全部在扣钱之前算好，
-        //    与「余额是否充足」无关，前端传入的任何 payout 一律忽略）
-        const serverSeed = newServerSeed();
-        const seedForRoll = clientSeed || newClientSeed();
-        const nonce = crypto.randomBytes(8).toString('hex');
-        const commitHash = hashSeed(serverSeed);
+        // 2. 领取本玩家 active 种子的下一个 nonce（锁序铁律：player_seeds 先于 wallets，防死锁）。
+        //    首次下注 lazy 建种子，同事务。serverSeed 明文只内部用于派生，绝不进响应。
+        await ensureActiveSeed(client, playerId);
+        const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
 
-        const roll = rollDice(serverSeed, seedForRoll, nonce);
+        const roll = rollDice(serverSeed, clientSeed, nonce);
         const chance = chanceFor(targetNum, direction);
         const win = judge(roll, targetNum, direction);
         const mult = payoutFor(chance);
@@ -334,9 +333,9 @@ router.post('/dice/play', requireAuth, requireType('player'), async (req, res, n
           [
             playerId,
             amountStr,
-            seedForRoll,
+            clientSeed,
             serverSeed,
-            commitHash,
+            serverSeedHash,
             payout,
             JSON.stringify({ roll, target: targetNum, direction, win, nonce }),
           ]
@@ -385,7 +384,7 @@ router.post('/dice/play', requireAuth, requireType('player'), async (req, res, n
           [roundId, playerId, amountStr, idempotencyKey, win ? 'win' : 'lose']
         );
 
-        return { roll, win, payout, balanceAfter, serverSeed, clientSeed: seedForRoll, nonce, commitHash, roundId };
+        return { roll, win, payout, balanceAfter, clientSeed, nonce, serverSeedHash, roundId };
       });
 
       return res.json({ ...result, idempotent: false });
@@ -401,10 +400,9 @@ router.post('/dice/play', requireAuth, requireType('player'), async (req, res, n
             win: oldResult.win,
             payout: existingAfterConflict.payout,
             balanceAfter: await getBalance(playerId),
-            serverSeed: existingAfterConflict.server_seed,
             clientSeed: existingAfterConflict.client_seed,
             nonce: oldResult.nonce,
-            commitHash: existingAfterConflict.result_hash,
+            serverSeedHash: existingAfterConflict.result_hash,
             roundId: existingAfterConflict.round_id,
             idempotent: true,
           });
@@ -441,7 +439,8 @@ async function findPlinkoBetByIdempotencyKey(idempotencyKey) {
 router.post('/plinko/play', requireAuth, requireType('player'), async (req, res, next) => {
   try {
     const playerId = req.user.sub;
-    const { amount, risk, rows, clientSeed, idempotencyKey } = req.body || {};
+    // clientSeed 不再从请求体收（模型 A：用玩家 active 种子里固定的 client_seed）
+    const { amount, risk, rows, idempotencyKey } = req.body || {};
 
     const amountNum = Number(amount);
     const rowsNum = Number(rows);
@@ -472,10 +471,9 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
         mult: oldResult.mult,
         payout: existing.payout,
         balanceAfter: await getBalance(playerId),
-        serverSeed: existing.server_seed,
         clientSeed: existing.client_seed,
         nonce: oldResult.nonce,
-        commitHash: existing.result_hash,
+        serverSeedHash: existing.result_hash,
         roundId: existing.round_id,
         idempotent: true,
       });
@@ -483,14 +481,12 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
 
     try {
       const result = await withTransaction(async (client) => {
-        // 2. 生成本局开奖种子并算出 path/bucket/赔率/派彩（全部在扣钱之前算好，
-        //    与「余额是否充足」无关，前端传入的任何 mult/payout 一律忽略）
-        const serverSeed = newServerSeedPlinko();
-        const seedForPath = clientSeed || newClientSeedPlinko();
-        const nonce = crypto.randomBytes(8).toString('hex');
-        const commitHash = hashSeedPlinko(serverSeed);
+        // 2. 领取本玩家 active 种子的下一个 nonce（锁序铁律：player_seeds 先于 wallets，防死锁）。
+        //    首次下注 lazy 建种子，同事务。serverSeed 明文只内部用于派生，绝不进响应。
+        await ensureActiveSeed(client, playerId);
+        const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
 
-        const path = derivePath(serverSeed, seedForPath, nonce, rowsNum);
+        const path = derivePath(serverSeed, clientSeed, nonce, rowsNum);
         const bucket = path.reduce((a, b) => a + b, 0);
         const mult = multsFor(rowsNum, risk)[bucket];
 
@@ -510,9 +506,9 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
           [
             playerId,
             amountStr,
-            seedForPath,
+            clientSeed,
             serverSeed,
-            commitHash,
+            serverSeedHash,
             payout,
             JSON.stringify({ path, bucket, mult, risk, rows: rowsNum, nonce }),
           ]
@@ -570,7 +566,7 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
           [roundId, playerId, amountStr, idempotencyKey, win ? 'win' : 'lose']
         );
 
-        return { path, bucket, mult, payout, balanceAfter, serverSeed, clientSeed: seedForPath, nonce, commitHash, roundId };
+        return { path, bucket, mult, payout, balanceAfter, clientSeed, nonce, serverSeedHash, roundId };
       });
 
       return res.json({ ...result, idempotent: false });
@@ -587,10 +583,9 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
             mult: oldResult.mult,
             payout: existingAfterConflict.payout,
             balanceAfter: await getBalance(playerId),
-            serverSeed: existingAfterConflict.server_seed,
             clientSeed: existingAfterConflict.client_seed,
             nonce: oldResult.nonce,
-            commitHash: existingAfterConflict.result_hash,
+            serverSeedHash: existingAfterConflict.result_hash,
             roundId: existingAfterConflict.round_id,
             idempotent: true,
           });
@@ -628,7 +623,8 @@ async function findLimboBetByIdempotencyKey(idempotencyKey) {
 router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, next) => {
   try {
     const playerId = req.user.sub;
-    const { amount, target, clientSeed, idempotencyKey } = req.body || {};
+    // clientSeed 不再从请求体收（模型 A：用玩家 active 种子里固定的 client_seed）
+    const { amount, target, idempotencyKey } = req.body || {};
 
     const amountNum = Number(amount);
     const targetNum = Number(target);
@@ -655,10 +651,9 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
         win: oldResult.win,
         payout: existing.payout,
         balanceAfter: await getBalance(playerId),
-        serverSeed: existing.server_seed,
         clientSeed: existing.client_seed,
         nonce: oldResult.nonce,
-        commitHash: existing.result_hash,
+        serverSeedHash: existing.result_hash,
         roundId: existing.round_id,
         idempotent: true,
       });
@@ -666,14 +661,12 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
 
     try {
       const result = await withTransaction(async (client) => {
-        // 2. 生成本局开奖种子并算出 finalMult/胜负/派彩（全部在扣钱之前算好，
-        //    与「余额是否充足」无关，前端传入的任何 finalMult/payout 一律忽略）
-        const serverSeed = newServerSeedLimbo();
-        const seedForMult = clientSeed || newClientSeedLimbo();
-        const nonce = crypto.randomBytes(8).toString('hex');
-        const commitHash = hashSeedLimbo(serverSeed);
+        // 2. 领取本玩家 active 种子的下一个 nonce（锁序铁律：player_seeds 先于 wallets，防死锁）。
+        //    首次下注 lazy 建种子，同事务。serverSeed 明文只内部用于派生，绝不进响应。
+        await ensureActiveSeed(client, playerId);
+        const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
 
-        const finalMult = deriveMult(serverSeed, seedForMult, nonce);
+        const finalMult = deriveMult(serverSeed, clientSeed, nonce);
         const win = judgeLimbo(finalMult, targetNum);
 
         const amountStr = amountNum.toFixed(2);
@@ -695,9 +688,9 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
           [
             playerId,
             amountStr,
-            seedForMult,
+            clientSeed,
             serverSeed,
-            commitHash,
+            serverSeedHash,
             payout,
             JSON.stringify({ finalMult, target: targetNum, win, nonce }),
           ]
@@ -746,7 +739,7 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
           [roundId, playerId, amountStr, idempotencyKey, win ? 'win' : 'lose']
         );
 
-        return { finalMult, win, payout, balanceAfter, serverSeed, clientSeed: seedForMult, nonce, commitHash, roundId };
+        return { finalMult, win, payout, balanceAfter, clientSeed, nonce, serverSeedHash, roundId };
       });
 
       return res.json({ ...result, idempotent: false });
@@ -762,10 +755,9 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
             win: oldResult.win,
             payout: existingAfterConflict.payout,
             balanceAfter: await getBalance(playerId),
-            serverSeed: existingAfterConflict.server_seed,
             clientSeed: existingAfterConflict.client_seed,
             nonce: oldResult.nonce,
-            commitHash: existingAfterConflict.result_hash,
+            serverSeedHash: existingAfterConflict.result_hash,
             roundId: existingAfterConflict.round_id,
             idempotent: true,
           });
