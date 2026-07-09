@@ -63,6 +63,7 @@ import { drawStreak, streakPayout, PATTERNS as STREAK_PATTERNS } from '../game/s
 import { spinRoulette, rouletteWinMult, isValidBetKey } from '../game/miniRoulette.js';
 import { makeSeededRng } from '../lib/seededRng.js';
 import * as speedGridEngine from '../game/speedGrid.js';
+import * as numberUpEngine from '../game/numberUp.js';
 
 const router = Router();
 
@@ -955,6 +956,12 @@ const ROUND_GAME_REGISTRY = {
       return { drawResult: { n }, hits: speedGridEngine.hitsOf(n), pushes: new Set() };
     },
   },
+  numberup: {
+    MARKETS: numberUpEngine.MARKETS,
+    isValidMarketKey: numberUpEngine.isValidMarketKey,
+    hasPush: numberUpEngine.HAS_PUSH,
+    spin: numberUpEngine.spin,
+  },
 };
 
 /** 按幂等键查询已存在的某轮次游戏局（跨事务普通查询），供幂等返回 */
@@ -1151,6 +1158,7 @@ function makeRoundGameHandler(gameName) {
 
 // 注册轮次开奖游戏路由（后续 9 个游戏在此加一行 + 注册表加一条 entry 即可）
 router.post('/speedgrid/play', requireAuth, requireType('player'), makeRoundGameHandler('speedgrid'));
+router.post('/numberup/play', requireAuth, requireType('player'), makeRoundGameHandler('numberup'));
 
 /** 按幂等键查询已存在的 plinko 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
 async function findPlinkoBetByIdempotencyKey(idempotencyKey) {
