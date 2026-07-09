@@ -22,6 +22,10 @@ dist-ssr
 # Local Claude Code settings
 .claude/settings.local.json
 
+# Debug / verification screenshots dump — 过程产物，不入库
+# （shots/ 里全是截图，非 src 引用的资产图；如需入库某张用 git add -f）
+shots/*.png
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
