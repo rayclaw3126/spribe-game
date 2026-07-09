@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import carSpritesImg from '../assets/speedgrid/car_sprites.png'
 
@@ -369,11 +370,15 @@ function RaceStage({ champ, sfx }) {
   return <canvas ref={canvasRef} data-champ={champ} style={{ width: '100%', height: 128, display: 'block' }} aria-hidden />
 }
 
-export default function SpeedGrid({ balance, setBalance, onBack }) {
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `speedgrid-${Date.now()}-${Math.random()}`)
+
+export default function SpeedGrid({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
+  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -396,14 +401,16 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
   const betsRef = useRef(new Map())
   const lastBetsRef = useRef(new Map())
   const betRef = useRef(bet)
-  const balanceRef = useRef(balance)
+  const balanceRef = useRef(serverBalance)
   const pendingRef = useRef(null)
+  const pendingDataRef = useRef(null)   // 后端 /speedgrid/play 返回（settleRound 消费）
+  const transitioningRef = useRef(false)  // 开奖 POST 进行中，防 tick 重入
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
 
   const audioRef = useRef({ ctx: null, muted: false })
 
-  useEffect(() => { balanceRef.current = balance }, [balance])
+  useEffect(() => { balanceRef.current = serverBalance }, [serverBalance])
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
@@ -502,20 +509,35 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
   }
 
   // 唯一赔付点：读 pendingRef 结果，按已下注 Map 一次性入账（无 push 项）
+  async function apiPost(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
+    return data
+  }
+  const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b), 0)
+
   function settleRound() {
     const champ = pendingRef.current
-    const hits = hitsOf(champ)
-    let winTotal = 0
-    betsRef.current.forEach((stake, k) => {
-      if (hits.has(k)) winTotal = round2(winTotal + stake * MARKETS[k].odds)
-    })
-    if (winTotal > 0) {
-      setBalance(b => round2(b + winTotal))
-      pushToast('本期命中', winTotal)
+    const data = pendingDataRef.current
+    let hits, winTotal
+    if (data) {
+      // 后端结算：命中/退注(push) 高亮 = outcome 非 lose；余额只认后端 balanceAfter
+      hits = new Set(Object.entries(data.perKeyOutcome || {}).filter(([, v]) => v.outcome !== 'lose').map(([k]) => k))
+      winTotal = Number(data.totalPayout || 0)
+      if (winTotal > 0) pushToast('本期命中', winTotal)
+      if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))
+    } else {
+      // 无注/开奖失败：仅显示，不动钱
+      hits = hitsOf(champ); winTotal = 0
     }
     setLastChamp(champ)
     setRoad(h => [...h, champ >= 13 ? '大' : '小'].slice(-ROAD_CAP))
-    setResult({ champ, hits, winTotal })
+    setResult({ champ, hits, winTotal, perKeyOutcome: data?.perKeyOutcome })
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
       : { ...b, status: 'crashed' }))
@@ -523,7 +545,8 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
 
   // 单 interval 驱动整台状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
   useEffect(() => {
-    const id = setInterval(() => {
+    const id = setInterval(async () => {
+      if (transitioningRef.current) return   // 开奖 POST 进行中，别再 tick
       cdRef.current -= 1
       if (cdRef.current > 0) { setCountdown(cdRef.current); return }
       const ph = phaseRef.current
@@ -532,12 +555,23 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
         cdRef.current = ticks; setCountdown(ticks)
       }
       if (ph === 'betting') {
-        // 结果此刻锁定 — drawing 相只读
-        let champ = null
-        if (import.meta.env.DEV && window.__SG_FORCE) {   // 对账注入口（一次性消费）
-          champ = window.__SG_FORCE; window.__SG_FORCE = null
+        // 结果此刻锁定 —— 有注则走后端开奖+结算，无注则本地开奖仅显示（不动钱）
+        if (betsRef.current.size > 0) {
+          transitioningRef.current = true
+          try {
+            const data = await apiPost('/round/speedgrid/play', { bets: Object.fromEntries(betsRef.current), idempotencyKey: genIdemKey() })
+            pendingDataRef.current = data
+            pendingRef.current = data.drawResult.n   // ← 后端冠军车号（不本地 drawCar）
+          } catch (e) {
+            setNetErr(e.message)
+            pendingDataRef.current = null
+            pendingRef.current = drawCar()   // 失败：本地开奖仅显示，注单未扣（暂存不扣钱）
+          }
+          transitioningRef.current = false
+        } else {
+          pendingDataRef.current = null
+          pendingRef.current = drawCar()
         }
-        pendingRef.current = champ || drawCar()
         go('drawing', DRAW_T)
       } else if (ph === 'drawing') {
         settleRound()
@@ -576,9 +610,9 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
     if (phaseRef.current !== 'betting') return false
     let total = 0
     entries.forEach(s => { total = round2(total + s) })
-    if (!entries.size || total <= 0 || total > balanceRef.current) return false
-    setBalance(b => round2(b - total))
-    balanceRef.current = round2(balanceRef.current - total)
+    // 暂存不扣钱：已暂存总额 + 本次不能超过后端余额（钱只在开奖 POST 那一刻走）
+    if (!entries.size || total <= 0 || (serverBalance != null && total > round2(serverBalance - stagedTotal()))) return false
+    setNetErr(null)
     entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
     setBetsPlaced(new Map(betsRef.current))
     return true
@@ -598,10 +632,10 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
   const betting = gamePhase === 'betting'
   const drawing = gamePhase === 'drawing'
   const confirmTotal = round2(bet * picks.size)
-  const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
+  const confirmOk = betting && picks.size > 0 && bet >= 1 && (serverBalance == null || confirmTotal <= round2(serverBalance - stagedTotal()))
   let lastTotal = 0
   lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
-  const repeatOk = betting && hasLast && lastTotal > 0 && lastTotal <= balance
+  const repeatOk = betting && hasLast && lastTotal > 0 && (serverBalance == null || lastTotal <= round2(serverBalance - stagedTotal()))
   const cur = pendingRef.current
   const shownChamp = gamePhase === 'settled' && cur ? cur : lastChamp
 
@@ -670,9 +704,19 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
     }}>{phaseChip.text}</span>
   )
   const topBar = (
-    <GameTopBar gameName="极速方格" venue={VENUE}
-      roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
+    <>
+      <GameTopBar gameName="极速方格" venue={VENUE}
+        roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
+        phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="极速方格" playerToken={playerToken} game="speedgrid" />
+      {netErr && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
+          background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
+        }} onClick={() => setNetErr(null)}>{netErr}</div>
+      )}
+    </>
   )
 
   // ---- ① 开奖区：冠军大牌 + 24 车号小网格（4 队涂装分组）----
@@ -973,7 +1017,7 @@ export default function SpeedGrid({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>极速方格</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 

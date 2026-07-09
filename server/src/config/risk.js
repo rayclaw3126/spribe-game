@@ -9,6 +9,7 @@ export default {
     goal:    { maxBet: '3.00', maxPayout: '50000.00' }, // lg 满清 13238×，bet3 顶赔 39714<cap（不触顶，靠钳制兜）
     streak:  { maxBet: '100.00', maxPayout: '50000.00' }, // F normal 顶赔 30.40×，bet100 顶赔 3040<cap（零钳制，cap 兜底）
     roulette: { maxBet: '100.00', maxPayout: '50000.00' }, // maxBet=单次转总注额上限；单号 11.4× 顶赔靠钳制兜
+    speedgrid: { maxBet: '100.00', maxPayout: '50000.00' }, // 轮次开奖·多注 map；直选 22.85× 顶赔靠钳制兜
     aviator: { maxBet: '500.00', maxPayout: '50000.00' },
   },
   // 敞口：单玩家所有未结算多步局的潜在最大赔付总额上限 + 并发未结算局数上限（双闸）

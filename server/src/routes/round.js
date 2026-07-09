@@ -61,6 +61,8 @@ import { drawKeno, kenoPayout } from '../game/keno.js';
 import { stepMult as goalStepMult, deriveBombRows, TIERS as GOAL_TIERS, COLS as GOAL_COLS } from '../game/goal.js';
 import { drawStreak, streakPayout, PATTERNS as STREAK_PATTERNS } from '../game/streakRoll.js';
 import { spinRoulette, rouletteWinMult, isValidBetKey } from '../game/miniRoulette.js';
+import { makeSeededRng } from '../lib/seededRng.js';
+import * as speedGridEngine from '../game/speedGrid.js';
 
 const router = Router();
 
@@ -934,6 +936,221 @@ router.post('/roulette/play', requireAuth, requireType('player'), async (req, re
     return next(err);
   }
 });
+
+// ==================================================================
+// 轮次开奖游戏【通用市场结算脚手架】—— 这批 10 个游戏共用。
+// 每个游戏注册一个 entry：{ MARKETS, isValidMarketKey, hasPush, spin(rng) }。
+// spin(rng) 用注入的 seededRng 开奖，返回 { drawResult, hits:Set<key>, pushes:Set<key> }。
+// 结算三态：hit→amount×odds、push→退本金 amount、未中→输。原子局，多注 map。
+// ==================================================================
+const round2 = (x) => Math.round(x * 100) / 100;
+
+const ROUND_GAME_REGISTRY = {
+  speedgrid: {
+    MARKETS: speedGridEngine.MARKETS,
+    isValidMarketKey: speedGridEngine.isValidMarketKey,
+    hasPush: speedGridEngine.HAS_PUSH,
+    spin: (rng) => {
+      const n = speedGridEngine.drawCar(rng);
+      return { drawResult: { n }, hits: speedGridEngine.hitsOf(n), pushes: new Set() };
+    },
+  },
+};
+
+/** 按幂等键查询已存在的某轮次游戏局（跨事务普通查询），供幂等返回 */
+async function findRoundGameBet(idempotencyKey, gameName) {
+  const result = await query(
+    `SELECT b.id AS bet_id, b.round_id, b.player_id,
+            r.result, r.payout, r.server_seed, r.client_seed, r.result_hash
+       FROM bets b
+       JOIN rounds r ON r.id = b.round_id
+      WHERE b.idempotency_key = $1 AND r.game = $2`,
+    [idempotencyKey, gameName]
+  );
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+/**
+ * 造一个轮次开奖游戏的 handler（参数化引擎）。请求 { bets:{marketKey:amount}, idempotencyKey }。
+ * @param {string} gameName - 注册表键（= DB rounds.game = 风控 config key）
+ */
+function makeRoundGameHandler(gameName) {
+  const entry = ROUND_GAME_REGISTRY[gameName];
+  const marketCount = Object.keys(entry.MARKETS).length;
+  return async (req, res, next) => {
+    try {
+      const playerId = req.user.sub;
+      const { bets, idempotencyKey } = req.body || {};
+
+      if (!idempotencyKey) {
+        return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
+      }
+      if (!bets || typeof bets !== 'object' || Array.isArray(bets)) {
+        return res.status(400).json({ error: 'bets 必须是 {marketKey: amount} 对象' });
+      }
+      const betEntries = Object.entries(bets);
+      if (betEntries.length < 1) {
+        return res.status(400).json({ error: 'bets 不能为空' });
+      }
+      if (betEntries.length > marketCount) {
+        return res.status(400).json({ error: `下注项过多（上限 ${marketCount}）` });
+      }
+      // 逐项校验：market key 合法 + amount 严格 > 0（防负注额刷钱/绕过总额上限）
+      let total = 0;
+      for (const [key, amt] of betEntries) {
+        if (!entry.isValidMarketKey(key)) {
+          return res.status(400).json({ error: `非法盘口 key：${key}` });
+        }
+        const a = Number(amt);
+        if (!Number.isFinite(a) || !(a > 0)) {
+          return res.status(400).json({ error: `下注金额必须 > 0（key ${key}）` });
+        }
+        total += a;
+      }
+      const totalStr = total.toFixed(2);
+
+      // 风控前置：按服务端算出的总注额校验
+      assertBetWithinLimits(gameName, totalStr);
+
+      // 1. 幂等先查
+      const existing = await findRoundGameBet(idempotencyKey, gameName);
+      if (existing) {
+        const oldResult = existing.result || {};
+        return res.json({
+          drawResult: oldResult.drawResult,
+          bets: oldResult.bets,
+          perKeyOutcome: oldResult.perKeyOutcome,
+          totalPayout: existing.payout,
+          balanceAfter: await getBalance(playerId),
+          clientSeed: existing.client_seed,
+          nonce: oldResult.nonce,
+          serverSeedHash: existing.result_hash,
+          roundId: existing.round_id,
+          idempotent: true,
+        });
+      }
+
+      try {
+        const result = await withTransaction(async (client) => {
+          // 2. claimNonce（锁 player_seeds）
+          await ensureActiveSeed(client, playerId);
+          const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
+
+          // 开奖 + 逐 key 三态结算全由后端算，前端只提供 bets
+          const rng = makeSeededRng(serverSeed, clientSeed, nonce);
+          const { drawResult, hits, pushes } = entry.spin(rng);
+          const perKeyOutcome = {};
+          let rawTotalPayout = 0;
+          for (const [key, amt] of betEntries) {
+            const a = Number(amt);
+            if (hits.has(key)) {
+              const p = round2(a * entry.MARKETS[key].odds);
+              perKeyOutcome[key] = { outcome: 'hit', payout: p };
+              rawTotalPayout += p;
+            } else if (entry.hasPush && pushes.has(key)) {
+              // push（平局）：退本金，既不算赢也不算输
+              perKeyOutcome[key] = { outcome: 'push', payout: a };
+              rawTotalPayout += a;
+            } else {
+              perKeyOutcome[key] = { outcome: 'lose', payout: 0 };
+            }
+          }
+          // 钳制型 cap；SQL numeric 定稿避免 JS 浮点累加误差
+          const capRow = await client.query(
+            'SELECT LEAST(round($1::numeric, 2), $2::numeric) AS payout',
+            [String(rawTotalPayout), String(maxPayoutFor(gameName))]
+          );
+          const totalPayout = capRow.rows[0].payout;
+          const win = Number(totalPayout) > 0;
+
+          // 3. 建 round（settled）
+          const betsSnapshot = Object.fromEntries(betEntries.map(([k, a]) => [k, Number(a)]));
+          const roundResult = await client.query(
+            `INSERT INTO rounds (game, player_id, bet_amount, client_seed, server_seed, result_hash, payout, status, result)
+             VALUES ($1, $2, $3::numeric, $4, $5, $6, $7::numeric, 'settled', $8::jsonb)
+             RETURNING id`,
+            [
+              gameName,
+              playerId,
+              totalStr,
+              clientSeed,
+              serverSeed,
+              serverSeedHash,
+              totalPayout,
+              JSON.stringify({ bets: betsSnapshot, drawResult, perKeyOutcome, totalPayout, nonce }),
+            ]
+          );
+          const roundId = roundResult.rows[0].id;
+
+          // 4. 扣钱（一次扣总注额）
+          const { balanceAfter: balanceAfterDebit } = await debit(client, {
+            playerId,
+            amount: totalStr,
+            type: `${gameName}_bet`,
+            idempotencyKey,
+            roundId,
+          });
+
+          let balanceAfter = balanceAfterDebit;
+          if (win) {
+            // totalPayout 含中奖派彩 + push 退注，一并入账
+            const creditResult = await credit(client, {
+              playerId,
+              amount: totalPayout,
+              type: `${gameName}_payout`,
+              idempotencyKey: `${gameName}-payout-${roundId}`,
+              roundId,
+            });
+            balanceAfter = creditResult.balanceAfter;
+          } else {
+            // 全输（无中无 push）：总注额进入链式分成
+            const playerResult = await client.query('SELECT agent_id FROM players WHERE id = $1', [playerId]);
+            const agentId = playerResult.rows[0]?.agent_id;
+            if (agentId) {
+              await distributeLoss(client, { playerId, agentId, roundId, lossAmount: totalStr });
+            }
+          }
+
+          // 5. 建 bet
+          await client.query(
+            `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome)
+             VALUES ($1, $2, $3::numeric, $4, $5)`,
+            [roundId, playerId, totalStr, idempotencyKey, win ? 'win' : 'lose']
+          );
+
+          return { drawResult, bets: betsSnapshot, perKeyOutcome, totalPayout, balanceAfter, clientSeed, nonce, serverSeedHash, roundId };
+        });
+
+        return res.json({ ...result, idempotent: false });
+      } catch (err) {
+        if (err.code === '23505') {
+          const existingAfterConflict = await findRoundGameBet(idempotencyKey, gameName);
+          if (existingAfterConflict) {
+            const oldResult = existingAfterConflict.result || {};
+            return res.json({
+              drawResult: oldResult.drawResult,
+              bets: oldResult.bets,
+              perKeyOutcome: oldResult.perKeyOutcome,
+              totalPayout: existingAfterConflict.payout,
+              balanceAfter: await getBalance(playerId),
+              clientSeed: existingAfterConflict.client_seed,
+              nonce: oldResult.nonce,
+              serverSeedHash: existingAfterConflict.result_hash,
+              roundId: existingAfterConflict.round_id,
+              idempotent: true,
+            });
+          }
+        }
+        throw err;
+      }
+    } catch (err) {
+      return next(err);
+    }
+  };
+}
+
+// 注册轮次开奖游戏路由（后续 9 个游戏在此加一行 + 注册表加一条 entry 即可）
+router.post('/speedgrid/play', requireAuth, requireType('player'), makeRoundGameHandler('speedgrid'));
 
 /** 按幂等键查询已存在的 plinko 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
 async function findPlinkoBetByIdempotencyKey(idempotencyKey) {
