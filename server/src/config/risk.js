@@ -12,6 +12,7 @@ export default {
     speedgrid: { maxBet: '100.00', maxPayout: '50000.00' }, // 轮次开奖·多注 map；直选 22.85× 顶赔靠钳制兜
     numberup: { maxBet: '100.00', maxPayout: '50000.00' }, // 轮次开奖·多注 map；顶赔 pick 47.5×100=4750<<cap，零钳制
     hattrick: { maxBet: '100.00', maxPayout: '50000.00' }, // 轮次开奖·多注 map；顶赔指定豹 206.28×100=20628<<cap，钳制仅兜底
+    goldenboot: { maxBet: '100.00', maxPayout: '50000.00' }, // 轮次开奖·多注 map；顶赔冠亚和 42.98×100=4298<<cap，零钳制
     aviator: { maxBet: '500.00', maxPayout: '50000.00' },
   },
   // 敞口：单玩家所有未结算多步局的潜在最大赔付总额上限 + 并发未结算局数上限（双闸）

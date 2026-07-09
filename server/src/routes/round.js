@@ -65,6 +65,7 @@ import { makeSeededRng } from '../lib/seededRng.js';
 import * as speedGridEngine from '../game/speedGrid.js';
 import * as numberUpEngine from '../game/numberUp.js';
 import * as hatTrickEngine from '../game/hatTrick.js';
+import * as goldenBootEngine from '../game/goldenBoot.js';
 
 const router = Router();
 
@@ -969,6 +970,12 @@ const ROUND_GAME_REGISTRY = {
     hasPush: hatTrickEngine.HAS_PUSH,
     spin: hatTrickEngine.spin,
   },
+  goldenboot: {
+    MARKETS: goldenBootEngine.MARKETS,
+    isValidMarketKey: goldenBootEngine.isValidMarketKey,
+    hasPush: goldenBootEngine.HAS_PUSH,
+    spin: goldenBootEngine.spin,
+  },
 };
 
 /** 按幂等键查询已存在的某轮次游戏局（跨事务普通查询），供幂等返回 */
@@ -1167,6 +1174,7 @@ function makeRoundGameHandler(gameName) {
 router.post('/speedgrid/play', requireAuth, requireType('player'), makeRoundGameHandler('speedgrid'));
 router.post('/numberup/play', requireAuth, requireType('player'), makeRoundGameHandler('numberup'));
 router.post('/hattrick/play', requireAuth, requireType('player'), makeRoundGameHandler('hattrick'));
+router.post('/goldenboot/play', requireAuth, requireType('player'), makeRoundGameHandler('goldenboot'));
 
 /** 按幂等键查询已存在的 plinko 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
 async function findPlinkoBetByIdempotencyKey(idempotencyKey) {
