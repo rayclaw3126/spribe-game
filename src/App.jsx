@@ -72,7 +72,7 @@ export default function App() {
 
   // 服务器接后端的即时游戏需要真实玩家登录、余额以服务器为准；
   // 其它游戏照旧免登录、本地模拟余额。
-  const NEEDS_LOGIN = ['Aviator', 'Dice', 'Plinko', 'Mines', 'Limbo', 'HiLo', 'Keno', 'Goal', 'StreakRoll', 'MiniRoulette', 'SpeedGrid', 'NumberUp', 'HatTrick', 'GoldenBoot']
+  const NEEDS_LOGIN = ['Aviator', 'Dice', 'Plinko', 'Mines', 'Limbo', 'HiLo', 'Keno', 'Goal', 'StreakRoll', 'MiniRoulette', 'SpeedGrid', 'NumberUp', 'HatTrick', 'GoldenBoot', 'HalfTime']
   const isServerGame = NEEDS_LOGIN.includes(activeGame)
   const needsLogin = isServerGame && !playerToken
 
