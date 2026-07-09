@@ -67,6 +67,7 @@ import * as numberUpEngine from '../game/numberUp.js';
 import * as hatTrickEngine from '../game/hatTrick.js';
 import * as goldenBootEngine from '../game/goldenBoot.js';
 import * as halfTimeEngine from '../game/halfTime.js';
+import * as wuXingEngine from '../game/wuXing.js';
 
 const router = Router();
 
@@ -983,6 +984,12 @@ const ROUND_GAME_REGISTRY = {
     hasPush: halfTimeEngine.HAS_PUSH,
     spin: halfTimeEngine.spin,
   },
+  wuxing: {
+    MARKETS: wuXingEngine.MARKETS,
+    isValidMarketKey: wuXingEngine.isValidMarketKey,
+    hasPush: wuXingEngine.HAS_PUSH,
+    spin: wuXingEngine.spin,
+  },
 };
 
 /** 按幂等键查询已存在的某轮次游戏局（跨事务普通查询），供幂等返回 */
@@ -1183,6 +1190,7 @@ router.post('/numberup/play', requireAuth, requireType('player'), makeRoundGameH
 router.post('/hattrick/play', requireAuth, requireType('player'), makeRoundGameHandler('hattrick'));
 router.post('/goldenboot/play', requireAuth, requireType('player'), makeRoundGameHandler('goldenboot'));
 router.post('/halftime/play', requireAuth, requireType('player'), makeRoundGameHandler('halftime'));
+router.post('/wuxing/play', requireAuth, requireType('player'), makeRoundGameHandler('wuxing'));
 
 /** 按幂等键查询已存在的 plinko 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
 async function findPlinkoBetByIdempotencyKey(idempotencyKey) {
