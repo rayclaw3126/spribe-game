@@ -808,7 +808,8 @@ async function lockMinesRound(client, roundId, playerId) {
 router.post('/mines/start', requireAuth, requireType('player'), async (req, res, next) => {
   try {
     const playerId = req.user.sub;
-    const { amount, mines, clientSeed, idempotencyKey } = req.body || {};
+    // clientSeed 不再从请求体收（模型 A：用玩家 active 种子里固定的 client_seed）
+    const { amount, mines, idempotencyKey } = req.body || {};
 
     const amountNum = Number(amount);
     const minesNum = Number(mines);
@@ -831,7 +832,9 @@ router.post('/mines/start', requireAuth, requireType('player'), async (req, res,
     if (existing) {
       return res.json({
         roundId: existing.round_id,
-        commitHash: existing.result_hash,
+        serverSeedHash: existing.result_hash,
+        clientSeed: existing.client_seed,
+        nonce: existing.result?.nonce,
         balanceAfter: await getBalance(playerId),
         idempotent: true,
       });
@@ -839,13 +842,12 @@ router.post('/mines/start', requireAuth, requireType('player'), async (req, res,
 
     try {
       const result = await withTransaction(async (client) => {
-        // 2. 生成本局开局种子并确定性布雷（全部在扣钱之前算好，与「余额是否充足」无关，
-        //    minePositions 只落库，绝不放进本次响应）
-        const serverSeed = newServerSeedMines();
-        const seedForMines = clientSeed || newClientSeedMines();
-        const nonce = crypto.randomBytes(8).toString('hex');
-        const commitHash = hashSeedMines(serverSeed);
-        const minePositions = deriveMines(serverSeed, seedForMines, nonce, minesNum);
+        // 2. 领取本玩家 active 种子的下一个 nonce（锁序铁律：player_seeds 先于 wallets，防死锁）。
+        //    首次下注 lazy 建种子，同事务。serverSeed 明文只内部用于布雷，绝不进响应。
+        //    minePositions 只落库，绝不放进本次响应。
+        await ensureActiveSeed(client, playerId);
+        const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
+        const minePositions = deriveMines(serverSeed, clientSeed, nonce, minesNum);
 
         const amountStr = amountNum.toFixed(2);
 
@@ -857,9 +859,9 @@ router.post('/mines/start', requireAuth, requireType('player'), async (req, res,
           [
             playerId,
             amountStr,
-            seedForMines,
+            clientSeed,
             serverSeed,
-            commitHash,
+            serverSeedHash,
             JSON.stringify({ mines: minePositions, revealed: [], mineCount: minesNum, nonce }),
           ]
         );
@@ -881,8 +883,8 @@ router.post('/mines/start', requireAuth, requireType('player'), async (req, res,
           [roundId, playerId, amountStr, idempotencyKey]
         );
 
-        // 6. 绝不返回 minePositions
-        return { roundId, commitHash, balanceAfter };
+        // 6. 绝不返回 minePositions / serverSeed 明文；只给 hash + nonce + clientSeed
+        return { roundId, serverSeedHash, clientSeed, nonce, balanceAfter };
       });
 
       return res.json({ ...result, idempotent: false });
@@ -894,7 +896,9 @@ router.post('/mines/start', requireAuth, requireType('player'), async (req, res,
         if (existingAfterConflict) {
           return res.json({
             roundId: existingAfterConflict.round_id,
-            commitHash: existingAfterConflict.result_hash,
+            serverSeedHash: existingAfterConflict.result_hash,
+            clientSeed: existingAfterConflict.client_seed,
+            nonce: existingAfterConflict.result?.nonce,
             balanceAfter: await getBalance(playerId),
             idempotent: true,
           });
@@ -941,7 +945,7 @@ router.post('/mines/reveal', requireAuth, requireType('player'), async (req, res
           return {
             safe: false,
             mines: r.mines,
-            serverSeed: round.server_seed,
+            serverSeedHash: round.result_hash,
             clientSeed: round.client_seed,
             nonce: r.nonce,
             roundId: round.id,
@@ -957,7 +961,7 @@ router.post('/mines/reveal', requireAuth, requireType('player'), async (req, res
           cleared: true,
           payout: round.payout,
           mines: r.mines,
-          serverSeed: round.server_seed,
+          serverSeedHash: round.result_hash,
           alreadyDone: true,
         };
       }
@@ -998,7 +1002,7 @@ router.post('/mines/reveal', requireAuth, requireType('player'), async (req, res
         return {
           safe: false,
           mines: r.mines,
-          serverSeed: round.server_seed,
+          serverSeedHash: round.result_hash,
           clientSeed: round.client_seed,
           nonce: r.nonce,
           roundId: round.id,
@@ -1045,7 +1049,7 @@ router.post('/mines/reveal', requireAuth, requireType('player'), async (req, res
           payout,
           balanceAfter,
           mines: r.mines,
-          serverSeed: round.server_seed,
+          serverSeedHash: round.result_hash,
         };
       }
 
@@ -1095,7 +1099,7 @@ router.post('/mines/cashout', requireAuth, requireType('player'), async (req, re
           mult: calcMultiplier(gemsDone, mineCount),
           gems: gemsDone,
           mines: r.mines,
-          serverSeed: round.server_seed,
+          serverSeedHash: round.result_hash,
           clientSeed: round.client_seed,
           nonce: r.nonce,
           alreadyDone: true,
@@ -1133,7 +1137,7 @@ router.post('/mines/cashout', requireAuth, requireType('player'), async (req, re
         mult,
         gems,
         mines: r.mines,
-        serverSeed: round.server_seed,
+        serverSeedHash: round.result_hash,
         clientSeed: round.client_seed,
         nonce: r.nonce,
       };
@@ -1152,7 +1156,7 @@ router.post('/mines/cashout', requireAuth, requireType('player'), async (req, re
 async function findHiloBetByIdempotencyKey(idempotencyKey) {
   const result = await query(
     `SELECT b.id AS bet_id, b.round_id, b.player_id,
-            r.result, r.result_hash, r.status
+            r.result, r.result_hash, r.client_seed, r.status
        FROM bets b
        JOIN rounds r ON r.id = b.round_id
       WHERE b.idempotency_key = $1 AND r.game = 'hilo'`,
@@ -1186,7 +1190,8 @@ async function lockHiloRound(client, roundId, playerId) {
 router.post('/hilo/start', requireAuth, requireType('player'), async (req, res, next) => {
   try {
     const playerId = req.user.sub;
-    const { amount, clientSeed, idempotencyKey } = req.body || {};
+    // clientSeed 不再从请求体收（模型 A：用玩家 active 种子里固定的 client_seed）
+    const { amount, idempotencyKey } = req.body || {};
 
     const amountNum = Number(amount);
 
@@ -1206,7 +1211,9 @@ router.post('/hilo/start', requireAuth, requireType('player'), async (req, res, 
       return res.json({
         roundId: existing.round_id,
         card: existing.result?.card,
-        commitHash: existing.result_hash,
+        serverSeedHash: existing.result_hash,
+        clientSeed: existing.client_seed,
+        nonce: existing.result?.nonce,
         balanceAfter: await getBalance(playerId),
         idempotent: true,
       });
@@ -1214,13 +1221,12 @@ router.post('/hilo/start', requireAuth, requireType('player'), async (req, res, 
 
     try {
       const result = await withTransaction(async (client) => {
-        // 2. 生成本局开局种子并派生首张明牌（全部在扣钱之前算好，与「余额是否充足」无关，
-        //    后续牌只落库，绝不放进本次响应）
-        const serverSeed = newServerSeedHiLo();
-        const seedForCard = clientSeed || newClientSeedHiLo();
-        const nonce = crypto.randomBytes(8).toString('hex');
-        const commitHash = hashSeedHiLo(serverSeed);
-        const firstCard = deriveCard(serverSeed, seedForCard, nonce, 0);
+        // 2. 领取本玩家 active 种子的下一个 nonce（锁序铁律：player_seeds 先于 wallets，防死锁）。
+        //    首次下注 lazy 建种子，同事务。serverSeed 明文只内部用于派生，绝不进响应；
+        //    后续牌只落库，绝不放进本次响应。
+        await ensureActiveSeed(client, playerId);
+        const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
+        const firstCard = deriveCard(serverSeed, clientSeed, nonce, 0);
 
         const amountStr = amountNum.toFixed(2);
 
@@ -1232,9 +1238,9 @@ router.post('/hilo/start', requireAuth, requireType('player'), async (req, res, 
           [
             playerId,
             amountStr,
-            seedForCard,
+            clientSeed,
             serverSeed,
-            commitHash,
+            serverSeedHash,
             JSON.stringify({
               step: 0,
               card: firstCard,
@@ -1264,8 +1270,8 @@ router.post('/hilo/start', requireAuth, requireType('player'), async (req, res, 
           [roundId, playerId, amountStr, idempotencyKey]
         );
 
-        // 6. 绝不返回 serverSeed / 后续牌
-        return { roundId, card: firstCard, commitHash, balanceAfter };
+        // 6. 绝不返回 serverSeed 明文 / 后续牌；只给 hash + nonce + clientSeed + 首张明牌
+        return { roundId, card: firstCard, serverSeedHash, clientSeed, nonce, balanceAfter };
       });
 
       return res.json({ ...result, idempotent: false });
@@ -1278,7 +1284,9 @@ router.post('/hilo/start', requireAuth, requireType('player'), async (req, res, 
           return res.json({
             roundId: existingAfterConflict.round_id,
             card: existingAfterConflict.result?.card,
-            commitHash: existingAfterConflict.result_hash,
+            serverSeedHash: existingAfterConflict.result_hash,
+            clientSeed: existingAfterConflict.client_seed,
+            nonce: existingAfterConflict.result?.nonce,
             balanceAfter: await getBalance(playerId),
             idempotent: true,
           });
@@ -1321,7 +1329,7 @@ router.post('/hilo/guess', requireAuth, requireType('player'), async (req, res, 
           return {
             card: r.card,
             correct: false,
-            serverSeed: round.server_seed,
+            serverSeedHash: round.result_hash,
             clientSeed: round.client_seed,
             nonce: r.nonce,
             roundId: round.id,
@@ -1382,7 +1390,7 @@ router.post('/hilo/guess', requireAuth, requireType('player'), async (req, res, 
       return {
         card: next,
         correct: false,
-        serverSeed: round.server_seed,
+        serverSeedHash: round.result_hash,
         clientSeed: round.client_seed,
         nonce: r.nonce,
         roundId: round.id,
@@ -1474,7 +1482,7 @@ router.post('/hilo/cashout', requireAuth, requireType('player'), async (req, res
           payout: round.payout,
           balanceAfter: await getBalance(playerId),
           cum: r.cum,
-          serverSeed: round.server_seed,
+          serverSeedHash: round.result_hash,
           clientSeed: round.client_seed,
           nonce: r.nonce,
           roundId: round.id,
@@ -1511,7 +1519,7 @@ router.post('/hilo/cashout', requireAuth, requireType('player'), async (req, res
         payout,
         balanceAfter,
         cum: r.cum,
-        serverSeed: round.server_seed,
+        serverSeedHash: round.result_hash,
         clientSeed: round.client_seed,
         nonce: r.nonce,
         roundId: round.id,
@@ -1527,15 +1535,38 @@ router.post('/hilo/cashout', requireAuth, requireType('player'), async (req, res
   }
 });
 
+// 局进行中时对外可见的 result 字段【白名单】（防提款机漏洞）：
+// 非终局绝不返回任何能推出未开区域的字段，只给"已发生/当前态"。漏一个即是洞，故用白名单不用黑名单。
+const PLAYING_RESULT_WHITELIST = {
+  // mines：只给已揭格 / 雷数（玩家自选，公开）/ nonce；【剥掉】mines 雷位数组、bustCell 等
+  mines: ['revealed', 'mineCount', 'nonce'],
+  // hilo：当前明牌 + 已猜历史 + 累乘 / 步数 / 剩余 skip / nonce（后续牌按需 deriveCard 派生，不落库、不可推）
+  hilo: ['step', 'card', 'cum', 'skips', 'history', 'nonce', 'status'],
+};
+const TERMINAL_STATUSES = new Set(['settled', 'cashed', 'bust']);
+
+// 终局（settled/cashed/bust）给全 result（此刻雷位/牌序公开无所谓，正好供验证）；
+// 非终局（playing/pending）按游戏白名单只挑安全字段，未知游戏一律不给 result 细节。
+function safeResultForView(game, status, result) {
+  if (!result) return result;
+  if (TERMINAL_STATUSES.has(status)) return result;
+  const allow = PLAYING_RESULT_WHITELIST[game];
+  if (!allow) return null;
+  const out = {};
+  for (const k of allow) if (k in result) out[k] = result[k];
+  return out;
+}
+
 // ------------------------------------------------------------------
 // GET /round/:id —— 查询单局详情
 // ------------------------------------------------------------------
 router.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
+    // 模型 A：绝不吐 server_seed 明文（只给 result_hash）。明文要走 /seed/rotate 才 reveal。
     const result = await query(
       `SELECT r.id, r.game, r.player_id, r.bet_amount, r.payout, r.status, r.result,
-              r.server_seed, r.client_seed, r.result_hash, r.created_at,
+              r.client_seed, r.result_hash, r.created_at,
               b.id AS bet_id, b.outcome AS bet_outcome, b.idempotency_key
          FROM rounds r
          LEFT JOIN bets b ON b.round_id = r.id
@@ -1545,7 +1576,10 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     if (result.rowCount === 0) {
       return res.status(404).json({ error: '该局不存在' });
     }
-    return res.json(result.rows[0]);
+    const row = result.rows[0];
+    // 进行中的局：剥掉 result 里的未来信息（如 mines 雷位），防玩家读活局作弊
+    row.result = safeResultForView(row.game, row.status, row.result);
+    return res.json(row);
   } catch (err) {
     return next(err);
   }
