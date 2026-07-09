@@ -7,6 +7,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import BetButton from '../components/shell/BetButton'
 
@@ -492,11 +493,15 @@ function DiceStage({ roll, height, shakeRef, sfx, onFinale, onLastSuspense, winT
   return <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }} aria-hidden />
 }
 
-export default function HatTrick({ balance, setBalance, onBack }) {
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `hattrick-${Date.now()}-${Math.random()}`)
+
+export default function HatTrick({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
+  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -524,14 +529,16 @@ export default function HatTrick({ balance, setBalance, onBack }) {
   const betsRef = useRef(new Map())
   const lastBetsRef = useRef(new Map())   // 上局注单快照（重复投注用）
   const betRef = useRef(bet)
-  const balanceRef = useRef(balance)
+  const balanceRef = useRef(serverBalance)
   const pendingRef = useRef(null)
+  const pendingDataRef = useRef(null)   // 后端 /hattrick/play 返回（settleRound 消费）
+  const transitioningRef = useRef(false)  // 开奖 POST 进行中，防 tick 重入
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
   const audioRef = useRef({ ctx: null, muted: false })
   const cardShakeRef = useRef(null)
 
-  useEffect(() => { balanceRef.current = balance }, [balance])
+  useEffect(() => { balanceRef.current = serverBalance }, [serverBalance])
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
@@ -657,17 +664,33 @@ export default function HatTrick({ balance, setBalance, onBack }) {
     timersRef.current.push(tm)
   }
 
-  // 唯一赔付点：读 pendingRef 结果，按已下注 Map 一次性入账
+  // 后端请求封装（余额只认后端 balanceAfter）
+  async function apiPost(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
+    return data
+  }
+  const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b), 0)
+
+  // 唯一赔付点：读后端 /hattrick/play 结算结果（命中/赔付/余额全认后端）
   function settleRound() {
     const r = pendingRef.current
-    const hits = hitsOf(r)
-    let winTotal = 0
-    betsRef.current.forEach((stake, k) => {
-      if (hits.has(k)) winTotal = round2(winTotal + stake * MARKETS[k].odds)
-    })
-    if (winTotal > 0) {
-      setBalance(b => round2(b + winTotal))
-      pushToast(winTotal)
+    const data = pendingDataRef.current
+    let hits, winTotal
+    if (data) {
+      // 后端结算：命中高亮 = outcome 非 lose（豹子局大小单双为 lose，不高亮）；余额只认 balanceAfter
+      hits = new Set(Object.entries(data.perKeyOutcome || {}).filter(([, v]) => v.outcome !== 'lose').map(([k]) => k))
+      winTotal = Number(data.totalPayout || 0)
+      if (winTotal > 0) pushToast(winTotal)
+      if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))
+    } else {
+      // 无注/开奖失败：仅显示，不动钱
+      hits = hitsOf(r); winTotal = 0
     }
     setLastRoll(r)
     setRecent(list => [r.total, ...list].slice(0, 5))
@@ -733,13 +756,29 @@ export default function HatTrick({ balance, setBalance, onBack }) {
 
   // 单 interval 驱动整台状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
   useEffect(() => {
-    const id = setInterval(() => {
+    const id = setInterval(async () => {
+      if (transitioningRef.current) return   // 开奖 POST 进行中，别再 tick
       cdRef.current -= 1
       if (cdRef.current > 0) { setCountdown(cdRef.current); return }
       const ph = phaseRef.current
       if (ph === 'betting') {
-        // 骰面此刻先定 — ROLLING 段（单3 动画）只读它，不再碰确定性随机数
-        pendingRef.current = deriveRoll(rollDice())
+        // 结果此刻锁定 —— 有注则走后端开奖+结算，无注则本地开奖仅显示（不动钱）
+        if (betsRef.current.size > 0) {
+          transitioningRef.current = true
+          try {
+            const data = await apiPost('/round/hattrick/play', { bets: Object.fromEntries(betsRef.current), idempotencyKey: genIdemKey() })
+            pendingDataRef.current = data
+            pendingRef.current = deriveRoll(data.drawResult.dice)   // ← 后端 3 骰点数（不本地 rollDice）
+          } catch (e) {
+            setNetErr(e.message)
+            pendingDataRef.current = null
+            pendingRef.current = deriveRoll(rollDice())   // 失败：本地开奖仅显示，注单未扣（暂存不扣钱）
+          }
+          transitioningRef.current = false
+        } else {
+          pendingDataRef.current = null
+          pendingRef.current = deriveRoll(rollDice())
+        }
         phaseRef.current = 'rolling'; setGamePhase('rolling')
         cdRef.current = ROLLING_T; setCountdown(ROLLING_T)
       } else if (ph === 'rolling') {
@@ -780,14 +819,14 @@ export default function HatTrick({ balance, setBalance, onBack }) {
     })
   }
 
-  // 唯一扣注点：确认/重复两个入口都走这一条（一次性扣款后入 betsRef）
+  // 唯一暂存点：确认/重复两个入口都走这一条（暂存不扣钱，钱只在开奖 POST 那一刻走）
   function placeBets(entries) {
     if (phaseRef.current !== 'betting') return false
     let total = 0
     entries.forEach(s => { total = round2(total + s) })
-    if (!entries.size || total <= 0 || total > balanceRef.current) return false
-    setBalance(b => round2(b - total))
-    balanceRef.current = round2(balanceRef.current - total)
+    // 暂存不扣钱：已暂存总额 + 本次不能超过后端余额
+    if (!entries.size || total <= 0 || (serverBalance != null && total > round2(serverBalance - stagedTotal()))) return false
+    setNetErr(null)
     entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
     setBetsPlaced(new Map(betsRef.current))
     return true
@@ -807,10 +846,10 @@ export default function HatTrick({ balance, setBalance, onBack }) {
 
   const betting = gamePhase === 'betting'
   const confirmTotal = round2(bet * picks.size)
-  const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
+  const confirmOk = betting && picks.size > 0 && bet >= 1 && (serverBalance == null || confirmTotal <= round2(serverBalance - stagedTotal()))
   let lastTotal = 0
   lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
-  const repeatOk = betting && hasLast && lastTotal > 0 && lastTotal <= balance
+  const repeatOk = betting && hasLast && lastTotal > 0 && (serverBalance == null || lastTotal <= round2(serverBalance - stagedTotal()))
   // 只读推算本局应得赢额（供开奖舞台 GOAL! +$X 用；不入账、不碰 settleRound）
   const winOfRoll = r => {
     if (!r) return 0
@@ -946,9 +985,19 @@ export default function HatTrick({ balance, setBalance, onBack }) {
     </span>
   )
   const topBar = (
-    <GameTopBar gameName="帽子戏法" band={HATTRICK.band} venue={VENUE}
-      roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
+    <>
+      <GameTopBar gameName="帽子戏法" band={HATTRICK.band} venue={VENUE}
+        roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
+        phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="帽子戏法" playerToken={playerToken} game="hattrick" />
+      {netErr && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
+          background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
+        }} onClick={() => setNetErr(null)}>{netErr}</div>
+      )}
+    </>
   )
 
   // ---- 珠盘路（真历史滚动，容量 6×20）----
@@ -1273,7 +1322,7 @@ export default function HatTrick({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>帽子戏法</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 

@@ -64,6 +64,7 @@ import { spinRoulette, rouletteWinMult, isValidBetKey } from '../game/miniRoulet
 import { makeSeededRng } from '../lib/seededRng.js';
 import * as speedGridEngine from '../game/speedGrid.js';
 import * as numberUpEngine from '../game/numberUp.js';
+import * as hatTrickEngine from '../game/hatTrick.js';
 
 const router = Router();
 
@@ -962,6 +963,12 @@ const ROUND_GAME_REGISTRY = {
     hasPush: numberUpEngine.HAS_PUSH,
     spin: numberUpEngine.spin,
   },
+  hattrick: {
+    MARKETS: hatTrickEngine.MARKETS,
+    isValidMarketKey: hatTrickEngine.isValidMarketKey,
+    hasPush: hatTrickEngine.HAS_PUSH,
+    spin: hatTrickEngine.spin,
+  },
 };
 
 /** 按幂等键查询已存在的某轮次游戏局（跨事务普通查询），供幂等返回 */
@@ -1159,6 +1166,7 @@ function makeRoundGameHandler(gameName) {
 // 注册轮次开奖游戏路由（后续 9 个游戏在此加一行 + 注册表加一条 entry 即可）
 router.post('/speedgrid/play', requireAuth, requireType('player'), makeRoundGameHandler('speedgrid'));
 router.post('/numberup/play', requireAuth, requireType('player'), makeRoundGameHandler('numberup'));
+router.post('/hattrick/play', requireAuth, requireType('player'), makeRoundGameHandler('hattrick'));
 
 /** 按幂等键查询已存在的 plinko 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
 async function findPlinkoBetByIdempotencyKey(idempotencyKey) {
