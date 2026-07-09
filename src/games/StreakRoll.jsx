@@ -8,6 +8,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 import flameUrl from '../assets/shared/flame_tier_sm.png'
 import ballUrl from '../assets/covers/ball-3d.png'
 import silKeeperUrl from '../assets/shared/silhouette_keeper.png'
@@ -56,7 +57,9 @@ const COLOR_LABEL = { R: 'RED', B: 'BLACK', F: 'FIRE' }
 const SPRING_W = 1.55       // rad/s — ≈4.2s of glide + settle
 const SPRING_KICK = 1.15
 
-export default function StreakRoll({ balance, setBalance, onBack }) {
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `streak-${Date.now()}-${Math.random()}`)
+
+export default function StreakRoll({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const [bet, setBet] = useState(10)
   const [offset, setOffset] = useState(0)
   const [rolling, setRolling] = useState(false)
@@ -72,6 +75,9 @@ export default function StreakRoll({ balance, setBalance, onBack }) {
   const [toasts, setToasts] = useState([])
   const [lossFlash, setLossFlash] = useState(false)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
+  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
+  const busyRef = useRef(false)
   const toastIdRef = useRef(0)
   const lossTimerRef = useRef(null)
 
@@ -257,41 +263,57 @@ export default function StreakRoll({ balance, setBalance, onBack }) {
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
   }
 
-  // Bet on a color and immediately roll — Hotline flow. The landing cell and
-  // the settlement share one mapping: pattern[idx] under the golden frame.
-  function betOn(color) {
-    if (bet > balance || bet < 1 || rolling) return
-    ensureAudio()
-    playChip()
-    setBalance(b => parseFloat((b - bet).toFixed(2)))
+  async function apiPost(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
+    return data
+  }
+
+  // 押色 + 开滚 —— 落格/命中/赔付全走后端 /round/streak/play，动画滚到后端指定 idx。
+  // 前端只提供 color + risk（风险档）；余额只认后端 balanceAfter。
+  async function betOn(color) {
+    if (bet < 1 || rolling || busyRef.current || (serverBalance != null && bet > serverBalance)) return
+    busyRef.current = true
+    ensureAudio(); playChip()
+    setNetErr(null)
     setResult(null); setWinCell(null); setLossFlash(false)
     setRolling(true)
 
     const mode = highRisk ? 'high' : 'normal'
-    const pattern = highRisk ? PATTERN_HIGH : PATTERN_NORMAL
+    let data
+    try {
+      data = await apiPost('/round/streak/play', { amount: bet, color, risk: mode, idempotencyKey: genIdemKey() })
+    } catch (e) {
+      setNetErr(e.message); setRolling(false); busyRef.current = false; return
+    }
+
+    const pattern = mode === 'high' ? PATTERN_HIGH : PATTERN_NORMAL
     const L = pattern.length
-    const idx = Math.floor(Math.random() * L)
-    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only; after the roll)
+    const idx = data.idx   // ← 后端指定落格（不再本地 Math.random）
+    setFeedBets(makeFeedBots())
     // always travel FORWARD: next copy's idx-cell plus 2 extra laps (2–4 laps total)
     const cur = cellRef.current
     const landCell = (Math.floor(cur / L) + 1) * L + idx + 2 * L
-    const target = centerOffset(landCell)   // same formula as initial/resize
+    const target = centerOffset(landCell)
     cellRef.current = landCell
     rollingRef.current = true
     const prevOffset = offset
 
     animateSpin(prevOffset, target, () => {
-      // seamless rewind: same pattern phase in copy 2 paints pixel-identically,
-      // keeping cell indices bounded across rounds (no transition in play)
       const eqCell = L + (landCell % L)
       cellRef.current = eqCell
-      const landed = pattern[idx]
-      const win = landed === color
-      const mult = win ? MULTS[mode][color] : 0
-      const payout = parseFloat((bet * mult).toFixed(2))
+      const landed = data.landed
+      const win = data.win
+      const mult = data.mult
+      const payout = Number(data.payout)
+      if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))   // 余额只认后端
       if (win) {
-        setBalance(b => parseFloat((b + payout).toFixed(2)))
-        pushToast(COLOR_LABEL[color], MULTS[mode][color], payout)
+        pushToast(COLOR_LABEL[color], mult, payout)
       } else {
         setLossFlash(true)
         if (lossTimerRef.current) clearTimeout(lossTimerRef.current)
@@ -299,13 +321,13 @@ export default function StreakRoll({ balance, setBalance, onBack }) {
       }
       setResult({ color, landed, mult, payout, win })
       setRoundHistory(h => [mult, ...h].slice(0, 20))
-      // fake feed rows settle for the round: ~45% cash green, the rest grey out
       setFeedBets(list => list.map(b => Math.random() < 0.45
         ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
         : { ...b, status: 'crashed' }))
       setWinCell(eqCell)
       setRolling(false)
       rollingRef.current = false
+      busyRef.current = false
       setOffset(centerOffset(eqCell))
       if (win && landed === 'F') { playWin(); playBig() }
       else if (win) playWin()
@@ -416,7 +438,8 @@ export default function StreakRoll({ balance, setBalance, onBack }) {
         {speedLines}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar gameName="STREAK ROLL" band={HOTLINE.bar} onBack={onBack} />
+        <GameTopBar gameName="STREAK ROLL" band={HOTLINE.bar} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="STREAK ROLL" playerToken={playerToken} game="streak" />
 
         <style>{`
           @keyframes srParticle { from { transform: translate(0,0); opacity:1 } to { transform: translate(var(--tx), var(--ty)); opacity:0 } }
@@ -629,7 +652,7 @@ export default function StreakRoll({ balance, setBalance, onBack }) {
           }}>⟳</button>
           {/* three bet buttons — bet the amount on a color and roll */}
           {(() => {
-            const locked = rolling || bet > balance || bet < 1
+            const locked = rolling || bet < 1 || (serverBalance != null && bet > serverBalance)
             const withLock = s => ({ ...s, cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.55 : 1 })
             return (
               <>
@@ -648,6 +671,9 @@ export default function StreakRoll({ balance, setBalance, onBack }) {
             )
           })()}
         </div>
+        {netErr && (
+          <div style={{ marginTop: 8, color: '#ff8a9a', fontSize: 12, fontWeight: 700, textAlign: 'center' }}>{netErr}</div>
+        )}
       </Panel>
   )
 
@@ -667,7 +693,7 @@ export default function StreakRoll({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Streak Roll</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 
