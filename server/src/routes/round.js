@@ -60,6 +60,7 @@ import {
 import { drawKeno, kenoPayout } from '../game/keno.js';
 import { stepMult as goalStepMult, deriveBombRows, TIERS as GOAL_TIERS, COLS as GOAL_COLS } from '../game/goal.js';
 import { drawStreak, streakPayout, PATTERNS as STREAK_PATTERNS } from '../game/streakRoll.js';
+import { spinRoulette, rouletteWinMult, isValidBetKey } from '../game/miniRoulette.js';
 
 const router = Router();
 
@@ -741,6 +742,183 @@ router.post('/streak/play', requireAuth, requireType('player'), async (req, res,
             idx: oldResult.idx,
             mult: oldResult.mult,
             payout: existingAfterConflict.payout,
+            balanceAfter: await getBalance(playerId),
+            clientSeed: existingAfterConflict.client_seed,
+            nonce: oldResult.nonce,
+            serverSeedHash: existingAfterConflict.result_hash,
+            roundId: existingAfterConflict.round_id,
+            idempotent: true,
+          });
+        }
+      }
+      throw err;
+    }
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/** 按幂等键查询已存在的 roulette 局（跨事务的普通查询，不加锁），供幂等返回 */
+async function findRouletteBetByIdempotencyKey(idempotencyKey) {
+  const result = await query(
+    `SELECT b.id AS bet_id, b.round_id, b.player_id,
+            r.result, r.payout, r.server_seed, r.client_seed, r.result_hash
+       FROM bets b
+       JOIN rounds r ON r.id = b.round_id
+      WHERE b.idempotency_key = $1 AND r.game = 'roulette'`,
+    [idempotencyKey]
+  );
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+// ------------------------------------------------------------------
+// POST /round/roulette/play —— Mini Roulette（12 格轮盘）多注单转 + 服务器开奖（仅玩家）
+// 请求体：{ bets: {key: amount, ...}, idempotencyKey }。玩家在多个 key 上各下注，转一次逐 key 结算。
+// 落号 n / 每 key mult / payout 全服务端算；客户端只提供 bets 的 {key, amount}。
+// ------------------------------------------------------------------
+const ROULETTE_MAX_KEYS = 22; // 12 单号 + 6 外围 + 余量，防塞几百 key 撑爆
+router.post('/roulette/play', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { bets, idempotencyKey } = req.body || {};
+
+    if (!idempotencyKey) {
+      return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
+    }
+    if (!bets || typeof bets !== 'object' || Array.isArray(bets)) {
+      return res.status(400).json({ error: 'bets 必须是 {key: amount} 对象' });
+    }
+    const entries = Object.entries(bets);
+    if (entries.length < 1) {
+      return res.status(400).json({ error: 'bets 不能为空' });
+    }
+    if (entries.length > ROULETTE_MAX_KEYS) {
+      return res.status(400).json({ error: `下注项过多（上限 ${ROULETTE_MAX_KEYS}）` });
+    }
+    // 逐项校验：key 合法 + amount 严格 > 0（防负注额刷钱/绕过总额上限）
+    let total = 0;
+    for (const [key, amt] of entries) {
+      if (!isValidBetKey(key)) {
+        return res.status(400).json({ error: `非法下注 key：${key}` });
+      }
+      const a = Number(amt);
+      if (!Number.isFinite(a) || !(a > 0)) {
+        return res.status(400).json({ error: `下注金额必须 > 0（key ${key}）` });
+      }
+      total += a;
+    }
+    const totalStr = total.toFixed(2);
+
+    // 风控前置：按【服务端算出的总注额】校验（不信客户端传的任何 total）
+    assertBetWithinLimits('roulette', totalStr);
+
+    // 1. 幂等先查
+    const existing = await findRouletteBetByIdempotencyKey(idempotencyKey);
+    if (existing) {
+      const oldResult = existing.result || {};
+      return res.json({
+        n: oldResult.n,
+        bets: oldResult.bets,
+        perKeyPayout: oldResult.perKeyPayout,
+        totalPayout: existing.payout,
+        balanceAfter: await getBalance(playerId),
+        clientSeed: existing.client_seed,
+        nonce: oldResult.nonce,
+        serverSeedHash: existing.result_hash,
+        roundId: existing.round_id,
+        idempotent: true,
+      });
+    }
+
+    try {
+      const result = await withTransaction(async (client) => {
+        // 2. claimNonce（锁 player_seeds）
+        await ensureActiveSeed(client, playerId);
+        const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
+
+        // 落号 + 逐 key 结算全由后端算，前端只提供 bets
+        const n = spinRoulette(serverSeed, clientSeed, nonce);
+        const perKeyPayout = {};
+        let rawTotalPayout = 0;
+        for (const [key, amt] of entries) {
+          const mult = rouletteWinMult(key, n);
+          const p = mult > 0 ? Math.round(Number(amt) * mult * 100) / 100 : 0;
+          if (p > 0) { perKeyPayout[key] = p; rawTotalPayout += p; }
+        }
+        // 钳制型 cap（原子局中奖不作废）；用 SQL numeric 定稿，避免 JS 浮点累加误差
+        const capRow = await client.query(
+          'SELECT LEAST(round($1::numeric, 2), $2::numeric) AS payout',
+          [String(rawTotalPayout), String(maxPayoutFor('roulette'))]
+        );
+        const totalPayout = capRow.rows[0].payout;
+        const win = Number(totalPayout) > 0;
+
+        // 3. 建 round（settled——即时游戏，下注即结算）
+        const roundResult = await client.query(
+          `INSERT INTO rounds (game, player_id, bet_amount, client_seed, server_seed, result_hash, payout, status, result)
+           VALUES ('roulette', $1, $2::numeric, $3, $4, $5, $6::numeric, 'settled', $7::jsonb)
+           RETURNING id`,
+          [
+            playerId,
+            totalStr,
+            clientSeed,
+            serverSeed,
+            serverSeedHash,
+            totalPayout,
+            JSON.stringify({ bets: Object.fromEntries(entries.map(([k, a]) => [k, Number(a)])), n, perKeyPayout, totalPayout, nonce }),
+          ]
+        );
+        const roundId = roundResult.rows[0].id;
+
+        // 4. 扣钱（一次扣总注额）
+        const { balanceAfter: balanceAfterDebit } = await debit(client, {
+          playerId,
+          amount: totalStr,
+          type: 'roulette_bet',
+          idempotencyKey,
+          roundId,
+        });
+
+        let balanceAfter = balanceAfterDebit;
+        if (win) {
+          const creditResult = await credit(client, {
+            playerId,
+            amount: totalPayout,
+            type: 'roulette_payout',
+            idempotencyKey: `roulette-payout-${roundId}`,
+            roundId,
+          });
+          balanceAfter = creditResult.balanceAfter;
+        } else {
+          // 全输：总注额进入链式分成
+          const playerResult = await client.query('SELECT agent_id FROM players WHERE id = $1', [playerId]);
+          const agentId = playerResult.rows[0]?.agent_id;
+          if (agentId) {
+            await distributeLoss(client, { playerId, agentId, roundId, lossAmount: totalStr });
+          }
+        }
+
+        // 5. 建 bet
+        await client.query(
+          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome)
+           VALUES ($1, $2, $3::numeric, $4, $5)`,
+          [roundId, playerId, totalStr, idempotencyKey, win ? 'win' : 'lose']
+        );
+
+        return { n, bets: Object.fromEntries(entries.map(([k, a]) => [k, Number(a)])), perKeyPayout, totalPayout, balanceAfter, clientSeed, nonce, serverSeedHash, roundId };
+      });
+
+      return res.json({ ...result, idempotent: false });
+    } catch (err) {
+      if (err.code === '23505') {
+        const existingAfterConflict = await findRouletteBetByIdempotencyKey(idempotencyKey);
+        if (existingAfterConflict) {
+          const oldResult = existingAfterConflict.result || {};
+          return res.json({
+            n: oldResult.n,
+            bets: oldResult.bets,
+            perKeyPayout: oldResult.perKeyPayout,
+            totalPayout: existingAfterConflict.payout,
             balanceAfter: await getBalance(playerId),
             clientSeed: existingAfterConflict.client_seed,
             nonce: oldResult.nonce,

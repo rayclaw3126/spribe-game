@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 
 // Team Roulette — full bet/spin/settle round on the Spribe-replica board.
 // Standard 12-number mini-roulette paytable:
@@ -57,10 +58,6 @@ const gloss = base => `radial-gradient(circle at 35% 28%, rgba(255,255,255,0.36)
 // 12 o'clock pointer where the golden ball rests.
 const sectorCenterDeg = n => WHEEL_ORDER.indexOf(n) * 30 + 15
 
-function rollNumber() {
-  return 1 + Math.floor(Math.random() * 12)
-}
-
 // cubic-bezier(0.15,0.55,0.25,1) inversion — keeps the tick schedule in sync
 // with the CSS spin transition (same helper family as Penalty Wheel).
 function makeBezier(x1, y1, x2, y2) {
@@ -78,19 +75,9 @@ function timeForProgress(y) {
   return (lo + hi) / 2
 }
 
-function winMult(key, n) {
-  if (key === `n${n}`) return SINGLE_MULT
-  const red = RED_SET.has(n)
-  if (key === 'red' && red) return OUTSIDE_MULT
-  if (key === 'black' && !red) return OUTSIDE_MULT
-  if (key === 'odd' && n % 2 === 1) return OUTSIDE_MULT
-  if (key === 'even' && n % 2 === 0) return OUTSIDE_MULT
-  if (key === 'low' && n <= 6) return OUTSIDE_MULT
-  if (key === 'high' && n >= 7) return OUTSIDE_MULT
-  return 0
-}
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `roulette-${Date.now()}-${Math.random()}`)
 
-export default function MiniRoulette({ balance, setBalance, onBack }) {
+export default function MiniRoulette({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [hoverNum, setHoverNum] = useState(null)
@@ -106,15 +93,17 @@ export default function MiniRoulette({ balance, setBalance, onBack }) {
   const [note, setNote] = useState('')
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
+  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
 
-  const balanceRef = useRef(balance)
+  const balanceRef = useRef(serverBalance)
   const betsRef = useRef(bets)
-  const pendingRef = useRef(null)
+  const pendingDataRef = useRef(null)   // 后端 /roulette/play 返回（settle 时消费）
+  const busyRef = useRef(false)
   const timersRef = useRef([])
   const tickTimersRef = useRef([])
   const toastIdRef = useRef(0)
   const audioRef = useRef({ ctx: null, muted: false })
-  useEffect(() => { balanceRef.current = balance }, [balance])
+  useEffect(() => { balanceRef.current = serverBalance }, [serverBalance])
   useEffect(() => { betsRef.current = bets }, [bets])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => {
@@ -190,22 +179,29 @@ export default function MiniRoulette({ balance, setBalance, onBack }) {
     tickTimersRef.current.push(setTimeout(playLand, SPIN_MS - 30))
   }
 
-  // Single money path (mirrors Aviator's credit()).
-  function creditBal(delta) {
-    balanceRef.current = Number((balanceRef.current + delta).toFixed(2))
-    setBalance(b => Number((b + delta).toFixed(2)))
+  // 服务器权威：钱只在「转」那一刻走后端（POST /roulette/play 一次扣总注额 + 结算派彩）。
+  // 放/撤/清/复用注只在本地【暂存】bets map，不动余额；可下注额 = serverBalance − totalBet。
+  async function apiPost(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
+    return data
   }
 
   const chipValue = CHIPS.find(c => c.label === chip).value
   const totalBet = Object.values(bets).reduce((a, b) => a + b, 0)
 
   function placeBet(key) {
-    if (spinning) return
-    if (chipValue > balanceRef.current) { setNote('余额不足，无法下注'); return }
+    if (spinning || busyRef.current) return
+    // 暂存注不扣钱，但已暂存总额 + 本次筹码不能超过后端余额
+    if (serverBalance != null && chipValue > serverBalance - totalBet) { setNote('余额不足，无法下注'); return }
     setNote('')
     setBets(b => ({ ...b, [key]: Number(((b[key] || 0) + chipValue).toFixed(2)) }))
     setBetStack(s => [...s, { key, amount: chipValue }])
-    creditBal(-chipValue)
     playChip()
   }
 
@@ -218,14 +214,12 @@ export default function MiniRoulette({ balance, setBalance, onBack }) {
       if (next[last.key] <= 0) delete next[last.key]
       return next
     })
-    creditBal(last.amount)
     setNote('')
     playChip()
   }
 
   function clearBets() {
     if (spinning || !totalBet) return
-    creditBal(Number(totalBet.toFixed(2)))
     setBets({})
     setBetStack([])
     setNote('')
@@ -236,12 +230,9 @@ export default function MiniRoulette({ balance, setBalance, onBack }) {
     if (spinning || !lastBets) return
     const entries = Object.entries(lastBets)
     const total = entries.reduce((a, [, v]) => a + v, 0)
-    const refund = totalBet
-    if (total > balanceRef.current + refund) { setNote('余额不足，无法复用上局注单'); return }
-    if (refund) creditBal(Number(refund.toFixed(2)))
+    if (serverBalance != null && total > serverBalance) { setNote('余额不足，无法复用上局注单'); return }
     setBets({ ...lastBets })
     setBetStack(entries.map(([key, amount]) => ({ key, amount })))
-    creditBal(-Number(total.toFixed(2)))
     setNote('')
   }
 
@@ -251,48 +242,42 @@ export default function MiniRoulette({ balance, setBalance, onBack }) {
     later(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
   }
 
-  function spin() {
-    if (spinning || !totalBet) return
-    const n = rollNumber()
-    pendingRef.current = n
-    // land the winning sector under the 12 o'clock ball (same mapping as verify)
+  // 转：先走后端拿落号 n + 逐 key 结算，再把转盘停在【后端指定的 n】，动画后 settle。
+  async function spin() {
+    if (spinning || busyRef.current || !totalBet) return
+    busyRef.current = true
+    ensureAudio(); setNote('')
+    let data
+    try {
+      data = await apiPost('/round/roulette/play', { bets: betsRef.current, idempotencyKey: genIdemKey() })
+    } catch (e) { setNote(e.message); busyRef.current = false; return }
+    pendingDataRef.current = data
+    const n = data.n   // ← 后端落号（不本地 rollNumber）
     const current = ((rotation % 360) + 360) % 360
     const targetMod = (360 - sectorCenterDeg(n)) % 360
     const delta = ((targetMod - current) % 360 + 360) % 360 + 360 * 5
-    ensureAudio()
     scheduleTicks(rotation, delta)
     setRotation(r => r + delta)
     setSpinning(true)
     setWinKeys(null)
-    setNote('')
-    setFeedBets(makeFeedBots())   // fresh fake round rides along
+    setFeedBets(makeFeedBots())
     later(settle, SPIN_MS + 150)
   }
 
   function settle() {
-    const n = pendingRef.current
-    const staked = betsRef.current
-    const winners = []
-    let payout = 0
-    Object.entries(staked).forEach(([key, amt]) => {
-      const mult = winMult(key, n)
-      if (mult > 0) {
-        winners.push(key)
-        payout = Number((payout + amt * mult).toFixed(2))
-      }
-    })
-    if (payout > 0) {
-      creditBal(payout)
-      pushToast(n, payout)
-      playWin()   // same frame as the gold highlight below
-    }
+    const data = pendingDataRef.current || {}
+    const n = data.n
+    const winners = Object.keys(data.perKeyPayout || {})   // 中奖 key（服务端定）
+    const totalPayout = Number(data.totalPayout || 0)
+    if (totalPayout > 0) { pushToast(n, totalPayout); playWin() }
+    if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))   // 余额只认后端
     setWinKeys(new Set(winners))
     setDraws(d => [n, ...d].slice(0, 20))
-    setLastBets({ ...staked })
+    setLastBets({ ...betsRef.current })
     setBets({})
     setBetStack([])
     setSpinning(false)
-    // fake feed rows settle for one round: some cash green, the rest grey out
+    busyRef.current = false
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
       : { ...b, status: 'crashed' }))
@@ -358,7 +343,8 @@ export default function MiniRoulette({ balance, setBalance, onBack }) {
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar gameName="TEAM ROULETTE" band={ROULETTE.band} onBack={onBack} />
+        <GameTopBar gameName="TEAM ROULETTE" band={ROULETTE.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="TEAM ROULETTE" playerToken={playerToken} game="roulette" />
 
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 16 : 26, alignItems: isMobile ? 'center' : 'flex-start', position: 'relative' }}>
           {/* cash-out style toast for wins */}
@@ -537,7 +523,7 @@ export default function MiniRoulette({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Team Roulette</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 
