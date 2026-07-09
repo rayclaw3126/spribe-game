@@ -7,6 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 import ballUrl from '../assets/covers/ball-3d.png'
 import badgeWinUrl from '../assets/shared/badge_win.png'
 
@@ -31,8 +32,10 @@ const PAYOUTS = {
   9:  { 5: 6, 6: 60, 7: 500, 8: 5000, 9: 10000 },
   10: { 5: 3, 6: 25, 7: 150, 8: 2500, 9: 10000, 10: 10000 },
 }
+// 幂等键：优先 crypto.randomUUID，不支持则退化拼接
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `keno-${Date.now()}-${Math.random()}`)
 
-export default function Keno({ balance, setBalance, onBack }) {
+export default function Keno({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
@@ -45,6 +48,7 @@ export default function Keno({ balance, setBalance, onBack }) {
   const [message, setMessage] = useState(null)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
+  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
   const audioRef = useRef({ ctx: null, muted: false })
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
@@ -122,48 +126,58 @@ export default function Keno({ balance, setBalance, onBack }) {
   }
 
   async function play() {
-    if (bet > balance || selected.length === 0) return
+    // 余额以服务器为准：serverBalance 为 null（登录后尚未拿到过 balanceAfter）时不拦
+    if (drawing || bet < 1 || selected.length === 0 || (serverBalance != null && bet > serverBalance)) return
     ensureAudio()
-    setBalance(b => b - bet)
     setPhase('drawing')
     setDrawing(true)
     setDrawn([])
     setMessage(null)
     setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
 
-    // Fisher-Yates over the 36 pool, take 10 — one ball drops every ~200ms
-    const pool = Array.from({ length: TOTAL }, (_, i) => i + 1)
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[pool[i], pool[j]] = [pool[j], pool[i]]
+    // 开奖不信前端：摇号/命中/赔付全走后端 /round/keno/play，前端只提供 selected
+    let data
+    try {
+      const resp = await fetch('/round/keno/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+        body: JSON.stringify({ amount: bet, selected, idempotencyKey: genIdemKey() }),
+      })
+      data = await resp.json()
+      if (!resp.ok) {
+        setMessage({ text: data?.error || '下注失败，请重试', win: false })
+        setPhase('idle'); setDrawing(false)
+        return
+      }
+    } catch {
+      setMessage({ text: '网络异常，请稍后重试', win: false })
+      setPhase('idle'); setDrawing(false)
+      return
     }
-    const shuffled = pool.slice(0, DRAW)
-    const drawResult = []
 
-    for (let i = 0; i < shuffled.length; i++) {
+    const { drawn: serverDrawn, matches, mult, payout, balanceAfter } = data
+    const picks = selected.length
+
+    // 摇号动画保留：用后端返回的 drawn 逐球落下（视觉不动，数据来自后端）
+    const drawResult = []
+    for (let i = 0; i < serverDrawn.length; i++) {
       await new Promise(r => setTimeout(r, 200))
-      drawResult.push(shuffled[i])
+      drawResult.push(serverDrawn[i])
       setDrawn([...drawResult])
       playDraw()
-      if (selected.includes(shuffled[i])) playMatch()
+      if (selected.includes(serverDrawn[i])) playMatch()
     }
 
-    const matches = selected.filter(n => shuffled.includes(n)).length
-    const picks = selected.length
-    const payout_table = PAYOUTS[picks] || {}
-    const mult = payout_table[matches] || 0
-    const payout = parseFloat((bet * mult).toFixed(2))
-
-    if (payout > 0) { setBalance(b => parseFloat((b + payout).toFixed(2))); playWin() }
-    else playLose()
-
-    const matchStr = `${matches}/${picks} matched`
+    const won = Number(payout) > 0
+    if (won) playWin(); else playLose()
     setMessage(
-      payout > 0
-        ? { text: `${matchStr} — ${mult}× — Won $${payout.toFixed(2)}!`, win: true }
-        : { text: `${matchStr} — No win this time`, win: false }
+      won
+        ? { text: `${matches}/${picks} matched — ${mult}× — Won $${Number(payout).toFixed(2)}!`, win: true }
+        : { text: `${matches}/${picks} matched — No win this time`, win: false }
     )
     setRoundHistory(h => [mult, ...h].slice(0, 20))
+    // 余额只认后端 balanceAfter，不本地加减
+    if (balanceAfter != null) setServerBalance(Number(balanceAfter))
     setPhase('done')
     setDrawing(false)
     // fake feed rows settle for the round: ~45% cash green, the rest grey out
@@ -282,7 +296,8 @@ export default function Keno({ balance, setBalance, onBack }) {
         }} />
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar gameName="TEAM KENO" band={KENO.band} onBack={onBack} />
+        <GameTopBar gameName="TEAM KENO" band={KENO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="TEAM KENO" playerToken={playerToken} game="keno" />
 
         {/* ---- middle zone: flexes to fill the card, board vertically centered ---- */}
         <div style={{
@@ -401,7 +416,7 @@ export default function Keno({ balance, setBalance, onBack }) {
             fontSize: 16, fontWeight: 900, cursor: 'not-allowed',
           }}>⟳</button>
           {(() => {
-            const canBet = phase === 'idle' && selected.length > 0 && bet <= balance && bet >= 1
+            const canBet = phase === 'idle' && selected.length > 0 && (serverBalance == null || bet <= serverBalance) && bet >= 1
             const isDone = phase === 'done'
             const enabled = isDone || canBet
             return (
@@ -438,7 +453,7 @@ export default function Keno({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Team Keno</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 

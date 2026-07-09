@@ -7,7 +7,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { query, withTransaction } from '../db.js';
 import { debit, credit } from '../lib/wallet.js';
-import { assertBetWithinLimits, assertPayoutCap, potentialPayout, assertExposureWithinLimit } from '../lib/risk.js';
+import { assertBetWithinLimits, assertPayoutCap, potentialPayout, assertExposureWithinLimit, maxPayoutFor } from '../lib/risk.js';
 import { ensureActiveSeed, claimNonce } from '../lib/seeds.js';
 import { distributeLoss } from '../lib/commission.js';
 import { requireAuth, requireType } from '../middleware/auth.js';
@@ -57,6 +57,7 @@ import {
   newClientSeed as newClientSeedHiLo,
   SKIPS_PER_ROUND,
 } from '../game/hilo.js';
+import { drawKeno, kenoPayout } from '../game/keno.js';
 
 const router = Router();
 
@@ -398,6 +399,180 @@ router.post('/dice/play', requireAuth, requireType('player'), async (req, res, n
           return res.json({
             roll: oldResult.roll,
             win: oldResult.win,
+            payout: existingAfterConflict.payout,
+            balanceAfter: await getBalance(playerId),
+            clientSeed: existingAfterConflict.client_seed,
+            nonce: oldResult.nonce,
+            serverSeedHash: existingAfterConflict.result_hash,
+            roundId: existingAfterConflict.round_id,
+            idempotent: true,
+          });
+        }
+      }
+      throw err;
+    }
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/** 按幂等键查询已存在的 keno 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
+async function findKenoBetByIdempotencyKey(idempotencyKey) {
+  const result = await query(
+    `SELECT b.id AS bet_id, b.round_id, b.player_id,
+            r.result, r.payout, r.server_seed, r.client_seed, r.result_hash
+       FROM bets b
+       JOIN rounds r ON r.id = b.round_id
+      WHERE b.idempotency_key = $1 AND r.game = 'keno'`,
+    [idempotencyKey]
+  );
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+// ------------------------------------------------------------------
+// POST /round/keno/play —— Team Keno（36 选 ≤10，摇 10）即时下注 + 服务器开奖（仅玩家）
+// 说明：摇号不信前端 —— drawn 由 serverSeed（后端私密）+ clientSeed + nonce 派生，
+// matches/mult/payout 后端按 PAYOUTS 表自算，前端传入的任何 matches/payout 一律忽略，
+// 只信客户端传的 selected（选号）。钱走 lib/wallet.js 唯一路径，输局触发链式分成。
+// ------------------------------------------------------------------
+router.post('/keno/play', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { amount, selected, idempotencyKey } = req.body || {};
+
+    const amountNum = Number(amount);
+
+    if (!idempotencyKey) {
+      return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
+    }
+    if (!amountNum || !(amountNum > 0)) {
+      return res.status(400).json({ error: '下注金额必须大于 0' });
+    }
+    // 选号校验：数组、1–10 个、每个 1–36 整数、互不相同
+    if (!Array.isArray(selected) || selected.length < 1 || selected.length > 10) {
+      return res.status(400).json({ error: 'selected 必须是 1–10 个号码的数组' });
+    }
+    const normSel = selected.map(Number);
+    if (normSel.some((n) => !Number.isInteger(n) || n < 1 || n > 36)) {
+      return res.status(400).json({ error: 'selected 里每个号码必须是 1–36 的整数' });
+    }
+    if (new Set(normSel).size !== normSel.length) {
+      return res.status(400).json({ error: 'selected 里号码不能重复' });
+    }
+
+    // 风控前置：注额超限直接拒，不进事务、不算开奖
+    assertBetWithinLimits('keno', amountNum.toFixed(2));
+
+    // 1. 幂等先查：命中则直接返回旧的开奖结果，不重复扣钱
+    const existing = await findKenoBetByIdempotencyKey(idempotencyKey);
+    if (existing) {
+      const oldResult = existing.result || {};
+      return res.json({
+        drawn: oldResult.drawn,
+        selected: oldResult.selected,
+        matches: oldResult.matches,
+        mult: oldResult.mult,
+        payout: existing.payout,
+        balanceAfter: await getBalance(playerId),
+        clientSeed: existing.client_seed,
+        nonce: oldResult.nonce,
+        serverSeedHash: existing.result_hash,
+        roundId: existing.round_id,
+        idempotent: true,
+      });
+    }
+
+    try {
+      const result = await withTransaction(async (client) => {
+        // 2. 领取本玩家 active 种子的下一个 nonce（锁序：player_seeds 先于 wallets）。
+        //    serverSeed 明文只内部用于摇号派生，绝不进响应。
+        await ensureActiveSeed(client, playerId);
+        const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
+
+        // 摇号 + 结算全由后端算，前端只提供 selected
+        const drawn = drawKeno(serverSeed, clientSeed, nonce);
+        const { matches, mult } = kenoPayout(normSel, drawn);
+        const win = mult > 0;
+
+        const amountStr = amountNum.toFixed(2);
+        let payout = '0.00';
+        if (win) {
+          // 钳制型封顶：赢额 = min(bet×mult, maxPayout)。原子局中奖不可作废，超顶只 cap 到上限，
+          // 不用 assertPayoutCap（那是「拒绝」型，会把中奖局整个 rollback，对 keno 是错的）。
+          const payoutResult = await client.query(
+            'SELECT LEAST(trunc($1::numeric * $2::numeric, 2), $3::numeric) AS payout',
+            [amountStr, String(mult), String(maxPayoutFor('keno'))]
+          );
+          payout = payoutResult.rows[0].payout;
+        }
+
+        // 3. 建 round（settled——Keno 是即时游戏，下注即结算）
+        const roundResult = await client.query(
+          `INSERT INTO rounds (game, player_id, bet_amount, client_seed, server_seed, result_hash, payout, status, result)
+           VALUES ('keno', $1, $2::numeric, $3, $4, $5, $6::numeric, 'settled', $7::jsonb)
+           RETURNING id`,
+          [
+            playerId,
+            amountStr,
+            clientSeed,
+            serverSeed,
+            serverSeedHash,
+            payout,
+            JSON.stringify({ drawn, selected: normSel, matches, mult, nonce }),
+          ]
+        );
+        const roundId = roundResult.rows[0].id;
+
+        // 4. 扣钱（资金唯一出入口）
+        const { balanceAfter: balanceAfterDebit } = await debit(client, {
+          playerId,
+          amount: amountStr,
+          type: 'keno_bet',
+          idempotencyKey,
+          roundId,
+        });
+
+        let balanceAfter = balanceAfterDebit;
+        if (win) {
+          // 5a. 赢：派彩加钱（payout 已在上面钳制到 maxPayout，此处直接入账）
+          const creditResult = await credit(client, {
+            playerId,
+            amount: payout,
+            type: 'keno_payout',
+            idempotencyKey: `keno-payout-${roundId}`,
+            roundId,
+          });
+          balanceAfter = creditResult.balanceAfter;
+        } else {
+          // 5b. 输：本局下注金额进入链式分成（佣金唯一入口）
+          const playerResult = await client.query('SELECT agent_id FROM players WHERE id = $1', [playerId]);
+          const agentId = playerResult.rows[0]?.agent_id;
+          if (agentId) {
+            await distributeLoss(client, { playerId, agentId, roundId, lossAmount: amountStr });
+          }
+        }
+
+        // 6. 建 bet
+        await client.query(
+          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome)
+           VALUES ($1, $2, $3::numeric, $4, $5)`,
+          [roundId, playerId, amountStr, idempotencyKey, win ? 'win' : 'lose']
+        );
+
+        return { drawn, selected: normSel, matches, mult, win, payout, balanceAfter, clientSeed, nonce, serverSeedHash, roundId };
+      });
+
+      return res.json({ ...result, idempotent: false });
+    } catch (err) {
+      if (err.code === '23505') {
+        const existingAfterConflict = await findKenoBetByIdempotencyKey(idempotencyKey);
+        if (existingAfterConflict) {
+          const oldResult = existingAfterConflict.result || {};
+          return res.json({
+            drawn: oldResult.drawn,
+            selected: oldResult.selected,
+            matches: oldResult.matches,
+            mult: oldResult.mult,
             payout: existingAfterConflict.payout,
             balanceAfter: await getBalance(playerId),
             clientSeed: existingAfterConflict.client_seed,

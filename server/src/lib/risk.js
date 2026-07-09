@@ -19,6 +19,12 @@ export function assertBetWithinLimits(game, amount) {
   return true;
 }
 
+// 取该 game 的派彩封顶（数值）。用于「钳制」型上限（如 keno 原子局：赢额超顶就 cap 到此值，
+// 而非 assertPayoutCap 的「拒绝」型——原子局把中奖局整个作废是错的）。
+export function maxPayoutFor(game) {
+  return Number(limitsFor(game).maxPayout);
+}
+
 // 派彩前：校验单局赢额（含本金）不超封顶
 export function assertPayoutCap(game, payout) {
   const p = Number(payout);

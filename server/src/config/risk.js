@@ -5,6 +5,7 @@ export default {
     dice:    { maxBet: '500.00' },
     limbo:   { maxBet: '200.00' },
     hilo:    { exposureMult: 200 }, // 敞口口径：潜在=bet×200（clamp cap），代替理论无界的满 cap
+    keno:    { maxBet: '20.00', maxPayout: '50000.00' }, // maxBet 20 降 RTP 侵蚀（小注顶赔零侵蚀）
     aviator: { maxBet: '500.00', maxPayout: '50000.00' },
   },
   // 敞口：单玩家所有未结算多步局的潜在最大赔付总额上限 + 并发未结算局数上限（双闸）
