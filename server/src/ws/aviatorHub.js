@@ -8,6 +8,7 @@
 // （这是共享房间，不是某个玩家私有的一局），真正的归属关系落在 bets 表上。
 import { query, withTransaction } from '../db.js';
 import { debit, credit } from '../lib/wallet.js';
+import { assertBetWithinLimits, assertPayoutCap, RiskError } from '../lib/risk.js';
 import { distributeLoss } from '../lib/commission.js';
 import {
   hashSeed,
@@ -232,6 +233,18 @@ async function handleBet(ws, msg) {
   }
   const amount = rawAmount.toFixed(2);
 
+  // 风控前置（WS 专用）：注额超限直接拒。RiskError 不能靠 HTTP 中间件兜，
+  // 这里就地转成 bet_rejected 帧并带 code，绝不落到下面兜底的「请重试」。
+  try {
+    assertBetWithinLimits('aviator', amount);
+  } catch (err) {
+    if (err instanceof RiskError) {
+      sendJSON(ws, { type: 'bet_rejected', reason: err.message, code: err.code });
+      return;
+    }
+    throw err;
+  }
+
   // 幂等：内存里已经记过这个玩家本局的下注，直接回已有信息，不重复扣钱。
   const existing = state.bets.get(playerId);
   if (existing) {
@@ -352,6 +365,9 @@ async function handleCashout(ws) {
       );
       const computedPayout = payoutResult.rows[0].payout;
 
+      // 风控封顶：派彩不得超上限。RiskError 抛出后由下面的 catch 转成 cashout_rejected（带 code）。
+      assertPayoutCap('aviator', computedPayout);
+
       const { balanceAfter: after } = await credit(client, {
         playerId,
         amount: computedPayout,
@@ -374,6 +390,11 @@ async function handleCashout(ws) {
       // 幂等命中：这个玩家的兑现请求已经处理过一次（并发重复消息），不重复加钱。
       bet.cashedOut = true;
       sendJSON(ws, { type: 'cashout_rejected', reason: '无有效下注或已兑现' });
+      return;
+    }
+    // 风控封顶（WS 专用）：派彩超上限。带 code 明确告知，绝不落到下面兜底的「请重试」。
+    if (err instanceof RiskError) {
+      sendJSON(ws, { type: 'cashout_rejected', reason: err.message, code: err.code });
       return;
     }
     console.error('[aviatorHub] 兑现处理异常：', err.message);

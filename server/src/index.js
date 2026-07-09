@@ -12,6 +12,7 @@ import roundRouter from './routes/round.js';
 import agentRouter from './routes/agent.js';
 import playerRouter from './routes/player.js';
 import { startAviatorHub } from './ws/aviatorHub.js';
+import { RiskError } from './lib/risk.js';
 
 const app = express();
 
@@ -73,6 +74,11 @@ app.use((req, res) => {
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('[unhandled error]', err.message);
+
+  // 风控拦截（下注超限/派彩封顶等）：RiskError 自带 status 与可辨识的 code，直接透出。
+  if (err instanceof RiskError) {
+    return res.status(err.status).json({ error: err.message, code: err.code });
+  }
 
   // 业务代码里主动抛出的「余额不足」「钱包不存在」等属于客户端可读的提示，用 400 返回；
   // 其余未预期的异常按 500 处理，且不把 err.stack 等内部细节吐给客户端。

@@ -7,6 +7,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { query, withTransaction } from '../db.js';
 import { debit, credit } from '../lib/wallet.js';
+import { assertBetWithinLimits, assertPayoutCap } from '../lib/risk.js';
 import { distributeLoss } from '../lib/commission.js';
 import { requireAuth, requireType } from '../middleware/auth.js';
 import {
@@ -92,6 +93,9 @@ router.post('/bet', requireAuth, requireType('player'), async (req, res, next) =
     if (!game || !amount || !idempotencyKey) {
       return res.status(400).json({ error: '参数不完整：game / amount / idempotencyKey 均为必填' });
     }
+
+    // 风控前置：注额超限直接拒。game 由客户端传，未知串在 risk.js 回落 default 限额（正确兜底）。
+    assertBetWithinLimits(game, amount);
 
     // 1. 幂等先查：命中则直接返回已有结果，不重复扣钱
     const existing = await findBetByIdempotencyKey(idempotencyKey);
@@ -190,6 +194,10 @@ router.post('/settle', requireAuth, async (req, res, next) => {
       const finalPayout = outcome === 'win' ? (payout || '0.00') : '0.00';
 
       if (outcome === 'win') {
+        // 风控封顶：settle 的 payout 是【客户端传入】的，最该防塞天价 payout。
+        // game 用服务端 round 记录的 round.game，不信客户端。
+        assertPayoutCap(round.game, finalPayout);
+
         // 2a. 赢：派彩加钱（资金唯一出入口）
         const creditResult = await credit(client, {
           playerId: round.player_id,
@@ -273,6 +281,9 @@ router.post('/dice/play', requireAuth, requireType('player'), async (req, res, n
       return res.status(400).json({ error: 'direction 必须是 under 或 over' });
     }
 
+    // 风控前置：注额超限直接拒，不进事务、不算开奖
+    assertBetWithinLimits('dice', amountNum.toFixed(2));
+
     // 1. 幂等先查：命中则直接返回旧的开奖结果，不重复扣钱
     const existing = await findDiceBetByIdempotencyKey(idempotencyKey);
     if (existing) {
@@ -344,6 +355,7 @@ router.post('/dice/play', requireAuth, requireType('player'), async (req, res, n
         let balanceAfter = balanceAfterDebit;
         if (win) {
           // 5a. 赢：派彩加钱（资金唯一出入口）
+          assertPayoutCap('dice', payout);
           const creditResult = await credit(client, {
             playerId,
             amount: payout,
@@ -447,6 +459,9 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
       return res.status(400).json({ error: `rows 必须在 ${PINS_MIN}–${PINS_MAX} 之间` });
     }
 
+    // 风控前置：注额超限直接拒，不进事务、不算开奖
+    assertBetWithinLimits('plinko', amountNum.toFixed(2));
+
     // 1. 幂等先查：命中则直接返回旧的开奖结果，不重复扣钱
     const existing = await findPlinkoBetByIdempotencyKey(idempotencyKey);
     if (existing) {
@@ -517,6 +532,7 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
         const payoutCheck = await client.query('SELECT $1::numeric > 0 AS positive', [payout]);
         if (payoutCheck.rows[0].positive) {
           // 5a. 派彩加钱（资金唯一出入口）
+          assertPayoutCap('plinko', payout);
           const creditResult = await credit(client, {
             playerId,
             amount: payout,
@@ -627,6 +643,9 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
       return res.status(400).json({ error: `target 必须在 ${LIMBO_TARGET_MIN}–${LIMBO_MAX_MULT} 之间` });
     }
 
+    // 风控前置：注额超限直接拒，不进事务、不算开奖
+    assertBetWithinLimits('limbo', amountNum.toFixed(2));
+
     // 1. 幂等先查：命中则直接返回旧的开奖结果，不重复扣钱
     const existing = await findLimboBetByIdempotencyKey(idempotencyKey);
     if (existing) {
@@ -697,6 +716,7 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
         let balanceAfter = balanceAfterDebit;
         if (win) {
           // 5a. 赢：派彩加钱（资金唯一出入口）
+          assertPayoutCap('limbo', payout);
           const creditResult = await credit(client, {
             playerId,
             amount: payout,
@@ -810,6 +830,9 @@ router.post('/mines/start', requireAuth, requireType('player'), async (req, res,
     if (!Number.isInteger(minesNum) || minesNum < MINES_MIN || minesNum > MINES_MAX) {
       return res.status(400).json({ error: `mines 必须在 ${MINES_MIN}–${MINES_MAX} 之间` });
     }
+
+    // 风控前置：注额超限直接拒，不进事务、不布雷
+    assertBetWithinLimits('mines', amountNum.toFixed(2));
 
     // 1. 幂等先查：命中则直接返回旧局，不重复扣钱
     const existing = await findMinesBetByIdempotencyKey(idempotencyKey);
@@ -1004,6 +1027,9 @@ router.post('/mines/reveal', requireAuth, requireType('player'), async (req, res
         );
         const payout = payoutResult.rows[0].payout;
 
+        // 风控封顶：揭满自动结算这条 credit 同样不得超上限（否则大注揭满是绕过 cap 的后门）
+        assertPayoutCap('mines', payout);
+
         const { balanceAfter } = await credit(client, {
           playerId,
           amount: payout,
@@ -1095,6 +1121,9 @@ router.post('/mines/cashout', requireAuth, requireType('player'), async (req, re
       );
       const payout = payoutResult.rows[0].payout;
 
+      // 风控封顶：多步滚倍后派彩不得超上限（credit 之前拦，防超封顶提现）
+      assertPayoutCap('mines', payout);
+
       const { balanceAfter } = await credit(client, {
         playerId,
         amount: payout,
@@ -1175,6 +1204,9 @@ router.post('/hilo/start', requireAuth, requireType('player'), async (req, res, 
     if (!amountNum || !(amountNum > 0)) {
       return res.status(400).json({ error: '下注金额必须大于 0' });
     }
+
+    // 风控前置：注额超限直接拒，不进事务、不发牌
+    assertBetWithinLimits('hilo', amountNum.toFixed(2));
 
     // 1. 幂等先查：命中则直接返回旧局，不重复扣钱
     const existing = await findHiloBetByIdempotencyKey(idempotencyKey);
@@ -1464,6 +1496,9 @@ router.post('/hilo/cashout', requireAuth, requireType('player'), async (req, res
         [round.bet_amount, r.cum]
       );
       const payout = payoutResult.rows[0].payout;
+
+      // 风控封顶：多步滚倍后派彩不得超上限（credit 之前拦，防超封顶提现）
+      assertPayoutCap('hilo', payout);
 
       const { balanceAfter } = await credit(client, {
         playerId,
