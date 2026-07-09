@@ -6,6 +6,7 @@ import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots, createArenaFx, drawArenaFx } from '../components/shell/arenaFx'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 import ballUrl from '../assets/covers/ball-3d.png'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 import { useSfxMuted } from '../components/shell/bgmManager'
@@ -22,21 +23,14 @@ const RTP = 0.97
 const COLS = 7
 const ROWS = 4
 const TIERS = { sm: { label: '▪', bombs: 1 }, md: { label: '▪▪', bombs: 2 }, lg: { label: '▪▪▪', bombs: 3 } }
-const stepMult = tier => RTP / ((ROWS - TIERS[tier].bombs) / ROWS)
+const stepMult = tier => RTP / ((ROWS - TIERS[tier].bombs) / ROWS)   // 仅用于「下一列倍数」展示；真 cum 以后端为准
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `goal-${Date.now()}-${Math.random()}`)
 const round2 = x => Math.round(x * 100) / 100
 
-// bomb rows for one column: shuffle 0..3, take first n (module-level randoms)
-function drawBombRows(n) {
-  const rows = [0, 1, 2, 3]
-  for (let i = ROWS - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[rows[i], rows[j]] = [rows[j], rows[i]]
-  }
-  return new Set(rows.slice(0, n))
-}
+// 本地随机挑一行（仅 AUTO / RANDOM 用来"替玩家点哪一格"，雷位仍由后端判定）
 const randomRow = () => Math.floor(Math.random() * ROWS)
 
-export default function Goal({ balance, setBalance, onBack }) {
+export default function Goal({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
 
   const [bet, setBet] = useState(10)
@@ -45,12 +39,15 @@ export default function Goal({ balance, setBalance, onBack }) {
   const [tierOpen, setTierOpen] = useState(false)
   const [picks, setPicks] = useState([])          // picked row per completed column
   const [bustInfo, setBustInfo] = useState(null)  // { col, bombs, picked }
-  const [cum, setCum] = useState(1)               // display copy of running product
+  const [cum, setCum] = useState(1)               // display copy of running product（以后端 cum 为准）
   const [revealing, setRevealing] = useState(false)
   const [autoOn, setAutoOn] = useState(false)
   const [roundHistory, setRoundHistory] = useState([])   // final mult per round, newest first
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
+  const [, setRoundId] = useState(null)   // 后端本局 id（走 ref 用）
+  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
 
   const phaseRef = useRef('idle')
   const tierRef = useRef('md')
@@ -58,6 +55,8 @@ export default function Goal({ balance, setBalance, onBack }) {
   const cumRef = useRef(1)
   const revealingRef = useRef(false)
   const autoRef = useRef(false)
+  const roundIdRef = useRef(null)
+  const busyRef = useRef(false)
   const audioRef = useRef({ ctx: null, muted: false })
   const timersRef = useRef([])
   const fxCanvasRef = useRef(null)   // arenaFx backdrop — pure decoration
@@ -157,58 +156,81 @@ export default function Goal({ balance, setBalance, onBack }) {
 
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
 
-  // ---------- flow ----------
-  // single money path: every round ends here exactly once
-  function settleMoney(mult) {
-    const payout = round2(bet * mult)
-    if (payout > 0) setBalance(b => round2(b + payout))
-    setRoundHistory(h => [round2(mult), ...h].slice(0, 20))
-    // fake feed rows settle for the round: ~45% cash green, the rest grey out
+  // ---------- flow（服务器权威：雷位/累乘/派彩全走后端；余额只认 balanceAfter）----------
+  async function apiPost(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
+    return data
+  }
+
+  // 单局收尾：历史条 + 假 feed 结算（展示用），phase 置 done
+  function finishRound(finalMult) {
+    setRoundHistory(h => [round2(finalMult), ...h].slice(0, 20))
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
       : { ...b, status: 'crashed' }))
     phaseRef.current = 'done'; setPhase('done')
   }
 
-  function start() {
-    if (phaseRef.current === 'playing' || bet > balance || bet < 1) return
-    ensureAudio()
-    setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
-    setBalance(b => round2(b - bet))
+  async function start() {
+    if (phaseRef.current === 'playing' || busyRef.current || bet < 1 || (serverBalance != null && bet > serverBalance)) return
+    busyRef.current = true
+    ensureAudio(); setNetErr(null)
+    setFeedBets(makeFeedBots())
+    let data
+    try {
+      data = await apiPost('/round/goal/start', { amount: bet, tier: tierRef.current, idempotencyKey: genIdemKey() })
+    } catch (e) { setNetErr(e.message); busyRef.current = false; return }
+    roundIdRef.current = data.roundId; setRoundId(data.roundId)
+    if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))   // 余额只认后端
     picksRef.current = []; setPicks([])
     cumRef.current = 1; setCum(1)
     setBustInfo(null)
     revealingRef.current = false; setRevealing(false)
     phaseRef.current = 'playing'; setPhase('playing')
+    busyRef.current = false
     if (autoRef.current) later(autoStep, 450)
   }
 
-  function pickCell(row) {
-    if (phaseRef.current !== 'playing' || revealingRef.current) return
-    const bombs = drawBombRows(TIERS[tierRef.current].bombs)   // draw first — SFX randoms must not sit ahead
+  async function pickCell(row) {
+    if (phaseRef.current !== 'playing' || revealingRef.current || busyRef.current) return
+    busyRef.current = true
     revealingRef.current = true; setRevealing(true)
     playRun()
+    let data
+    try {
+      data = await apiPost('/round/goal/pick', { roundId: roundIdRef.current, row })
+    } catch (e) {
+      revealingRef.current = false; setRevealing(false); busyRef.current = false
+      setNetErr(e.message); return
+    }
+    // 短暂揭示动画（视觉保留，结果数据来自后端）
+    await new Promise(r => setTimeout(r, 320))
+    revealingRef.current = false; setRevealing(false); busyRef.current = false
 
-    later(() => {
-      revealingRef.current = false; setRevealing(false)
-      if (bombs.has(row)) {
-        setBustInfo({ col: picksRef.current.length, bombs: [...bombs], picked: row })
-        settleMoney(0)
-        playTackle()
+    if (data.safe === false) {
+      // 踩雷终局：后端返回本列雷行
+      setBustInfo({ col: data.col, bombs: data.bombs || [], picked: row })
+      finishRound(0)
+      playTackle()
+    } else {
+      cumRef.current = data.cum; setCum(data.cum)
+      const np = [...picksRef.current, row]; picksRef.current = np; setPicks(np)
+      if (data.cleared) {
+        // 走满 7 列自动结算（后端已钳制 payout + 记 balanceAfter）
+        if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))
+        finishRound(data.cum)
+        playWin()
       } else {
-        cumRef.current *= stepMult(tierRef.current)
-        setCum(cumRef.current)
-        const np = [...picksRef.current, row]
-        picksRef.current = np; setPicks(np)
-        if (np.length >= COLS) {
-          settleMoney(cumRef.current)   // 走满 7 列自动按最终累乘结算
-          playWin()
-        } else {
-          playPass()
-          if (autoRef.current) later(autoStep, 600)
-        }
+        playPass()
+        if (autoRef.current) later(autoStep, 600)
       }
-    }, 350)
+    }
   }
 
   function autoStep() {
@@ -227,10 +249,17 @@ export default function Goal({ balance, setBalance, onBack }) {
     if (next && phaseRef.current === 'playing' && !revealingRef.current) later(autoStep, 300)
   }
 
-  function cashOut() {
-    if (phaseRef.current !== 'playing' || revealingRef.current) return
-    settleMoney(cumRef.current)
+  async function cashOut() {
+    if (phaseRef.current !== 'playing' || revealingRef.current || busyRef.current) return
+    busyRef.current = true
+    let data
+    try { data = await apiPost('/round/goal/cashout', { roundId: roundIdRef.current }) }
+    catch (e) { setNetErr(e.message); busyRef.current = false; return }
+    if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))   // 余额只认后端
+    cumRef.current = data.cum; setCum(data.cum)
+    finishRound(data.cum)
     playCash()
+    busyRef.current = false
   }
 
   function switchTier(t) {   // 局中锁
@@ -303,7 +332,7 @@ export default function Goal({ balance, setBalance, onBack }) {
         </svg>
 
         {/* ---- top bar（共享件；特有件：即时兑现指示 pill 经 rightExtra 原样传）---- */}
-        <GameTopBar gameName="GOAL" band={GOAL.band} onBack={onBack} rightExtra={
+        <GameTopBar gameName="GOAL" band={GOAL.band} onBack={onBack} onFairness={() => setFairOpen(true)} rightExtra={
           <span style={{
             padding: '3px 12px', borderRadius: RADIUS.pill,
             background: GOAL.win, color: '#083a1b',
@@ -311,6 +340,7 @@ export default function Goal({ balance, setBalance, onBack }) {
             flex: '0 0 auto',
           }}>+{(playing ? cashable : 0).toFixed(2)} USD</span>
         } />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="GOAL" playerToken={playerToken} game="goal" />
 
         {/* ---- middle zone: flexes to fill the card, keeps the grid group as
              the vertical visual center; leftover space is absorbed here ---- */}
@@ -501,14 +531,19 @@ export default function Goal({ balance, setBalance, onBack }) {
               <span style={{ fontSize: 12, opacity: 0.92 }}>{cashable.toFixed(2)} USD</span>
             </button>
           ) : (
-            <button type="button" onClick={start} disabled={bet > balance || bet < 1} style={{
+            <button type="button" onClick={start} disabled={bet < 1 || (serverBalance != null && bet > serverBalance)} style={{
               minWidth: isMobile ? 170 : 230, padding: '11px 0', borderRadius: RADIUS.pill,
               background: GOAL.bet, color: COLORS.white,
               border: '1px solid rgba(255,255,255,0.35)',
               fontSize: 14, fontWeight: 900, letterSpacing: 1,
-              cursor: bet > balance || bet < 1 ? 'not-allowed' : 'pointer',
-              opacity: bet > balance || bet < 1 ? 0.55 : 1,
+              cursor: (bet < 1 || (serverBalance != null && bet > serverBalance)) ? "not-allowed" : "pointer",
+              opacity: (bet < 1 || (serverBalance != null && bet > serverBalance)) ? 0.55 : 1,
             }}>▷ BET</button>
+          )}
+          {netErr && (
+            <div style={{
+              marginTop: 8, color: '#ff8a9a', fontSize: 12, fontWeight: 700, textAlign: 'center',
+            }}>{netErr}</div>
           )}
         </div>
       </Panel>
@@ -530,7 +565,7 @@ export default function Goal({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Goal</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
 

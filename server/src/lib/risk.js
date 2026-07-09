@@ -1,5 +1,6 @@
 import cfg from '../config/risk.js';
 import { calcMultiplier, GRID } from '../game/mines.js';
+import { stepMult as goalStepMult, COLS as GOAL_COLS } from '../game/goal.js';
 
 export class RiskError extends Error {
   constructor(code, message) { super(message); this.name = 'RiskError'; this.code = code; this.status = 400; }
@@ -46,14 +47,19 @@ export function assertPayoutCap(game, payout) {
  * @param {number|string} [mineCount] mines 必传
  * @returns {number}
  */
-export function potentialPayout(game, betAmount, mineCount) {
+export function potentialPayout(game, betAmount, extra) {
   const bet = Number(betAmount);
   const L = limitsFor(game);
   const cap = Number(L.maxPayout);
   if (game === 'mines') {
-    const m = Number(mineCount);
+    // extra = mineCount：满清倍数 calcMultiplier(25-mineCount, mineCount)
+    const m = Number(extra);
     const fullClearMult = calcMultiplier(GRID - m, m);
     return Math.min(bet * fullClearMult, cap);
+  }
+  if (game === 'goal') {
+    // extra = tier（'sm'|'md'|'lg'）：满清倍数 = stepMult(tier)^COLS（有界）
+    return Math.min(bet * goalStepMult(extra) ** GOAL_COLS, cap);
   }
   // hilo（及任何配了 exposureMult 的游戏）：潜在 = bet × exposureMult，clamp cap。
   // 理论无界的游戏用这个"代表性上限"记敞口，真超的尾部风险由 cashout 的 payout cap 兜。

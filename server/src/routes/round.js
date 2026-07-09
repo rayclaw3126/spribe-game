@@ -58,6 +58,7 @@ import {
   SKIPS_PER_ROUND,
 } from '../game/hilo.js';
 import { drawKeno, kenoPayout } from '../game/keno.js';
+import { stepMult as goalStepMult, deriveBombRows, TIERS as GOAL_TIERS, COLS as GOAL_COLS } from '../game/goal.js';
 
 const router = Router();
 
@@ -956,14 +957,17 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
 async function computeOpenExposure(client, playerId) {
   const res = await client.query(
     `SELECT bet_amount, game, result FROM rounds
-      WHERE player_id = $1 AND game IN ('mines','hilo') AND status = 'playing'
+      WHERE player_id = $1 AND game IN ('mines','hilo','goal') AND status = 'playing'
       FOR UPDATE`,
     [playerId]
   );
   let total = 0;
   for (const r of res.rows) {
-    const mineCount = r.game === 'mines' ? r.result?.mineCount : undefined;
-    total += potentialPayout(r.game, r.bet_amount, mineCount);
+    // extra：mines 取 mineCount、goal 取 tier；hilo 不需要（走 exposureMult）
+    let extra;
+    if (r.game === 'mines') extra = r.result?.mineCount;
+    else if (r.game === 'goal') extra = r.result?.tier;
+    total += potentialPayout(r.game, r.bet_amount, extra);
   }
   return { total, count: res.rowCount };
 }
@@ -1740,6 +1744,283 @@ router.post('/hilo/cashout', requireAuth, requireType('player'), async (req, res
   }
 });
 
+// ==================================================================
+// Goal（射门闯关）—— 多步局：7 列逐列避雷累乘。差异于 mines：雷【按列现派】
+// （result 永不落未来列雷位），派彩用【钳制】型 cap（不作废熬过多列的赢局）。
+// ==================================================================
+
+/** 按幂等键查询已存在的 goal 局（跨事务的普通查询，不加锁），供 start 幂等返回 */
+async function findGoalBetByIdempotencyKey(idempotencyKey) {
+  const result = await query(
+    `SELECT b.id AS bet_id, b.round_id, b.player_id,
+            r.result, r.result_hash, r.client_seed, r.status
+       FROM bets b
+       JOIN rounds r ON r.id = b.round_id
+      WHERE b.idempotency_key = $1 AND r.game = 'goal'`,
+    [idempotencyKey]
+  );
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+/** 按 roundId 取一局 goal，行锁 FOR UPDATE，并校验所属玩家 */
+async function lockGoalRound(client, roundId, playerId) {
+  const result = await client.query('SELECT * FROM rounds WHERE id = $1 FOR UPDATE', [roundId]);
+  if (result.rowCount === 0) throw httpError(404, '该局不存在');
+  const round = result.rows[0];
+  if (round.game !== 'goal') throw httpError(400, '该局不是 goal 游戏');
+  if (String(round.player_id) !== String(playerId)) throw httpError(403, '无权访问该局');
+  return round;
+}
+
+// ------------------------------------------------------------------
+// POST /round/goal/start —— 开局：选 tier（每列雷数，局中锁），建有状态会话
+// 说明：不派任何雷（按列现派，result 里没有未来雷位）。serverSeed 只落库，reveal 前绝不返回。
+// ------------------------------------------------------------------
+router.post('/goal/start', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { amount, tier, idempotencyKey } = req.body || {};
+    const amountNum = Number(amount);
+
+    if (!idempotencyKey) {
+      return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
+    }
+    if (!amountNum || !(amountNum > 0)) {
+      return res.status(400).json({ error: '下注金额必须大于 0' });
+    }
+    if (!GOAL_TIERS[tier]) {
+      return res.status(400).json({ error: 'tier 必须是 sm / md / lg' });
+    }
+
+    // 风控前置：注额超限直接拒
+    assertBetWithinLimits('goal', amountNum.toFixed(2));
+
+    // 1. 幂等先查
+    const existing = await findGoalBetByIdempotencyKey(idempotencyKey);
+    if (existing) {
+      return res.json({
+        roundId: existing.round_id,
+        serverSeedHash: existing.result_hash,
+        clientSeed: existing.client_seed,
+        nonce: existing.result?.nonce,
+        tier: existing.result?.tier,
+        balanceAfter: await getBalance(playerId),
+        idempotent: true,
+      });
+    }
+
+    try {
+      const result = await withTransaction(async (client) => {
+        // 2. claimNonce（锁 player_seeds）
+        await ensureActiveSeed(client, playerId);
+        const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
+
+        const amountStr = amountNum.toFixed(2);
+
+        // 敞口闸（debit 前）：goal 潜在 = min(bet×stepMult(tier)^7, cap)。锁序 player_seeds→rounds→wallets。
+        const { total: openTotal, count: openCount } = await computeOpenExposure(client, playerId);
+        assertExposureWithinLimit('goal', openTotal, openCount, potentialPayout('goal', amountStr, tier));
+
+        // 3. 建 round：status='playing'，result 存 tier/picks/cum/step/nonce（无任何雷位）
+        const roundResult = await client.query(
+          `INSERT INTO rounds (game, player_id, bet_amount, client_seed, server_seed, result_hash, payout, status, result)
+           VALUES ('goal', $1, $2::numeric, $3, $4, $5, NULL, 'playing', $6::jsonb)
+           RETURNING id`,
+          [
+            playerId,
+            amountStr,
+            clientSeed,
+            serverSeed,
+            serverSeedHash,
+            JSON.stringify({ tier, picks: [], cum: 1, step: 0, nonce, status: 'playing' }),
+          ]
+        );
+        const roundId = roundResult.rows[0].id;
+
+        // 4. 扣钱
+        const { balanceAfter } = await debit(client, {
+          playerId,
+          amount: amountStr,
+          type: 'goal_bet',
+          idempotencyKey,
+          roundId,
+        });
+
+        // 5. 建 bet（未结算，pending）
+        await client.query(
+          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome)
+           VALUES ($1, $2, $3::numeric, $4, 'pending')`,
+          [roundId, playerId, amountStr, idempotencyKey]
+        );
+
+        return { roundId, serverSeedHash, clientSeed, nonce, tier, balanceAfter };
+      });
+
+      return res.json({ ...result, idempotent: false });
+    } catch (err) {
+      if (err.code === '23505') {
+        const existingAfterConflict = await findGoalBetByIdempotencyKey(idempotencyKey);
+        if (existingAfterConflict) {
+          return res.json({
+            roundId: existingAfterConflict.round_id,
+            serverSeedHash: existingAfterConflict.result_hash,
+            clientSeed: existingAfterConflict.client_seed,
+            nonce: existingAfterConflict.result?.nonce,
+            tier: existingAfterConflict.result?.tier,
+            balanceAfter: await getBalance(playerId),
+            idempotent: true,
+          });
+        }
+      }
+      throw err;
+    }
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// POST /round/goal/pick —— 推进一列：服务器【按列现派】本列雷行，避雷则累乘、踩雷终局。
+// 说明：每次对该 roundId 行锁；tier 从 round.result 读（不收客户端，天然锁）；走满 7 列自动结算（钳制 cap）。
+// ------------------------------------------------------------------
+router.post('/goal/pick', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { roundId, row } = req.body || {};
+    const rowNum = Number(row);
+
+    if (!roundId) {
+      return res.status(400).json({ error: '参数不完整：roundId 必填' });
+    }
+    if (!Number.isInteger(rowNum) || rowNum < 0 || rowNum >= 4) {
+      return res.status(400).json({ error: 'row 必须是 0–3 的整数' });
+    }
+
+    const result = await withTransaction(async (client) => {
+      const round = await lockGoalRound(client, roundId, playerId);
+      const r = round.result || {};
+
+      // 已终局：bust 幂等返回，cashed 拒绝
+      if (round.status !== 'playing') {
+        if (round.status === 'bust') {
+          return { safe: false, col: r.bustCol, bombs: r.bombs, cum: r.cum, serverSeedHash: round.result_hash, clientSeed: round.client_seed, nonce: r.nonce, roundId: round.id, alreadyDone: true };
+        }
+        throw httpError(400, '该局已结束，无法继续');
+      }
+
+      const tier = r.tier;
+      const bombs = GOAL_TIERS[tier].bombs;
+      const step = r.step;
+      // 按列现派：本列雷行（tier 从 result 读，客户端改不了）
+      const bombSet = deriveBombRows(round.server_seed, round.client_seed, r.nonce, step, bombs);
+
+      if (bombSet.has(rowNum)) {
+        // 踩雷终局：reveal 本列雷、全额下注进入链式分成
+        const newResult = { ...r, picks: [...(r.picks || []), rowNum], bustCol: step, bustRow: rowNum, bombs: [...bombSet], status: 'bust' };
+        await client.query(`UPDATE rounds SET status = 'bust', result = $2::jsonb, payout = '0.00' WHERE id = $1`, [round.id, JSON.stringify(newResult)]);
+        await client.query(`UPDATE bets SET outcome = 'lose' WHERE round_id = $1`, [round.id]);
+        const playerResult = await client.query('SELECT agent_id FROM players WHERE id = $1', [playerId]);
+        const agentId = playerResult.rows[0]?.agent_id;
+        if (agentId) {
+          await distributeLoss(client, { playerId, agentId, roundId: round.id, lossAmount: round.bet_amount });
+        }
+        return { safe: false, col: step, bombs: [...bombSet], bustRow: rowNum, cum: r.cum, serverSeedHash: round.result_hash, clientSeed: round.client_seed, nonce: r.nonce, roundId: round.id };
+      }
+
+      // 安全：累乘、推进
+      const newStep = step + 1;
+      const newCum = r.cum * goalStepMult(tier);
+      const newPicks = [...(r.picks || []), rowNum];
+
+      if (newStep >= GOAL_COLS) {
+        // 走满 7 列自动结算（钳制 cap——别漏！照 mines 揭满后门教训）
+        const payoutResult = await client.query(
+          'SELECT LEAST(round($1::numeric * $2::numeric, 2), $3::numeric) AS payout',
+          [round.bet_amount, String(newCum), String(maxPayoutFor('goal'))]
+        );
+        const payout = payoutResult.rows[0].payout;
+        const { balanceAfter } = await credit(client, {
+          playerId,
+          amount: payout,
+          type: 'goal_payout',
+          idempotencyKey: `goal-cash-${round.id}`,
+          roundId: round.id,
+        });
+        const newResult = { ...r, picks: newPicks, cum: newCum, step: newStep, status: 'cashed' };
+        await client.query(`UPDATE rounds SET status = 'cashed', result = $2::jsonb, payout = $3::numeric WHERE id = $1`, [round.id, JSON.stringify(newResult), payout]);
+        await client.query(`UPDATE bets SET outcome = 'win' WHERE round_id = $1`, [round.id]);
+        return { safe: true, cleared: true, col: step, mult: newCum, cum: newCum, payout, balanceAfter, serverSeedHash: round.result_hash, clientSeed: round.client_seed, nonce: r.nonce, roundId: round.id };
+      }
+
+      // 未走满：只落地进度（不 reveal 本列雷）
+      const newResult = { ...r, picks: newPicks, cum: newCum, step: newStep };
+      await client.query(`UPDATE rounds SET result = $2::jsonb WHERE id = $1`, [round.id, JSON.stringify(newResult)]);
+      return { safe: true, cleared: false, col: step, mult: newCum, cum: newCum, step: newStep };
+    });
+
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// POST /round/goal/cashout —— 任意列兑现：payout = 钳制(bet × cum, cap)
+// ------------------------------------------------------------------
+router.post('/goal/cashout', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { roundId } = req.body || {};
+    if (!roundId) {
+      return res.status(400).json({ error: '参数不完整：roundId 必填' });
+    }
+
+    const result = await withTransaction(async (client) => {
+      const round = await lockGoalRound(client, roundId, playerId);
+      const r = round.result || {};
+
+      if (round.status === 'bust') {
+        throw httpError(400, '该局已踩雷结束，无法兑现');
+      }
+      if (round.status === 'cashed') {
+        return { payout: round.payout, balanceAfter: await getBalance(playerId), cum: r.cum, serverSeedHash: round.result_hash, clientSeed: round.client_seed, nonce: r.nonce, roundId: round.id, alreadyDone: true };
+      }
+
+      // status === 'playing'：钳制型 cap（不作废赢局）
+      const payoutResult = await client.query(
+        'SELECT LEAST(round($1::numeric * $2::numeric, 2), $3::numeric) AS payout',
+        [round.bet_amount, String(r.cum), String(maxPayoutFor('goal'))]
+      );
+      const payout = payoutResult.rows[0].payout;
+      const { balanceAfter } = await credit(client, {
+        playerId,
+        amount: payout,
+        type: 'goal_payout',
+        idempotencyKey: `goal-cash-${round.id}`,
+        roundId: round.id,
+      });
+      const newResult = { ...r, status: 'cashed' };
+      await client.query(`UPDATE rounds SET status = 'cashed', payout = $2::numeric, result = $3::jsonb WHERE id = $1`, [round.id, payout, JSON.stringify(newResult)]);
+      await client.query(`UPDATE bets SET outcome = 'win' WHERE round_id = $1`, [round.id]);
+
+      return { payout, balanceAfter, cum: r.cum, serverSeedHash: round.result_hash, clientSeed: round.client_seed, nonce: r.nonce, roundId: round.id };
+    });
+
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return next(err);
+  }
+});
+
 // 局进行中时对外可见的 result 字段【白名单】（防提款机漏洞）：
 // 非终局绝不返回任何能推出未开区域的字段，只给"已发生/当前态"。漏一个即是洞，故用白名单不用黑名单。
 const PLAYING_RESULT_WHITELIST = {
@@ -1747,6 +2028,8 @@ const PLAYING_RESULT_WHITELIST = {
   mines: ['revealed', 'mineCount', 'nonce'],
   // hilo：当前明牌 + 已猜历史 + 累乘 / 步数 / 剩余 skip / nonce（后续牌按需 deriveCard 派生，不落库、不可推）
   hilo: ['step', 'card', 'cum', 'skips', 'history', 'nonce', 'status'],
+  // goal：tier(公开)/已过列选行/累乘/步数/nonce（雷行按列现派、result 本就无未来雷位；白名单为纵深防御）
+  goal: ['tier', 'picks', 'cum', 'step', 'nonce', 'status'],
 };
 const TERMINAL_STATUSES = new Set(['settled', 'cashed', 'bust']);
 
