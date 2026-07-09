@@ -7,7 +7,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { query, withTransaction } from '../db.js';
 import { debit, credit } from '../lib/wallet.js';
-import { assertBetWithinLimits, assertPayoutCap } from '../lib/risk.js';
+import { assertBetWithinLimits, assertPayoutCap, potentialPayout, assertExposureWithinLimit } from '../lib/risk.js';
 import { ensureActiveSeed, claimNonce } from '../lib/seeds.js';
 import { distributeLoss } from '../lib/commission.js';
 import { requireAuth, requireType } from '../middleware/auth.js';
@@ -771,6 +771,28 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
 });
 
 /** 按幂等键查询已存在的 mines 局（跨事务的普通查询，不加锁），只用于 start 的幂等返回 */
+/**
+ * 查该玩家当前所有未结算多步局（mines/hilo status='playing'）的潜在赔付总额 + 局数。
+ * FOR UPDATE 锁住这些行，防并发 start 各自读到旧快照绕过敞口上限。
+ * 锁序：调用方在 claimNonce(player_seeds) 之后、debit(wallets) 之前调用 →
+ *       全局固定 player_seeds → rounds → wallets，wallets 永远最后，无环、不死锁。
+ * @returns {Promise<{ total:number, count:number }>}
+ */
+async function computeOpenExposure(client, playerId) {
+  const res = await client.query(
+    `SELECT bet_amount, game, result FROM rounds
+      WHERE player_id = $1 AND game IN ('mines','hilo') AND status = 'playing'
+      FOR UPDATE`,
+    [playerId]
+  );
+  let total = 0;
+  for (const r of res.rows) {
+    const mineCount = r.game === 'mines' ? r.result?.mineCount : undefined;
+    total += potentialPayout(r.game, r.bet_amount, mineCount);
+  }
+  return { total, count: res.rowCount };
+}
+
 async function findMinesBetByIdempotencyKey(idempotencyKey) {
   const result = await query(
     `SELECT b.id AS bet_id, b.round_id, b.player_id,
@@ -850,6 +872,10 @@ router.post('/mines/start', requireAuth, requireType('player'), async (req, res,
         const minePositions = deriveMines(serverSeed, clientSeed, nonce, minesNum);
 
         const amountStr = amountNum.toFixed(2);
+
+        // 敞口闸（在 debit 之前，超敞口不扣钱不开局）：锁序 player_seeds→rounds→wallets。
+        const { total: openTotal, count: openCount } = await computeOpenExposure(client, playerId);
+        assertExposureWithinLimit('mines', openTotal, openCount, potentialPayout('mines', amountStr, minesNum));
 
         // 3. 建 round：有状态会话，status='playing'，result 里存雷位置/已揭格/雷数/nonce
         const roundResult = await client.query(
@@ -1229,6 +1255,10 @@ router.post('/hilo/start', requireAuth, requireType('player'), async (req, res, 
         const firstCard = deriveCard(serverSeed, clientSeed, nonce, 0);
 
         const amountStr = amountNum.toFixed(2);
+
+        // 敞口闸（在 debit 之前，超敞口不扣钱不开局）：锁序 player_seeds→rounds→wallets。
+        const { total: openTotal, count: openCount } = await computeOpenExposure(client, playerId);
+        assertExposureWithinLimit('hilo', openTotal, openCount, potentialPayout('hilo', amountStr));
 
         // 3. 建 round：有状态会话，status='playing'，result 里存 step/明牌/累乘/skip 次数/历史/nonce
         const roundResult = await client.query(
