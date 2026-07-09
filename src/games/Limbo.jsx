@@ -13,6 +13,7 @@ import WinToast from '../components/shell/WinToast'
 import badgeWinUrl from '../assets/shared/badge_win.png'
 import badgeLoseUrl from '../assets/shared/badge_lose.png'
 import bayBgUrl from '../assets/shared/bay_bg.png'
+import SeedFairness from '../components/shell/SeedFairness'
 
 const COLOR = '#16C784'
 const FILL_TOP = '#5DCAA5'
@@ -69,6 +70,7 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
   const [muted, setMuted] = useState(false)
   const [toasts, setToasts] = useState([])
   const [proof, setProof] = useState(null)   // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
+  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
   const [bgmOn, toggleBgm] = useBgm()
 
   function pushToast(label) {
@@ -204,8 +206,8 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
       return
     }
 
-    const { finalMult, win, payout, balanceAfter, serverSeed, commitHash } = data
-    pendingRef.current = { win, payout: Number(payout), balanceAfter, serverSeed, commitHash }
+    const { finalMult, win, payout, balanceAfter, serverSeedHash, nonce } = data
+    pendingRef.current = { win, payout: Number(payout), balanceAfter, serverSeedHash, nonce }
 
     setFeedBets(makeFeedBots())   // fresh fake round rides along (display only; after the roll)
     animRef.current = { to: finalMult, start: performance.now(), bet, t }
@@ -229,7 +231,7 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
     const profit = win ? pending.payout : 0
     // 余额只认后端 balanceAfter，不本地加减
     if (pending.balanceAfter != null) setServerBalance(Number(pending.balanceAfter))
-    if (pending.serverSeed) setProof({ serverSeed: pending.serverSeed, commitHash: pending.commitHash })
+    if (pending.serverSeedHash) setProof({ serverSeedHash: pending.serverSeedHash, nonce: pending.nonce })
     setResult({ mult: to, win, profit })
     setRoundHistory(h => [to, ...h].slice(0, 20))
     // fake feed rows settle for the round: ~45% cash green, the rest grey out
@@ -569,6 +571,21 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
             50% { color: #EF4444; }
           }
         `}</style>
+        {/* ⚖ 可验证公平 — game-card top-right，与音频钮同排（绿系区分） */}
+        <button
+          type="button"
+          onClick={() => setFairOpen(true)}
+          style={{
+            position: 'absolute', top: isDesk ? 32 : 10, right: 106, zIndex: 3,
+            width: 40, height: 40, borderRadius: '50%',
+            background: 'rgba(53,208,127,0.18)', color: '#35d07f',
+            border: '1px solid rgba(53,208,127,0.5)', fontSize: 18, fontWeight: 900,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}
+          title="可验证公平"
+        >⚖</button>
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="ODDS CLIMB" playerToken={playerToken} game="limbo" />
+
         {/* BGM toggle — game-card top-right, anchored to the card not the meter */}
         <button
           type="button"
@@ -637,7 +654,7 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
             textAlign: 'center', marginTop: 8, fontSize: 10, fontWeight: 600,
             color: 'rgba(255,255,255,0.4)', wordBreak: 'break-all',
           }}>
-            可验证 · serverSeed: {proof.serverSeed?.slice(0, 16)}… · hash: {proof.commitHash?.slice(0, 16)}…
+            可验证 · hash: {proof.serverSeedHash?.slice(0, 16)}… · nonce: {proof.nonce}
           </div>
         )}
         </div>{/* /middle zone */}

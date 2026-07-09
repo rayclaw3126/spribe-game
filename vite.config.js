@@ -26,6 +26,11 @@ export default defineConfig({
         target: 'http://127.0.0.1:4000',
         changeOrigin: true,
       },
+      // 可验证公平种子接口：/seed/current(GET) /rotate /client，同源代理转发。
+      '/seed': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+      },
     },
   },
 })

@@ -7,6 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 
 // 单M2: Dribble gameplay — adjustable defenders, hypergeometric multipliers,
@@ -82,6 +83,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [cashedOut, setCashedOut] = useState(false)
   const [proof, setProof] = useState(null)      // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
+  const [fairOpen, setFairOpen] = useState(false)
   const [toastMsg, setToastMsg] = useState('')
   const [, setShaking] = useState(false)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
@@ -195,7 +197,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
       })
       setRoundId(data.roundId)
       setServerBalance(Number(data.balanceAfter))
-      setProof({ commitHash: data.commitHash })
+      setProof({ serverSeedHash: data.serverSeedHash, nonce: data.nonce })
       setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
       setRevealed([])
       setMinesRevealed(null)
@@ -219,7 +221,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
         setExploded(idx)
         setMinesRevealed(data.mines)
         setRevealed(prev => [...new Set([...prev, idx, ...data.mines])])
-        setProof(p => ({ ...p, serverSeed: data.serverSeed, clientSeed: data.clientSeed }))
+        setProof(p => ({ ...p, serverSeedHash: data.serverSeedHash, nonce: data.nonce }))
         finishRound(0)
         playTackle()
         triggerShake()
@@ -231,7 +233,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
           setMinesRevealed(data.mines)
           setRevealed(prev => [...new Set([...prev, ...data.mines])])
           setServerBalance(Number(data.balanceAfter))
-          setProof(p => ({ ...p, serverSeed: data.serverSeed }))
+          setProof(p => ({ ...p, serverSeedHash: data.serverSeedHash }))
           finishRound(data.mult)
           playWin()
         } else {
@@ -254,7 +256,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
       setMinesRevealed(data.mines)
       setRevealed(prev => [...new Set([...prev, ...data.mines])])
       setServerBalance(Number(data.balanceAfter))
-      setProof(p => ({ ...p, serverSeed: data.serverSeed, clientSeed: data.clientSeed }))
+      setProof(p => ({ ...p, serverSeedHash: data.serverSeedHash, nonce: data.nonce }))
       finishRound(data.mult)
       playCash()
     } catch (err) {
@@ -379,7 +381,8 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
         {pitchGlow}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar gameName="DRIBBLE" band={MINES.band} onBack={onBack} />
+        <GameTopBar gameName="DRIBBLE" band={MINES.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="DRIBBLE" playerToken={playerToken} game="mines" />
 
         {/* ---- middle zone: flexes to fill the card, keeps the grid group as
              the vertical visual center; leftover space is absorbed here ---- */}
@@ -514,12 +517,12 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
 
         {/* ---- 可验证公平：显示上一局的 serverSeed + commit hash，玩家可用
              clientSeed/nonce/serverSeed 自行重算校验雷位置未被篡改 ---- */}
-        {proof && (proof.serverSeed || proof.commitHash) && (
+        {proof && proof.serverSeedHash && (
           <div style={{
             textAlign: 'center', marginTop: 8, fontSize: 10, fontWeight: 600,
             color: 'rgba(255,255,255,0.5)', wordBreak: 'break-all', position: 'relative', zIndex: 1,
           }}>
-            可验证 · {proof.serverSeed ? `serverSeed: ${proof.serverSeed.slice(0, 16)}… · ` : ''}hash: {(proof.commitHash || '').slice(0, 16)}…
+            可验证 · hash: {(proof.serverSeedHash || '').slice(0, 16)}…{proof.nonce != null ? ` · nonce: ${proof.nonce}` : ''}
           </div>
         )}
 

@@ -7,6 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 
 // 单P2: Free Kick gameplay — three risk tiers, binomial physics drop,
 // adjustable pins, RTP-calibrated paytables.
@@ -189,6 +190,7 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
   const [toasts, setToasts] = useState([])
   const [flash, setFlash] = useState(null)         // { tier, k } landing cell glow
   const [proof, setProof] = useState(null)         // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
+  const [fairOpen, setFairOpen] = useState(false)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const ballsRef = useRef([])
   const rafRef = useRef(null)
@@ -241,7 +243,7 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
     setFlash({ tier: ball.tier, k: ball.k })
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
     flashTimerRef.current = setTimeout(() => setFlash(null), 600)
-    setProof({ serverSeed: ball.serverSeed, commitHash: ball.commitHash })
+    setProof({ serverSeedHash: ball.serverSeedHash, nonce: ball.nonce })
   }
   function frame(now) {
     const list = ballsRef.current
@@ -308,11 +310,11 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
       return
     }
 
-    const { path, bucket, mult, payout, balanceAfter, serverSeed, commitHash } = data
+    const { path, bucket, mult, payout, balanceAfter, serverSeedHash, nonce } = data
     const ball = {
       id: ++ballIdRef.current, tier, bet, path, k: bucket, pins: rows,
       mult: Number(mult), payout: Number(payout), balanceAfter,
-      serverSeed, commitHash,
+      serverSeedHash, nonce,
       start: null, seg: -1, rot: 0, node: null,
     }
     ballsRef.current = [...ballsRef.current, ball]
@@ -489,7 +491,8 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
         {pitchScene}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar gameName="FREE KICK" band={PLINKO.band} onBack={onBack} />
+        <GameTopBar gameName="FREE KICK" band={PLINKO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="FREE KICK" playerToken={playerToken} game="plinko" />
 
         {/* ---- second row (mobile only — desktop 34px row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 2 }}>{historyStrip}</div>}
@@ -596,7 +599,7 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
             textAlign: 'center', padding: '2px 0', position: 'relative', zIndex: 1,
             fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.4)', wordBreak: 'break-all',
           }}>
-            可验证 · serverSeed: {proof.serverSeed?.slice(0, 16)}… · hash: {proof.commitHash?.slice(0, 16)}…
+            可验证 · hash: {proof.serverSeedHash?.slice(0, 16)}… · nonce: {proof.nonce}
           </div>
         )}
 

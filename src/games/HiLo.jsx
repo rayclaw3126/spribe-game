@@ -6,6 +6,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 import ballUrl from '../assets/covers/ball-3d.png'
 
 // 单HL2: Rating Hi-Lo gameplay — 1–13 probability multipliers, skip, streak
@@ -150,6 +151,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
   const [cardFlash, setCardFlash] = useState(null)   // 'win' | 'lose' | null
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [proof, setProof] = useState(null)     // 最近一局：{ commitHash, serverSeed, clientSeed } 供玩家自行验证
+  const [fairOpen, setFairOpen] = useState(false)
   const [toastMsg, setToastMsg] = useState('')
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
@@ -283,7 +285,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
       setSkips(SKIPS_PER_ROUND)
       setCardFlash(null)
       setFlipping(false)
-      setProof({ commitHash: data.commitHash })
+      setProof({ serverSeedHash: data.serverSeedHash, nonce: data.nonce })
       setPhase('playing')
       beginDeal(data.card, 'deal', null)   // state committed above — anim is a visual replay
     } catch (err) {
@@ -316,7 +318,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
           setPhase('done')          // stake already deducted at start — round over
           settleFeed()
           playWrong()
-          setProof(p => ({ ...p, serverSeed: data.serverSeed, clientSeed: data.clientSeed }))
+          setProof(p => ({ ...p, serverSeedHash: data.serverSeedHash, nonce: data.nonce }))
         }
         setFlipping(false)
         later(() => setCardFlash(null), 700)
@@ -358,7 +360,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
     try {
       const data = await apiPost('/round/hilo/cashout', { roundId })
       setServerBalance(Number(data.balanceAfter))
-      setProof(p => ({ ...p, serverSeed: data.serverSeed, clientSeed: data.clientSeed }))
+      setProof(p => ({ ...p, serverSeedHash: data.serverSeedHash, nonce: data.nonce }))
       setPhase('done')
       settleFeed()
       playCash()
@@ -497,7 +499,8 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
         {floatField}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar gameName="RATING HI-LO" band={HILO.band} onBack={onBack} />
+        <GameTopBar gameName="RATING HI-LO" band={HILO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="RATING HI-LO" playerToken={playerToken} game="hilo" />
 
         {/* ---- upper region (mobile only — desktop 34px row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 1 }}>{historyStrip}</div>}
@@ -599,12 +602,12 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
 
         {/* ---- 可验证公平：显示本局的 commit hash / serverSeed（reveal 后），
              玩家可用 clientSeed/nonce/step 自行用 deriveCard 重算校验牌序未被篡改 ---- */}
-        {proof && (proof.serverSeed || proof.commitHash) && (
+        {proof && proof.serverSeedHash && (
           <div style={{
             textAlign: 'center', marginTop: 8, fontSize: 10, fontWeight: 600,
             color: 'rgba(255,255,255,0.5)', wordBreak: 'break-all', position: 'relative', zIndex: 1,
           }}>
-            可验证 · {proof.serverSeed ? `serverSeed: ${proof.serverSeed.slice(0, 16)}… · ` : ''}hash: {(proof.commitHash || '').slice(0, 16)}…
+            可验证 · hash: {(proof.serverSeedHash || '').slice(0, 16)}…{proof.nonce != null ? ` · nonce: ${proof.nonce}` : ''}
           </div>
         )}
 

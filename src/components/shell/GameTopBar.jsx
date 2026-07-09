@@ -15,7 +15,7 @@ import { MusicNoteIcon, SpeakerIcon } from './AudioIcons'
 // 砍掉旧内联顶栏的 余额 USD / DEMO MODE pill / 文字版 How-to-Play pill。
 // 色值全部取 tokens 现组；band 缺省 DERBY.band（绿系轮次彩通用档）。
 
-export default function GameTopBar({ gameName, venue, roundId, phaseChip, subRow, onHowTo, onBack, rightExtra, band }) {
+export default function GameTopBar({ gameName, venue, roundId, phaseChip, subRow, onHowTo, onFairness, onBack, rightExtra, band }) {
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bgmOn, toggleBgm] = useBgm()
   const [muted, toggleMuted] = useSfxMuted()
@@ -96,6 +96,15 @@ export default function GameTopBar({ gameName, venue, roundId, phaseChip, subRow
   const rightBits = (
     <>
       {rightExtra}
+      {/* ⚖ 可验证公平圆钮：仅当传入 onFairness 才渲染（照 ? 钮同款，绿系区分玩法） */}
+      {onFairness && (
+        <button type="button" onClick={() => onFairness()} title="可验证公平" style={{
+          width: 28, height: 28, borderRadius: RADIUS.pill, flex: '0 0 auto',
+          background: DERBY.sel, color: '#0d2016', border: 'none',
+          fontSize: 14, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}>⚖</button>
+      )}
       {/* ? 橙圆钮：无下拉，直接触发玩法说明 */}
       <button type="button" onClick={() => onHowTo?.()} title="玩法说明" style={{
         width: 28, height: 28, borderRadius: RADIUS.pill, flex: '0 0 auto',

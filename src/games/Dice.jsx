@@ -7,6 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 
 // 单D2: Total Goals gameplay — 0–100 roll, UNDER/OVER settle, RTP-calibrated
 // payouts. Slider sets the target line (4.00–96.00); the roll is uniform on
@@ -48,6 +49,7 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
   const [toasts, setToasts] = useState([])
   const [numColor, setNumColor] = useState(null) // null | 'win' | 'lose'
   const [proof, setProof] = useState(null)       // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
+  const [fairOpen, setFairOpen] = useState(false) // 可验证公平抽屉（批B纯UI）
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const audioRef = useRef({ ctx: null, bus: null, muted: false })
@@ -256,12 +258,12 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
       return
     }
 
-    const { roll, win, payout, balanceAfter, serverSeed, commitHash } = data
+    const { roll, win, payout, balanceAfter, serverSeedHash, nonce } = data
     const pay = Number(payout)
 
     animateRoll(roll, () => {
       setServerBalance(Number(balanceAfter))   // 余额只认后端 balanceAfter，不本地加减
-      setProof({ serverSeed, commitHash })
+      setProof({ serverSeedHash, nonce })
       if (win) {
         pushToast(`开点 ${roll.toFixed(2)}`, pay)
         setNumColor('win')
@@ -389,7 +391,8 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
         {pitchScene}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar gameName="TOTAL GOALS" band={DICE.band} onBack={onBack} />
+        <GameTopBar gameName="TOTAL GOALS" band={DICE.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="TOTAL GOALS" playerToken={playerToken} game="dice" />
 
         {/* ---- roll history strip (mobile only — desktop row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 1 }}>{historyStrip}</div>}
@@ -527,7 +530,7 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
             textAlign: 'center', marginTop: 8, fontSize: 10, fontWeight: 600,
             color: 'rgba(255,255,255,0.4)', wordBreak: 'break-all',
           }}>
-            可验证 · serverSeed: {proof.serverSeed?.slice(0, 16)}… · hash: {proof.commitHash?.slice(0, 16)}…
+            可验证 · hash: {proof.serverSeedHash?.slice(0, 16)}… · nonce: {proof.nonce}
           </div>
         )}
 
