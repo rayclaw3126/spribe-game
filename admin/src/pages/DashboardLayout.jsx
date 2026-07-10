@@ -5,6 +5,7 @@ import { Outlet } from 'react-router-dom'
 import { COLORS, LAYOUT, SPACE } from '../theme/tokens.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import Sidebar from '../components/Sidebar.jsx'
+import FeedbackWidget from '../components/feedback/FeedbackWidget.jsx'
 import useIsMobile from '../hooks/useIsMobile.js'
 
 export default function DashboardLayout() {
@@ -111,6 +112,9 @@ export default function DashboardLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* 反馈悬浮入口：登录后全局显示，挂在最外层。 */}
+      <FeedbackWidget />
     </div>
   )
 }

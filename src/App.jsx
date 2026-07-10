@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import Lobby from './components/Lobby'
 import Header from './components/Header'
 import GameLogin from './pages/GameLogin'
+// 单2改：前台反馈钮暂隐藏（挪去代理后台）。组件文件保留，需要时取消注释即可恢复。
+// import FeedbackWidget from './components/feedback/FeedbackWidget'
 import Aviator from './games/Aviator'
 import Dice from './games/Dice'
 import Plinko from './games/Plinko'
@@ -78,6 +80,10 @@ export default function App() {
     return <GameLogin onLogin={handlePlayerLogin} />
   }
 
+  // 单2改：反馈悬浮入口暂隐藏（挪去代理后台）。恢复时取消下方两行 + 顶部 import 注释即可。
+  // const username = localStorage.getItem(NAME_KEY) || ''
+  // const feedback = <FeedbackWidget activeGame={activeGame} username={username} />
+
   // 已登录且选了游戏：全屏铺满，不挂 Header，也不留顶部留白。
   if (GameComponent) {
     return (
@@ -89,6 +95,7 @@ export default function App() {
           onLogout={handlePlayerLogout}
           onBack={() => setActiveGame(null)}
         />
+        {/* {feedback} */}
       </div>
     )
   }
@@ -104,6 +111,7 @@ export default function App() {
       <main style={{ paddingTop: '52px' }}>
         <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} />
       </main>
+      {/* {feedback} */}
     </div>
   )
 }
