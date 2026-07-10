@@ -6,7 +6,9 @@ export default function GameLayout({ color = '#16C784', children, sidebar }) {
   const isMobile = useIsMobile()
   return (
     <div style={{
-      maxWidth: 960, margin: '0 auto', padding: isMobile ? '16px 12px' : '32px 24px',
+      maxWidth: isMobile ? 'none' : 960,
+      margin: '0 auto',
+      padding: isMobile ? 0 : '32px 24px',   // 手机端贴满屏幕，无黑边
       animation: 'fadeIn 0.4s ease',
     }}>
       {/* Content */}
