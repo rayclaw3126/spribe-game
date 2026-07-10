@@ -3,6 +3,11 @@
 // 鉴权：提交 / 查询 / 改状态本步都只要求登录（requireAuth）；细粒度权限后续单再收紧。
 // 本步不含图片附件（下一步单独做）。
 import { Router } from 'express';
+import crypto from 'node:crypto';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import multer from 'multer';
 import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -13,6 +18,49 @@ const STATUSES = ['new', 'processing', 'resolved', 'ignored'];
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
+
+// ---------- 图片上传（multer + 存本地磁盘）----------
+// 限死大小/张数/格式防滥传；文件名用随机 hash 防猜测；只收 image/*。
+const MAX_FILES = 6;
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // 单张 ≤ 5MB
+const URL_PREFIX = '/uploads/issues'; // 对外访问前缀（index.js 用 express.static 托管）
+
+// uploads/issues/ 目录：相对 server 根（本文件在 server/src/routes/）。
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPLOAD_DIR = path.resolve(__dirname, '../../uploads/issues');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// 由 mimetype 决定扩展名（不信原文件名，防伪造/路径穿越）。
+const MIME_EXT = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+};
+
+const uploadImages = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const ext = MIME_EXT[file.mimetype] || '.img';
+      cb(null, `${crypto.randomBytes(16).toString('hex')}${ext}`);
+    },
+  }),
+  limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
+  fileFilter: (req, file, cb) => {
+    // 只放行图片；非图片一律拒（会被下面 multer 错误映射成 400）。
+    if (file.mimetype && file.mimetype.startsWith('image/')) return cb(null, true);
+    return cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'images'));
+  },
+}).array('images', MAX_FILES);
+
+// 把 multer 的各类报错映射成可读的 400 文案。
+function uploadErrorMessage(err) {
+  if (err.code === 'LIMIT_FILE_SIZE') return '单张图片超过 5MB 上限';
+  if (err.code === 'LIMIT_FILE_COUNT') return `单次最多上传 ${MAX_FILES} 张`;
+  if (err.code === 'LIMIT_UNEXPECTED_FILE') return '仅支持图片文件（image/*）';
+  return '图片上传失败';
+}
 
 // 取字符串并去空白；非字符串或空串返回 null（便于区分「没传」和「传了空」）。
 function cleanStr(raw) {
@@ -170,6 +218,83 @@ router.patch('/:id', requireAuth, async (req, res, next) => {
     return res.json({ issue: result.rows[0] });
   } catch (err) {
     if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    return next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// GET /issues/:id —— 单条详情，带它的图片列表（join issue_images）
+// ------------------------------------------------------------------
+router.get('/:id', requireAuth, async (req, res, next) => {
+  try {
+    const id = toPositiveInt(req.params?.id, 0);
+    if (!id) {
+      return res.status(400).json({ error: 'id 非法' });
+    }
+    const issueResult = await query('SELECT * FROM issues WHERE id = $1', [id]);
+    if (issueResult.rowCount === 0) {
+      return res.status(404).json({ error: '问题不存在' });
+    }
+    const imageResult = await query(
+      `SELECT id, filename, url, created_at FROM issue_images
+       WHERE issue_id = $1 ORDER BY created_at ASC, id ASC`,
+      [id]
+    );
+    return res.json({ issue: { ...issueResult.rows[0], images: imageResult.rows } });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// 在跑 multer 存盘前先拦掉不存在的 issue_id，避免落下孤儿文件。
+async function ensureIssueExists(req, res, next) {
+  try {
+    const id = toPositiveInt(req.params?.id, 0);
+    if (!id) {
+      return res.status(400).json({ error: 'id 非法' });
+    }
+    const r = await query('SELECT id FROM issues WHERE id = $1', [id]);
+    if (r.rowCount === 0) {
+      return res.status(404).json({ error: '问题不存在' });
+    }
+    req.issueId = id;
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// multer 包一层：把 LIMIT_* / 非图片等错误统一转成 400，不进全局 500。
+function runUpload(req, res, next) {
+  uploadImages(req, res, (err) => {
+    if (err) return res.status(400).json({ error: uploadErrorMessage(err) });
+    return next();
+  });
+}
+
+// ------------------------------------------------------------------
+// POST /issues/:id/images —— 给某条问题上传截图（最多 6 张，单张 ≤5MB，仅 image/*）
+// 文件名随机 hash，落盘 uploads/issues/；每张插 issue_images 一条，返回 url 列表。
+// ------------------------------------------------------------------
+router.post('/:id/images', requireAuth, ensureIssueExists, runUpload, async (req, res, next) => {
+  try {
+    const files = req.files || [];
+    if (files.length === 0) {
+      return res.status(400).json({ error: '未收到图片' });
+    }
+    const images = [];
+    for (const f of files) {
+      const url = `${URL_PREFIX}/${f.filename}`;
+      const r = await query(
+        `INSERT INTO issue_images (issue_id, filename, url)
+         VALUES ($1, $2, $3)
+         RETURNING id, filename, url, created_at`,
+        [req.issueId, f.filename, url]
+      );
+      images.push(r.rows[0]);
+    }
+    return res.status(201).json({ images });
+  } catch (err) {
     return next(err);
   }
 });

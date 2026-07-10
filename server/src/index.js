@@ -2,6 +2,8 @@
 // 说明：/health 是纯进程存活探针；此外挂载登录鉴权（/auth）和一局协议（/round）路由。
 import 'dotenv/config';
 import http from 'http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
@@ -16,6 +18,9 @@ import issuesRouter from './routes/issues.js';
 import { startAviatorHub } from './ws/aviatorHub.js';
 import { startMomentumHub } from './ws/momentumHub.js';
 import { RiskError } from './lib/risk.js';
+
+// ESM 下手动还原 __dirname，供 express.static 定位 uploads/ 目录。
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 
@@ -43,6 +48,11 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// 静态托管上传的问题截图：uploads/ 目录映射到 /uploads 访问路径。
+// 例：uploads/issues/<hash>.png → GET /uploads/issues/<hash>.png
+// 只读托管，不接受这里的写入；上传统一走 POST /issues/:id/images。
+app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 
 // 登录限流：15 分钟内同一来源最多 20 次尝试，防暴力破解密码。
 // 只挂在 /auth/login 这一条路径上，其余接口（含 /auth 下其它路由，若未来新增）不受影响。
