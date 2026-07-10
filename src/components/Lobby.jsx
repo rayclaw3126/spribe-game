@@ -60,7 +60,7 @@ const TABS = [
 
 export default function Lobby({ onSelect, balance }) {
   const isMobile = useIsMobile()
-  const [tab, setTab] = useState('hot')
+  const [tab, setTab] = useState('all')
   const shown = tab === 'all' ? [...TOP_IDS.map(id => GAMES.find(g => g.id === id)), ...GAMES.filter(g => !TOP_IDS.includes(g.id))]
     : tab === 'hot' ? GAMES.filter(g => HOT_IDS.includes(g.id))
       : tab === 'new' ? GAMES.filter(g => NEW_IDS.includes(g.id))

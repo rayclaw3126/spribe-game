@@ -438,7 +438,7 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
         {speedLines}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar gameName="STREAK ROLL" band={HOTLINE.bar} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <GameTopBar balance={serverBalance ?? 0} gameName="STREAK ROLL" band={HOTLINE.bar} onBack={onBack} onFairness={() => setFairOpen(true)} />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="STREAK ROLL" playerToken={playerToken} game="streak" />
 
         <style>{`
@@ -685,18 +685,6 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
         background: COLORS.bg,
       }}>
-        <div style={{
-          height: LAYOUT.headerH, flex: '0 0 auto',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 16px', background: COLORS.panel,
-          borderBottom: `1px solid ${COLORS.border}`,
-        }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Streak Roll</strong>
-          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
-          </span>
-        </div>
-
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />
