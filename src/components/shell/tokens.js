@@ -370,7 +370,7 @@ export const SPACE = {
 // Spribe-parity desktop skeleton (1440×900 basis, ≥1024 breakpoint)
 export const LAYOUT = {
   breakpoint: 1024,
-  siteHeaderH: 60,   // global site header above the game area
+  siteHeaderH: 0,    // 全屏游戏视图不挂站点顶栏，游戏区不再为它扣高度
   headerH: 40,       // in-game top bar (name left, balance right)
   feedW: 400,        // bet feed sidebar, full height, edge-flush
   historyH: 34,      // round-history strip row

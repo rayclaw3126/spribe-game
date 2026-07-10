@@ -560,7 +560,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   )
   const topBar = (
     <>
-      <GameTopBar gameName="骨牌对决" venue={VENUE}
+      <GameTopBar balance={serverBalance ?? 0} gameName="骨牌对决" venue={VENUE}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode} onHowTo={() => setRulesOpen(true)} onBack={onBack} onFairness={() => setFairOpen(true)} />
       <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={VENUE} playerToken={playerToken} game="dominoduel" />
@@ -814,15 +814,6 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   if (isDesk) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640, background: COLORS.bg }}>
-        <div style={{
-          height: LAYOUT.headerH, flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 16px', background: COLORS.panel, borderBottom: `1px solid ${COLORS.border}`,
-        }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>骨牌对决</strong>
-          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
-          </span>
-        </div>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />

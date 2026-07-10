@@ -491,7 +491,7 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
         {pitchScene}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar gameName="FREE KICK" band={PLINKO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <GameTopBar balance={serverBalance ?? 0} gameName="FREE KICK" band={PLINKO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="FREE KICK" playerToken={playerToken} game="plinko" />
 
         {/* ---- second row (mobile only — desktop 34px row has it) ---- */}
@@ -658,18 +658,6 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
         background: COLORS.bg,
       }}>
-        <div style={{
-          height: LAYOUT.headerH, flex: '0 0 auto',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 16px', background: COLORS.panel,
-          borderBottom: `1px solid ${COLORS.border}`,
-        }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Free Kick</strong>
-          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
-          </span>
-        </div>
-
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />

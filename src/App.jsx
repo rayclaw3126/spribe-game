@@ -30,9 +30,8 @@ const TOKEN_KEY = 'spribe_player_token'
 const NAME_KEY = 'spribe_player_username'
 
 export default function App() {
-  const [balance, setBalance] = useState(1000)
   const [activeGame, setActiveGame] = useState(null)
-  // Aviator 专用：服务器权威余额（其它 20 款游戏继续用上面的本地 balance，不受影响）。
+  // 全部 21 款游戏都由后端结算，余额一律以服务器为准。
   const [serverBalance, setServerBalance] = useState(null)
   const [playerToken, setPlayerToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '')
 
@@ -52,6 +51,8 @@ export default function App() {
     localStorage.removeItem(NAME_KEY)
     setPlayerToken('')
     setServerBalance(null)
+    // 不清 activeGame 的话，重新登录会直接弹回上一局的游戏里。
+    setActiveGame(null)
   }
 
   // 已登录（token 在 localStorage）刷新页面时，主动拉一次玩家余额作为 serverBalance 初值，
@@ -70,37 +71,38 @@ export default function App() {
     return () => { cancelled = true }
   }, [playerToken])
 
-  // 服务器接后端的即时游戏需要真实玩家登录、余额以服务器为准；
-  // 其它游戏照旧免登录、本地模拟余额。
-  const NEEDS_LOGIN = ['Aviator', 'Dice', 'Plinko', 'Mines', 'Limbo', 'HiLo', 'Keno', 'Goal', 'StreakRoll', 'MiniRoulette', 'SpeedGrid', 'NumberUp', 'HatTrick', 'GoldenBoot', 'HalfTime', 'WuXing', 'LineUp', 'DerbyDay', 'DominoDuel', 'RollingBall', 'Momentum']
-  const isServerGame = NEEDS_LOGIN.includes(activeGame)
-  const needsLogin = isServerGame && !playerToken
+  // 强制登录：没有 token 一律只给登录页，进不了大厅，也进不了任何游戏。
+  const needsLogin = !playerToken
 
+  if (needsLogin) {
+    return <GameLogin onLogin={handlePlayerLogin} />
+  }
+
+  // 已登录且选了游戏：全屏铺满，不挂 Header，也不留顶部留白。
+  if (GameComponent) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0e1520' }}>
+        <GameComponent
+          serverBalance={serverBalance}
+          setServerBalance={setServerBalance}
+          playerToken={playerToken}
+          onLogout={handlePlayerLogout}
+          onBack={() => setActiveGame(null)}
+        />
+      </div>
+    )
+  }
+
+  // 已登录、未进游戏：Header + 大厅。
   return (
     <div style={{ minHeight: '100vh', background: '#0e1520' }}>
-      {!needsLogin && (
-        <Header
-          balance={isServerGame ? (serverBalance ?? 0) : balance}
-          onHome={() => setActiveGame(null)}
-          activeGame={activeGame}
-        />
-      )}
-      <main style={{ paddingTop: needsLogin ? 0 : '60px' }}>
-        {needsLogin ? (
-          <GameLogin onLogin={handlePlayerLogin} onCancel={() => setActiveGame(null)} />
-        ) : isServerGame ? (
-          <GameComponent
-            serverBalance={serverBalance}
-            setServerBalance={setServerBalance}
-            playerToken={playerToken}
-            onLogout={handlePlayerLogout}
-            onBack={() => setActiveGame(null)}
-          />
-        ) : GameComponent ? (
-          <GameComponent balance={balance} setBalance={setBalance} onBack={() => setActiveGame(null)} />
-        ) : (
-          <Lobby onSelect={setActiveGame} balance={balance} />
-        )}
+      <Header
+        balance={serverBalance ?? 0}
+        onHome={() => setActiveGame(null)}
+        onLogout={handlePlayerLogout}
+      />
+      <main style={{ paddingTop: '52px' }}>
+        <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} />
       </main>
     </div>
   )

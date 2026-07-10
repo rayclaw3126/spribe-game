@@ -2,23 +2,13 @@ import { useIsMobile } from '../hooks/useMediaQuery'
 import badgeWinUrl from '../assets/shared/badge_win.png'
 import badgeLoseUrl from '../assets/shared/badge_lose.png'
 
-export default function GameLayout({ title, color = '#16C784', children, sidebar }) {
+export default function GameLayout({ color = '#16C784', children, sidebar }) {
   const isMobile = useIsMobile()
   return (
     <div style={{
       maxWidth: 960, margin: '0 auto', padding: isMobile ? '16px 12px' : '32px 24px',
       animation: 'fadeIn 0.4s ease',
     }}>
-      {/* Game title bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', marginBottom: 20,
-      }}>
-        <h2 style={{
-          fontFamily: "'Space Grotesk', sans-serif",
-          fontWeight: 800, fontSize: isMobile ? 21 : 26, color: 'var(--text)',
-        }}>{title}</h2>
-      </div>
-
       {/* Content */}
       <div style={{
         display: 'grid',
