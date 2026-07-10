@@ -42,6 +42,26 @@ export function bigProb(num, den) {
   return Number((num * 1000000000000000n) / den) / 1e15;
 }
 
+/**
+ * 两独立分布之和的精确卷积（如 htTotal = htHome + htAway，各 ~ 10-of-80 独立）。
+ * @param {{counts:bigint[], total:bigint, maxSum:number}} A
+ * @param {{counts:bigint[], total:bigint, maxSum:number}} B
+ * @returns {{ total: bigint, maxSum: number, counts: bigint[], countOf(s):bigint }}
+ */
+export function convolveCounts(A, B) {
+  const maxSum = A.maxSum + B.maxSum;
+  const counts = new Array(maxSum + 1).fill(0n);
+  for (let a = 0; a <= A.maxSum; a++) {
+    const ca = A.counts[a];
+    if (!ca) continue;
+    for (let b = 0; b <= B.maxSum; b++) {
+      const cb = B.counts[b];
+      if (cb) counts[a + b] += ca * cb;
+    }
+  }
+  return { total: A.total * B.total, maxSum, counts, countOf: (s) => (s >= 0 && s <= maxSum ? counts[s] : 0n) };
+}
+
 /** 和值落 [lo,hi]（含端）的精确概率。 */
 export function probSumBand(pmf, lo, hi, pred = null) {
   let num = 0n;
