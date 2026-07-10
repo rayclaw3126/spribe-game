@@ -1,9 +1,10 @@
 // 提交问题弹窗 —— 沿用 admin/PlayerBalanceModal 的遮罩/面板风格，禁用原生 alert/confirm。
-// 提交后纯前端往列表顶插一条，不请求后端。提交人自动带当前登录账号（只读）。
+// 真发后端：先 POST /issues 拿 id → 再 POST /issues/:id/images 传图。提交人取当前登录账号（只读）。
 import { useEffect, useRef, useState } from 'react'
 import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
 import { useToast } from '../state/ToastContext.jsx'
-import { CURRENT_USER } from '../data/session.js'
+import { useAuth } from '../state/AuthContext.jsx'
+import { createIssue, uploadIssueImages } from '../api/client.js'
 import { PRIORITY_META, MERCHANT_OPTIONS } from '../data/issues.js'
 import Icon from './Icon.jsx'
 
@@ -153,14 +154,16 @@ function ModalHeader({ onClose }) {
   )
 }
 
-export default function SubmitIssueModal({ onClose, onSubmit }) {
+export default function SubmitIssueModal({ onClose, onSubmitted }) {
   const { push } = useToast()
+  const { user } = useAuth()
   const [title, setTitle] = useState('')
   const [desc, setDesc] = useState('')
   const [priority, setPriority] = useState('mid')
   const [merchant, setMerchant] = useState('')
   const [shots, setShots] = useState([])
   const [formError, setFormError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   // 组件卸载时释放所有预览 URL，防内存泄漏（用 ref 拿到最新 shots）。
   const shotsRef = useRef(shots)
@@ -181,15 +184,34 @@ export default function SubmitIssueModal({ onClose, onSubmit }) {
     })
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     if (!title.trim()) {
       setFormError('请填写标题')
       return
     }
-    onSubmit({ title: title.trim(), desc: desc.trim(), priority, merchant })
-    push('问题已提交，已置顶留档', 'success')
-    onClose()
+    setFormError('')
+    setSubmitting(true)
+    try {
+      // 两步：先建问题拿 id，再传图（有图才传）。归属商家=source_tenant（留空=平台级）。
+      const { issue } = await createIssue({
+        title: title.trim(),
+        description: desc.trim() || undefined,
+        priority,
+        sourceTenant: merchant || undefined,
+        sourcePage: '系统问题',
+      })
+      if (shots.length > 0) {
+        await uploadIssueImages(issue.id, shots.map((s) => s.file))
+      }
+      onSubmitted()
+    } catch (err) {
+      const msg = err.message || '提交失败'
+      setFormError(msg)
+      push(msg, 'error')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -240,7 +262,7 @@ export default function SubmitIssueModal({ onClose, onSubmit }) {
         <ScreenshotField shots={shots} onAdd={addShots} onRemove={removeShot} />
 
         <Field label="提交人">
-          <input value={CURRENT_USER} readOnly style={{ ...fieldStyle, color: COLORS.textMuted }} />
+          <input value={user?.username || '—'} readOnly style={{ ...fieldStyle, color: COLORS.textMuted }} />
         </Field>
 
         {formError && (
@@ -277,18 +299,19 @@ export default function SubmitIssueModal({ onClose, onSubmit }) {
           </button>
           <button
             type="submit"
+            disabled={submitting}
             style={{
               padding: '10px 18px',
               fontSize: 14,
               fontWeight: 600,
               color: COLORS.white,
-              background: COLORS.primary,
+              background: submitting ? COLORS.slate : COLORS.primary,
               border: 'none',
               borderRadius: RADIUS.sm,
-              cursor: 'pointer',
+              cursor: submitting ? 'default' : 'pointer',
             }}
           >
-            提交
+            {submitting ? '提交中…' : '提交'}
           </button>
         </div>
       </form>

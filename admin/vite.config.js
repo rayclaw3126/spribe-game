@@ -21,6 +21,8 @@ export default defineConfig({
       '/auth': proxyTarget('http://127.0.0.1:4000'),
       '/agent': proxyTarget('http://127.0.0.1:4000'),
       '/round': proxyTarget('http://127.0.0.1:4000'),
+      '/issues': proxyTarget('http://127.0.0.1:4000'),
+      '/uploads': proxyTarget('http://127.0.0.1:4000'),
     },
   },
 })

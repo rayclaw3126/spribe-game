@@ -80,7 +80,7 @@ export function FilterRow({ search, onSearch, priority, onPriority }) {
   )
 }
 
-export function Pagination({ total, pageSize = 20 }) {
+export function Pagination({ total, page = 1, pageSize = 20, onPage }) {
   const pages = Math.max(1, Math.ceil(total / pageSize))
   return (
     <div
@@ -97,25 +97,31 @@ export function Pagination({ total, pageSize = 20 }) {
         共 {total} 条 · 每页 {pageSize} 条
       </span>
       <div style={{ display: 'flex', gap: 6 }}>
-        {Array.from({ length: pages }, (_, i) => i + 1).map((p) => (
-          <span
-            key={p}
-            style={{
-              minWidth: 30,
-              height: 30,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 13,
-              color: p === 1 ? COLORS.white : COLORS.textMuted,
-              background: p === 1 ? '#2f6fe0' : COLORS.surface,
-              border: `1px solid ${p === 1 ? '#2f6fe0' : COLORS.border}`,
-              borderRadius: RADIUS.sm,
-            }}
-          >
-            {p}
-          </span>
-        ))}
+        {Array.from({ length: pages }, (_, i) => i + 1).map((p) => {
+          const active = p === page
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onPage && onPage(p)}
+              style={{
+                minWidth: 30,
+                height: 30,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 13,
+                color: active ? COLORS.white : COLORS.textMuted,
+                background: active ? '#2f6fe0' : COLORS.surface,
+                border: `1px solid ${active ? '#2f6fe0' : COLORS.border}`,
+                borderRadius: RADIUS.sm,
+                cursor: active ? 'default' : 'pointer',
+              }}
+            >
+              {p}
+            </button>
+          )
+        })}
       </div>
     </div>
   )

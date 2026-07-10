@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { COLORS, LAYOUT, SPACE } from '../theme/tokens.js'
-import { CURRENT_USER } from '../data/session.js'
+import { useAuth } from '../state/AuthContext.jsx'
 import Sidebar from '../components/Sidebar.jsx'
 import useIsMobile from '../hooks/useIsMobile.js'
 
@@ -49,6 +49,7 @@ function SidebarPanel({ onNavigate }) {
 
 export default function VendorLayout() {
   const isMobile = useIsMobile()
+  const { user, logout } = useAuth()
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   return (
@@ -122,9 +123,26 @@ export default function VendorLayout() {
               </button>
             )}
             <span style={{ fontSize: 13.5, color: COLORS.textMuted }}>
-              当前账号：<strong style={{ color: COLORS.text, fontWeight: 600 }}>{CURRENT_USER}</strong>
+              当前账号：<strong style={{ color: COLORS.text, fontWeight: 600 }}>{user?.username || '—'}</strong>
             </span>
           </div>
+
+          <button
+            type="button"
+            onClick={logout}
+            style={{
+              padding: '6px 14px',
+              fontSize: 13,
+              fontWeight: 500,
+              color: COLORS.textMuted,
+              background: 'transparent',
+              border: `1px solid ${COLORS.border}`,
+              borderRadius: 8,
+              cursor: 'pointer',
+            }}
+          >
+            退出登录
+          </button>
         </header>
 
         <main style={{ flex: 1, padding: SPACE.xl, minWidth: 0 }}>

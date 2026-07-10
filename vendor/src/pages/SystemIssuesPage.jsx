@@ -1,32 +1,17 @@
-// 系统问题页（本单核心）：测试员提交的问题永久留档，可搜索追源。
-// 全前端假数据：tab 过滤 / 搜索 / 优先级筛选 / 状态改写 / 提交插入 都在内存里做，不请求后端。
-import { useMemo, useState } from 'react'
+// 系统问题页（接后端 /issues）：列表 GET /issues(status/q/分页)，展开 GET /issues/:id，
+// 改状态 PATCH /issues/:id，提交 POST /issues + 传图。状态 tab 计数各查一次 total。
+// 优先级为前端筛选（后端 GET 无优先级参数），只作用于当前页返回项。
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { COLORS, SPACE } from '../theme/tokens.js'
-import { ISSUES, STATUS_TABS } from '../data/issues.js'
-import { CURRENT_USER } from '../data/session.js'
+import { STATUS_TABS } from '../data/issues.js'
+import { listIssues, patchIssue } from '../api/client.js'
+import { useToast } from '../state/ToastContext.jsx'
 import IssueRow from '../components/issues/IssueRow.jsx'
 import { StatusTabs, FilterRow, Pagination } from '../components/issues/IssueControls.jsx'
 import SubmitIssueModal from '../components/SubmitIssueModal.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 
-function countByStatus(issues) {
-  const counts = { all: issues.length }
-  for (const tab of STATUS_TABS) {
-    if (tab.key === 'all') continue
-    counts[tab.key] = issues.filter((i) => i.status === tab.key).length
-  }
-  return counts
-}
-
-function filterIssues(issues, { tab, search, priority }) {
-  const q = search.trim().toLowerCase()
-  return issues.filter((i) => {
-    if (tab !== 'all' && i.status !== tab) return false
-    if (priority !== 'all' && i.priority !== priority) return false
-    if (q && !(`${i.title} ${i.desc}`.toLowerCase().includes(q))) return false
-    return true
-  })
-}
+const PAGE_SIZE = 20
 
 function PageHeader({ onOpenSubmit }) {
   return (
@@ -58,39 +43,86 @@ function PageHeader({ onOpenSubmit }) {
   )
 }
 
-let insertSeq = ISSUES.length
-
-function makeIssue({ title, desc, priority, merchant }) {
-  insertSeq += 1
-  return {
-    id: String(insertSeq).padStart(4, '0'),
-    status: 'new',
-    priority,
-    title,
-    desc: desc || '（提交人未填写描述）',
-    reporter: CURRENT_USER,
-    time: '刚刚',
-    source: { merchant, game: '—', player: '—' },
-  }
+// 各 tab 计数：对每个状态各查一次（pageSize=1 只取 total）。
+async function fetchCounts() {
+  const results = await Promise.all(
+    STATUS_TABS.map((tab) =>
+      listIssues({ status: tab.key, pageSize: 1 }).then((r) => [tab.key, r.total]).catch(() => [tab.key, 0])
+    )
+  )
+  return Object.fromEntries(results)
 }
 
 export default function SystemIssuesPage() {
-  const [issues, setIssues] = useState(ISSUES)
+  const { push } = useToast()
+  const [items, setItems] = useState([])
+  const [total, setTotal] = useState(0)
+  const [counts, setCounts] = useState({})
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
   const [tab, setTab] = useState('all')
   const [search, setSearch] = useState('')
+  const [debounced, setDebounced] = useState('')
   const [priority, setPriority] = useState('all')
+  const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
 
-  const counts = useMemo(() => countByStatus(issues), [issues])
-  const visible = useMemo(() => filterIssues(issues, { tab, search, priority }), [issues, tab, search, priority])
+  // 搜索防抖：输入停 300ms 才打后端。
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
 
-  function setStatus(id, status) {
-    setIssues((prev) => prev.map((i) => (i.id === id ? { ...i, status } : i)))
+  // 换 tab / 改搜索 → 回到第 1 页。
+  useEffect(() => { setPage(1) }, [tab, debounced])
+
+  const loadList = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const r = await listIssues({ status: tab, q: debounced, page, pageSize: PAGE_SIZE })
+      setItems(r.items)
+      setTotal(r.total)
+    } catch (err) {
+      setError(err.message || '加载失败')
+      setItems([])
+      setTotal(0)
+    } finally {
+      setLoading(false)
+    }
+  }, [tab, debounced, page])
+
+  const loadCounts = useCallback(async () => {
+    setCounts(await fetchCounts())
+  }, [])
+
+  useEffect(() => { loadList() }, [loadList])
+  useEffect(() => { loadCounts() }, [loadCounts])
+
+  async function setStatus(id, status) {
+    try {
+      await patchIssue(id, { status })
+      setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status } : i)))
+      push('状态已更新', 'success')
+      loadCounts()
+    } catch (err) {
+      push(err.message || '更新失败', 'error')
+    }
   }
 
-  function addIssue(form) {
-    setIssues((prev) => [makeIssue(form), ...prev])
+  function handleSubmitted() {
+    setModalOpen(false)
+    push('问题已提交', 'success')
+    loadList()
+    loadCounts()
   }
+
+  // 优先级前端筛（作用于当前页返回项）。
+  const visible = useMemo(
+    () => (priority === 'all' ? items : items.filter((i) => i.priority === priority)),
+    [items, priority]
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg, maxWidth: 1040 }}>
@@ -98,7 +130,11 @@ export default function SystemIssuesPage() {
       <StatusTabs active={tab} counts={counts} onChange={setTab} />
       <FilterRow search={search} onSearch={setSearch} priority={priority} onPriority={setPriority} />
 
-      {visible.length === 0 ? (
+      {error ? (
+        <EmptyState text={error} />
+      ) : loading ? (
+        <EmptyState text="加载中…" />
+      ) : visible.length === 0 ? (
         <EmptyState text="没有符合条件的问题" />
       ) : (
         <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 8, overflow: 'hidden' }}>
@@ -108,9 +144,9 @@ export default function SystemIssuesPage() {
         </div>
       )}
 
-      <Pagination total={visible.length} />
+      <Pagination total={total} page={page} pageSize={PAGE_SIZE} onPage={setPage} />
 
-      {modalOpen && <SubmitIssueModal onClose={() => setModalOpen(false)} onSubmit={addIssue} />}
+      {modalOpen && <SubmitIssueModal onClose={() => setModalOpen(false)} onSubmitted={handleSubmitted} />}
     </div>
   )
 }

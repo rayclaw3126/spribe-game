@@ -5,6 +5,7 @@ import { useLocation } from 'react-router-dom'
 import { COLORS, RADIUS, SPACE } from '../../theme/tokens.js'
 import { useAuth } from '../../state/AuthContext.jsx'
 import { useToast } from '../../state/ToastContext.jsx'
+import { createIssue, uploadIssueImages } from '../../api/client.js'
 import ScreenshotField from './ScreenshotField.jsx'
 
 // 路由 → 当前页面名（自动带、只读）。未知路径回退「后台」。
@@ -95,10 +96,12 @@ function ModalHeader({ onClose }) {
 }
 
 function FeedbackModal({ username, pageName, onClose, onSubmitted }) {
+  const { push } = useToast()
   const [title, setTitle] = useState('')
   const [desc, setDesc] = useState('')
   const [shots, setShots] = useState([])
   const [formError, setFormError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const shotsRef = useRef(shots)
   shotsRef.current = shots
@@ -118,14 +121,34 @@ function FeedbackModal({ username, pageName, onClose, onSubmitted }) {
     })
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     if (!title.trim()) {
       setFormError('请填写标题')
       return
     }
-    // 纯前端：不发后端，图片仅本地预览，提交即关窗 + toast。
-    onSubmitted()
+    setFormError('')
+    setSubmitting(true)
+    try {
+      // 两步：先建问题拿 id，再传图（有图才传）。source_page=当前页面，source_tenant 留空=平台级。
+      // admin 反馈钮无优先级选项，默认 mid。
+      const { issue } = await createIssue({
+        title: title.trim(),
+        description: desc.trim() || undefined,
+        priority: 'mid',
+        sourcePage: pageName,
+      })
+      if (shots.length > 0) {
+        await uploadIssueImages(issue.id, shots.map((s) => s.file))
+      }
+      onSubmitted()
+    } catch (err) {
+      const msg = err.message || '提交失败'
+      setFormError(msg)
+      push(msg, 'error')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -184,9 +207,10 @@ function FeedbackModal({ username, pageName, onClose, onSubmitted }) {
           </button>
           <button
             type="submit"
-            style={{ padding: '10px 20px', fontSize: 14, fontWeight: 600, color: COLORS.white, background: COLORS.primary, border: 'none', borderRadius: RADIUS.sm, cursor: 'pointer' }}
+            disabled={submitting}
+            style={{ padding: '10px 20px', fontSize: 14, fontWeight: 600, color: COLORS.white, background: submitting ? COLORS.slate : COLORS.primary, border: 'none', borderRadius: RADIUS.sm, cursor: submitting ? 'default' : 'pointer' }}
           >
-            提交
+            {submitting ? '提交中…' : '提交'}
           </button>
         </div>
       </form>

@@ -53,6 +53,58 @@ async function request(path, { method = 'GET', body, skipAuthRedirect = false } 
   return data
 }
 
+// 后端源站：dev 留空走同源 vite proxy(/uploads 已转发)；prod 若前后端不同域，
+// 设 VITE_API_ORIGIN 为后端完整地址，图片 <img src> 会拼成完整后端 URL。
+export const API_ORIGIN = import.meta.env.VITE_API_ORIGIN || ''
+
+// 把后端返回的相对 url（/uploads/issues/xx.png）拼成可直接 <img src> 的地址。
+export function imageUrl(url) {
+  return `${API_ORIGIN}${url}`
+}
+
+// multipart 上传：不走 request()（那边强制 JSON），单独一份，复用同款 token/401 处理。
+async function requestForm(path, formData) {
+  const headers = {}
+  const token = getToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  let res
+  try {
+    res = await fetch(path, { method: 'POST', headers, body: formData })
+  } catch {
+    const err = new Error('网络请求失败，请检查后端服务是否已启动')
+    err.status = 0
+    throw err
+  }
+
+  let data = null
+  const text = await res.text()
+  if (text) {
+    try { data = JSON.parse(text) } catch { data = null }
+  }
+  if (!res.ok) {
+    const err = new Error((data && data.error) || `请求失败（${res.status}）`)
+    err.status = res.status
+    if (res.status === 401 && window.location.pathname !== '/login') {
+      clearAuth()
+      window.location.href = '/login'
+    }
+    throw err
+  }
+  return data
+}
+
+// ---- 系统问题 / 反馈 ----
+export function createIssue(payload) {
+  return request('/issues', { method: 'POST', body: payload })
+}
+
+export function uploadIssueImages(issueId, files) {
+  const form = new FormData()
+  for (const f of files) form.append('images', f)
+  return requestForm(`/issues/${encodeURIComponent(issueId)}/images`, form)
+}
+
 export function login(username, password) {
   return request('/auth/login', {
     method: 'POST',
