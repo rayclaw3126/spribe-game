@@ -18,17 +18,9 @@ export default function Header({ balance, onHome, onLogout }) {
       boxSizing: 'border-box',
     }}>
       <button onClick={onHome} style={{
-        display: 'flex', alignItems: 'center', gap: 10,
+        display: 'flex', alignItems: 'center',
         background: 'none', padding: 0, flex: '0 0 auto',
       }}>
-        <span style={{
-          width: 34, height: 34, borderRadius: 10,
-          background: '#1a2230',
-          border: '1px solid #232c39',
-          color: '#16c784',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 18,
-        }}>⚽</span>
         <span style={{
           fontFamily: "'Space Grotesk', sans-serif",
           fontWeight: 800, fontSize: isMobile ? 16 : 19,
