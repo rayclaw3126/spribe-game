@@ -71,6 +71,7 @@ import * as wuXingEngine from '../game/wuXing.js';
 import * as lineUpEngine from '../game/lineUp.js';
 import * as derbyDayEngine from '../game/derbyDay.js';
 import * as dominoDuelEngine from '../game/dominoDuel.js';
+import * as rollingBallEngine from '../game/rollingBall.js';
 
 const router = Router();
 
@@ -1215,6 +1216,193 @@ router.post('/wuxing/play', requireAuth, requireType('player'), makeRoundGameHan
 router.post('/lineup/play', requireAuth, requireType('player'), makeRoundGameHandler('lineup'));
 router.post('/derbyday/play', requireAuth, requireType('player'), makeRoundGameHandler('derbyday'));
 router.post('/dominoduel/play', requireAuth, requireType('player'), makeRoundGameHandler('dominoduel'));
+
+// ==================================================================
+// RollingBall（连开 3 球）—— bespoke 多步 handler（不走通用轮次脚手架）
+// 方案：B 按步现派（每球只在该球请求到达时才抽，result 只存已开球，未开球不存→无未来泄露）
+//   + 单端点线程 roundId（ballIndex 服务端从 revealed.length 定序，客户端传的一律不信）
+//   + 每球 claimNonce + drawBall 按步抽 + 服务端 oddsFor 锁 odds（前端 odds 仅显示）
+//   + 逐球即扣即结（无跨球骑留 → 敞口=0，不入 computeOpenExposure）+ 每球幂等 + cap 钳制。
+// ==================================================================
+const RB_MARKET_MAX = 93;   // 合法键上限：6 组 + 3 行 + 5 列 + 4 组合 + 75 单号
+
+/** 按幂等键查询已存在的某球 rollingball 记录（跨事务普通查询），供幂等返回 */
+async function findRollingBallBet(idempotencyKey) {
+  const result = await query(
+    `SELECT b.round_id, r.result, r.result_hash, r.client_seed
+       FROM bets b JOIN rounds r ON r.id = b.round_id
+      WHERE b.idempotency_key = $1 AND r.game = 'rollingball'`,
+    [idempotencyKey]
+  );
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+/** 从某球记录拼幂等响应 */
+function rbBallResponse(row, idempotencyKey, balanceAfter) {
+  const balls = row.result?.balls || [];
+  const ball = balls.find((b) => b.idempotencyKey === idempotencyKey);
+  if (!ball) return null;
+  const revealed = (row.result?.revealed || []).slice(0, ball.idx + 1);
+  const settled = row.result?.status === 'settled';
+  return {
+    roundId: row.round_id, ballIndex: ball.idx, ball: ball.ball,
+    perKeyOutcome: ball.perKeyOutcome, ballPayout: ball.ballPayout,
+    revealed, nextBall: settled ? null : ball.idx + 1, status: row.result?.status,
+    balanceAfter, clientSeed: row.client_seed, nonce: ball.nonce, serverSeedHash: row.result_hash,
+    idempotent: true,
+  };
+}
+
+router.post('/rollingball/play', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { roundId, bets, idempotencyKey } = req.body || {};
+
+    if (!idempotencyKey) return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
+    if (!bets || typeof bets !== 'object' || Array.isArray(bets)) return res.status(400).json({ error: 'bets 必须是 {key: amount} 对象' });
+    const betEntries = Object.entries(bets);
+    if (betEntries.length < 1) return res.status(400).json({ error: '每球至少下 1 注' });   // 每球≥1注
+    if (betEntries.length > RB_MARKET_MAX) return res.status(400).json({ error: `下注项过多（上限 ${RB_MARKET_MAX}）` });
+
+    // 静态校验：key 合法 + amount 严格 >0（防负注/绕限）；「已开号/c_k=0」需 revealed，进事务再判。
+    let total = 0;
+    for (const [key, amt] of betEntries) {
+      if (!rollingBallEngine.isValidKey(key)) return res.status(400).json({ error: `非法盘口 key：${key}` });
+      const a = Number(amt);
+      if (!Number.isFinite(a) || !(a > 0)) return res.status(400).json({ error: `下注金额必须 > 0（key ${key}）` });
+      total += a;
+    }
+    const totalStr = total.toFixed(2);
+    assertBetWithinLimits('rollingball', totalStr);   // 每球独立风控（敞口=0，无需 exposure gate）
+
+    // 幂等先查（每球独立 idempotencyKey）
+    const existing = await findRollingBallBet(idempotencyKey);
+    if (existing) {
+      const resp = rbBallResponse(existing, idempotencyKey, await getBalance(playerId));
+      if (resp) return res.json(resp);
+    }
+
+    try {
+      const out = await withTransaction(async (client) => {
+        await ensureActiveSeed(client, playerId);
+
+        // ---- 定序：新局 ballIdx=0；续球从 revealed.length 定序（客户端 ballIndex 不信，仅校验一致）----
+        let revealed, balls, ballIdx, round = null;
+        if (roundId == null) {
+          revealed = []; balls = []; ballIdx = 0;
+        } else {
+          const r = await client.query('SELECT * FROM rounds WHERE id = $1 FOR UPDATE', [roundId]);
+          if (r.rowCount === 0) throw httpError(404, '该局不存在');
+          round = r.rows[0];
+          if (round.game !== 'rollingball') throw httpError(400, '该局不是 rollingball 游戏');
+          if (String(round.player_id) !== String(playerId)) throw httpError(403, '无权访问该局');
+          if (round.status !== 'playing') throw httpError(400, '该局已结束');
+          revealed = round.result.revealed || [];
+          balls = round.result.balls || [];
+          ballIdx = revealed.length;   // 服务端定序
+          if (ballIdx > 2) throw httpError(400, '本局 3 球已开满');
+        }
+        // 客户端若传 ballIndex，必须与服务端定序一致（防跳球）
+        if (req.body.ballIndex != null && Number(req.body.ballIndex) !== ballIdx) {
+          throw httpError(400, `ballIndex 定序错误（应为 ${ballIdx}，防跳球）`);
+        }
+
+        // ---- claimNonce（每球一个，一局 N/N+1/N+2）----
+        const { serverSeed, clientSeed, serverSeedHash, nonce } = await claimNonce(client, playerId);
+
+        // ---- 按步现派：从剩余池抽本球（未开球不预抽）----
+        const remaining = rollingBallEngine.remainingPool(revealed);
+        const rng = makeSeededRng(serverSeed, clientSeed, nonce);
+        const ball = rollingBallEngine.drawBall(remaining, rng);
+
+        // ---- 服务端算 odds 锁定 + 逐 key 结算（前端 odds 一律不信）----
+        const perKeyOutcome = {}; const betsRecord = {}; let rawPayout = 0;
+        for (const [key, amt] of betEntries) {
+          const a = Number(amt);
+          const odds = rollingBallEngine.oddsFor(key, ballIdx, revealed);
+          if (odds == null) throw httpError(400, `盘口不可押（已开号/号池耗尽）：${key}`);   // 无放回拒
+          betsRecord[key] = { stake: a, odds };
+          if (rollingBallEngine.hitOf(key, ball)) {
+            const p = round2(a * odds);
+            perKeyOutcome[key] = { outcome: 'hit', payout: p };
+            rawPayout += p;
+          } else {
+            perKeyOutcome[key] = { outcome: 'lose', payout: 0 };
+          }
+        }
+        // 钳制型 cap（SQL numeric 定稿，避免 JS 浮点累加误差）
+        const capRow = await client.query(
+          'SELECT LEAST(round($1::numeric, 2), $2::numeric) AS payout',
+          [String(rawPayout), String(maxPayoutFor('rollingball'))]
+        );
+        const ballPayout = capRow.rows[0].payout;
+        const win = Number(ballPayout) > 0;
+
+        const newRevealed = [...revealed, ball];
+        const status = newRevealed.length >= 3 ? 'settled' : 'playing';
+        const ballEntry = { idx: ballIdx, ball, nonce, idempotencyKey, bets: betsRecord, perKeyOutcome, ballPayout };
+        const newResult = { revealed: newRevealed, balls: [...balls, ballEntry], status };
+
+        // ---- 建/更新 round（result 只存已开球）----
+        let rid;
+        if (roundId == null) {
+          const rr = await client.query(
+            `INSERT INTO rounds (game, player_id, bet_amount, client_seed, server_seed, result_hash, payout, status, result)
+             VALUES ('rollingball', $1, $2::numeric, $3, $4, $5, $6::numeric, $7, $8::jsonb)
+             RETURNING id`,
+            [playerId, totalStr, clientSeed, serverSeed, serverSeedHash, ballPayout, status, JSON.stringify(newResult)]
+          );
+          rid = rr.rows[0].id;
+        } else {
+          rid = round.id;
+          await client.query(
+            `UPDATE rounds SET bet_amount = bet_amount + $1::numeric, payout = COALESCE(payout, 0) + $2::numeric, status = $3, result = $4::jsonb WHERE id = $5`,
+            [totalStr, ballPayout, status, JSON.stringify(newResult), rid]
+          );
+        }
+
+        // ---- 逐球即扣即结（本球扣本球注、派本球赢；无跨球骑留 → 敞口=0）----
+        const { balanceAfter: afterDebit } = await debit(client, {
+          playerId, amount: totalStr, type: 'rollingball_bet', idempotencyKey, roundId: rid,
+        });
+        let balanceAfter = afterDebit;
+        if (win) {
+          const cr = await credit(client, {
+            playerId, amount: ballPayout, type: 'rollingball_payout',
+            idempotencyKey: `rollingball-payout-${rid}-${ballIdx}`, roundId: rid,
+          });
+          balanceAfter = cr.balanceAfter;
+        } else {
+          const pr = await client.query('SELECT agent_id FROM players WHERE id = $1', [playerId]);
+          const agentId = pr.rows[0]?.agent_id;
+          if (agentId) await distributeLoss(client, { playerId, agentId, roundId: rid, lossAmount: totalStr });
+        }
+        // 每球一条 bet（idempotency_key = 本球键）
+        await client.query(
+          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome)
+           VALUES ($1, $2, $3::numeric, $4, $5)`,
+          [rid, playerId, totalStr, idempotencyKey, win ? 'win' : 'lose']
+        );
+
+        return {
+          roundId: rid, ballIndex: ballIdx, ball, perKeyOutcome, ballPayout,
+          revealed: newRevealed, nextBall: status === 'settled' ? null : newRevealed.length, status,
+          balanceAfter, clientSeed, nonce, serverSeedHash,
+        };
+      });
+      return res.json({ ...out, idempotent: false });
+    } catch (err) {
+      if (err.code === '23505') {
+        const after = await findRollingBallBet(idempotencyKey);
+        if (after) { const resp = rbBallResponse(after, idempotencyKey, await getBalance(playerId)); if (resp) return res.json(resp); }
+      }
+      if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+      throw err;
+    }
+  } catch (err) {
+    return next(err);
+  }
+});
 
 /** 按幂等键查询已存在的 plinko 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
 async function findPlinkoBetByIdempotencyKey(idempotencyKey) {
@@ -2655,6 +2843,8 @@ const PLAYING_RESULT_WHITELIST = {
   hilo: ['step', 'card', 'cum', 'skips', 'history', 'nonce', 'status'],
   // goal：tier(公开)/已过列选行/累乘/步数/nonce（雷行按列现派、result 本就无未来雷位；白名单为纵深防御）
   goal: ['tier', 'picks', 'cum', 'step', 'nonce', 'status'],
+  // rollingball：已开球 + 逐球结算（按步现派，result 本就无未开球）；白名单为纵深防御
+  rollingball: ['revealed', 'balls', 'status'],
 };
 const TERMINAL_STATUSES = new Set(['settled', 'cashed', 'bust']);
 

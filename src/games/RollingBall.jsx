@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
@@ -279,10 +280,14 @@ function BettingBall({ size }) {
   )
 }
 
-export default function RollingBall({ balance, setBalance, onBack }) {
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `rollingball-${Date.now()}-${Math.random()}`)
+
+export default function RollingBall({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bet, setBet] = useState(10)
+  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -304,8 +309,11 @@ export default function RollingBall({ balance, setBalance, onBack }) {
   const picksRef = useRef(picks)
   const betsRef = useRef(new Map())                       // 当前球注单 key→{stake,odds}
   const betRef = useRef(bet)
-  const balanceRef = useRef(balance)
-  const pendingRef = useRef(null)                         // 本局锁定的 3 球
+  const balanceRef = useRef(serverBalance)
+  const pendingRef = useRef(null)                         // 本局已开球（按步现派，逐球从后端填入）
+  const roundIdRef = useRef(null)                         // 后端本局 roundId（多步线程）
+  const pendingDataRef = useRef(null)                     // 当前球后端返回（settleBall 消费）
+  const transitioningRef = useRef(false)                  // 开球 POST 进行中，防 tick 重入
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
 
@@ -316,7 +324,7 @@ export default function RollingBall({ balance, setBalance, onBack }) {
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const audioRef = useRef({ ctx: null, muted: false })
 
-  useEffect(() => { balanceRef.current = balance }, [balance])
+  useEffect(() => { balanceRef.current = serverBalance }, [serverBalance])
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
@@ -437,23 +445,40 @@ export default function RollingBall({ balance, setBalance, onBack }) {
     timersRef.current.push(tm)
   }
 
-  // 唯一赔付点：结算第 idx 球注单（对本球号 n）
+  // 后端请求封装（余额只认后端 balanceAfter）
+  async function apiPost(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
+    return data
+  }
+  const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b.stake), 0)
+
+  // 唯一赔付点：结算第 idx 球——命中/赔付/余额全认后端 perKeyOutcome（锁定 odds 在后端算）
   function settleBall(idx) {
-    const n = pendingRef.current[idx]
+    const data = pendingDataRef.current
+    const n = data ? data.ball : pendingRef.current?.[idx]
     let win = 0
     const hits = new Set()
-    betsRef.current.forEach(({ stake, odds }, key) => {
-      if (hitOf(key, n)) { win = round2(win + stake * odds); hits.add(key) }
-    })
-    if (win > 0) { setBalance(b => round2(b + win)); pushToast(`第${idx + 1}球命中`, win); sfxHit() }
+    if (data) {
+      for (const [k, v] of Object.entries(data.perKeyOutcome || {})) if (v.outcome === 'hit') hits.add(k)
+      win = Number(data.ballPayout || 0)
+      if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))   // 余额只认后端
+    }
+    if (win > 0) { pushToast(`第${idx + 1}球命中`, win); sfxHit() }
     setResult({ idx, ball: n, hits, win })
     if (idx === 2) sfxFinal()   // 三球齐 → 终场哨
-    if (idx === 0) setRoad(r => [...r, n >= 38 ? '大' : '小'].slice(-ROAD_CAP))
+    if (idx === 0 && n != null) setRoad(r => [...r, n >= 38 ? '大' : '小'].slice(-ROAD_CAP))
   }
 
   // 单心跳驱动状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
   useEffect(() => {
-    const id = setInterval(() => {
+    const id = setInterval(async () => {
+      if (transitioningRef.current) return   // 开球 POST 进行中，别再 tick
       cdRef.current -= 1
       if (cdRef.current > 0) { setCountdown(cdRef.current); return }
       const ph = phaseRef.current
@@ -463,31 +488,53 @@ export default function RollingBall({ balance, setBalance, onBack }) {
         phaseRef.current = next; setPhase(next)
         cdRef.current = ticks; setCountdown(ticks)
       }
+      // 本局收尾 → 回新局（清 roundId/已开球；无注/失败/开满 3 球共用）
+      const endRound = () => {
+        if (pendingRef.current?.length === 3) setLastRound(pendingRef.current)
+        roundIdRef.current = null
+        pendingRef.current = []
+        pendingDataRef.current = null
+        betsRef.current = new Map(); setBetsPlaced(new Map())
+        picksRef.current = new Set(); setPicks(new Set())
+        setResult(null)
+        setFeedBets(makeFeedBots())
+        setRoundNo(x => x + 1)
+        go('b1-bet', BET_T)
+      }
       if (sb === 'bet') {
-        // 第 1 球押注截止 → 锁定 3 球（pendingRef 锁 3 球，逐球揭示）
-        if (bi === 0) {
-          let three = null
-          if (import.meta.env.DEV && window.__RB_FORCE) { three = window.__RB_FORCE; window.__RB_FORCE = null }
-          pendingRef.current = three || drawThree()
+        // 本球下注窗关：有注则 POST 开本球（每球≥1注，串 roundId）；无注则本局收尾（零敞口无害）
+        if (betsRef.current.size === 0) { endRound(); return }
+        transitioningRef.current = true
+        try {
+          const body = { bets: Object.fromEntries([...betsRef.current].map(([k, v]) => [k, v.stake])), idempotencyKey: genIdemKey() }
+          if (bi > 0 && roundIdRef.current) body.roundId = roundIdRef.current   // 续球线程 roundId
+          const data = await apiPost('/round/rollingball/play', body)
+          roundIdRef.current = data.roundId
+          pendingDataRef.current = data
+          if (!Array.isArray(pendingRef.current)) pendingRef.current = []
+          pendingRef.current[bi] = data.ball   // ← 后端本球号（动画停这里，不本地随机）
+          forceTick(x => x + 1)
+          transitioningRef.current = false
+          go(`b${bi + 1}-draw`, DRAW_T)
+        } catch (e) {
+          setNetErr(e.message)
+          pendingDataRef.current = null
+          transitioningRef.current = false
+          endRound()   // 开球失败：结束本局（暂存注未扣钱）
         }
-        forceTick(x => x + 1)   // 揭示本球
-        go(`b${bi + 1}-draw`, DRAW_T)
       } else if (sb === 'draw') {
         settleBall(bi)
         go(`b${bi + 1}-settle`, SETTLE_T)
       } else {
-        // 结算完毕 → 下一球 或 本局收尾
-        betsRef.current = new Map(); setBetsPlaced(new Map())
-        picksRef.current = new Set(); setPicks(new Set())
-        setResult(null)
-        if (bi < 2) {
-          go(`b${bi + 2}-bet`, BET_T)   // 开下一球押注窗（赔率随剩余池自动重算）
+        // 结算完毕 → 下一球 或 本局收尾（后端 status settled 即本局结束）
+        const done = bi >= 2 || pendingDataRef.current?.status === 'settled'
+        if (!done) {
+          betsRef.current = new Map(); setBetsPlaced(new Map())
+          picksRef.current = new Set(); setPicks(new Set())
+          setResult(null)
+          go(`b${bi + 2}-bet`, BET_T)   // 开下一球押注窗（赔率随剩余池，含已开球）
         } else {
-          setLastRound(pendingRef.current)
-          pendingRef.current = null
-          setFeedBets(makeFeedBots())
-          setRoundNo(x => x + 1)
-          go('b1-bet', BET_T)
+          endRound()
         }
       }
     }, TICK_MS)
@@ -511,14 +558,14 @@ export default function RollingBall({ balance, setBalance, onBack }) {
     })
   }
 
-  // 唯一扣注点
+  // 唯一暂存点：暂存本球注（不扣钱，钱只在开球 POST 那一刻走）
   function placeBets(entries) {
     if (phaseRef.current.slice(3) !== 'bet') return false
     let total = 0
     entries.forEach(({ stake }) => { total = round2(total + stake) })
-    if (!entries.size || total <= 0 || total > balanceRef.current) return false
-    setBalance(b => round2(b - total))
-    balanceRef.current = round2(balanceRef.current - total)
+    // 暂存不扣钱：本球已暂存 + 本次不能超过后端余额
+    if (!entries.size || total <= 0 || (serverBalance != null && total > round2(serverBalance - stagedTotal()))) return false
+    setNetErr(null)
     entries.forEach((v, k) => {
       const prev = betsRef.current.get(k)
       betsRef.current.set(k, { stake: round2((prev?.stake || 0) + v.stake), odds: v.odds })
@@ -538,7 +585,7 @@ export default function RollingBall({ balance, setBalance, onBack }) {
   }
 
   const confirmTotal = round2(bet * picks.size)
-  const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
+  const confirmOk = betting && picks.size > 0 && bet >= 1 && (serverBalance == null || confirmTotal <= round2(serverBalance - stagedTotal()))
   const revealedCount = ballIdx + (sub === 'bet' ? 0 : 1)
   const drawnBalls = pendingRef.current ? pendingRef.current.slice(0, revealedCount) : []
   const curNum = sub === 'bet' ? null : pendingRef.current?.[ballIdx]
@@ -631,9 +678,19 @@ export default function RollingBall({ balance, setBalance, onBack }) {
     </span>
   )
   const topBar = (
-    <GameTopBar gameName="滚球" venue={VENUE}
-      roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
+    <>
+      <GameTopBar gameName="滚球" venue={VENUE}
+        roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
+        phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={VENUE} playerToken={playerToken} game="rollingball" />
+      {netErr && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
+          background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
+        }} onClick={() => setNetErr(null)}>{netErr}</div>
+      )}
+    </>
   )
 
   // ---- ① 开奖区：当前球大字 + 3 球槽 + 上局回顾 ----
@@ -967,7 +1024,7 @@ export default function RollingBall({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>滚球</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>

@@ -18,6 +18,7 @@ export default {
     lineup: { maxBet: '100.00', maxPayout: '50000.00' }, // 轮次开奖·多注 map；顶赔 zone edge 8.0×100=800<<cap，零钳制
     derbyday: { maxBet: '100.00', maxPayout: '50000.00' }, // 轮次开奖·多注 map（有 push）；顶赔 htftFlip 7.1×100=710<<cap，零钳制
     dominoduel: { maxBet: '100.00', maxPayout: '50000.00' }, // 轮次开奖·多注 map（波胆+push）；顶赔 cs-0-0 97.93×100=9793<<cap，零钳制
+    rollingball: { maxBet: '100.00', maxPayout: '50000.00' }, // bespoke 连开3球·每球独立多注；顶赔单号 ball1 71.42×100=7142<<cap，零钳制
     aviator: { maxBet: '500.00', maxPayout: '50000.00' },
   },
   // 敞口：单玩家所有未结算多步局的潜在最大赔付总额上限 + 并发未结算局数上限（双闸）
