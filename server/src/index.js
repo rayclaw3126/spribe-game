@@ -13,6 +13,7 @@ import agentRouter from './routes/agent.js';
 import playerRouter from './routes/player.js';
 import seedRouter from './routes/seed.js';
 import { startAviatorHub } from './ws/aviatorHub.js';
+import { startMomentumHub } from './ws/momentumHub.js';
 import { RiskError } from './lib/risk.js';
 
 const app = express();
@@ -97,7 +98,9 @@ const PORT = process.env.PORT || 4000;
 // HTTP + WebSocket 共用同一个端口：express app 挂在 http server 上，
 // Aviator 的实时通道走 /ws/aviator 这条独立 path，互不干扰。
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws/aviator' });
+// 多 WSS 挂同一 http server：用 noServer + 单一 upgrade 路由按 path 分发（避免多个 WSS 都 hook
+// 'upgrade' 事件时 perMessageDeflate 协商互撞导致 "RSV1 must be clear"）。
+const wss = new WebSocketServer({ noServer: true });
 
 // WS 握手认证：连接建立时用 query string 里的 token 校验身份，只允许 player 类型连接。
 // 这个 handler 在 startAviatorHub(wss) 之前注册，'connection' 事件的多个监听器按注册顺序
@@ -132,7 +135,40 @@ wss.on('connection', (ws, req) => {
 
 startAviatorHub(wss);
 
+// Momentum 实时通道走 /ws/momentum（独立 path，与 aviator 互不干扰）。同款握手认证（token + Origin）。
+const momentumWss = new WebSocketServer({ noServer: true });
+momentumWss.on('connection', (ws, req) => {
+  try {
+    const origin = req.headers.origin;
+    if (origin && !allowedOrigins.includes(origin)) { ws.close(1008, '来源不允许'); return; }
+    const url = new URL(req.url, 'http://localhost');
+    const token = url.searchParams.get('token');
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    if (payload.type !== 'player') throw new Error('仅玩家可连');
+    ws.playerId = payload.sub;
+    ws.playerName = payload.username;
+  } catch (e) {
+    console.error('[ws] Momentum WS 认证失败');
+    try { ws.close(1008, '认证失败'); } catch { /* 连接已异常 */ }
+  }
+});
+startMomentumHub(momentumWss);
+
+// 单一 upgrade 路由：按 pathname 分发到对应 WSS（noServer 模式各自不 hook upgrade，这里统一路由）。
+server.on('upgrade', (req, socket, head) => {
+  let pathname;
+  try { pathname = new URL(req.url, 'http://localhost').pathname; } catch { socket.destroy(); return; }
+  if (pathname === '/ws/aviator') {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  } else if (pathname === '/ws/momentum') {
+    momentumWss.handleUpgrade(req, socket, head, (ws) => momentumWss.emit('connection', ws, req));
+  } else {
+    socket.destroy();
+  }
+});
+
 server.listen(PORT, () => {
   console.log(`spribe-server 已启动，监听端口 ${PORT}`);
   console.log(`WebSocket 实时通道已就绪：ws://localhost:${PORT}/ws/aviator`);
+  console.log(`Momentum 实时通道已就绪：ws://localhost:${PORT}/ws/momentum`);
 });

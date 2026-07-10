@@ -8,7 +8,7 @@
 // （这是共享房间，不是某个玩家私有的一局），真正的归属关系落在 bets 表上。
 import { query, withTransaction } from '../db.js';
 import { debit, credit } from '../lib/wallet.js';
-import { assertBetWithinLimits, assertPayoutCap, RiskError } from '../lib/risk.js';
+import { assertBetWithinLimits, maxPayoutFor, assertRoundLiability, RiskError } from '../lib/risk.js';
 import { distributeLoss } from '../lib/commission.js';
 import {
   hashSeed,
@@ -237,6 +237,9 @@ async function handleBet(ws, msg) {
   // 这里就地转成 bet_rejected 帧并带 code，绝不落到下面兜底的「请重试」。
   try {
     assertBetWithinLimits('aviator', amount);
+    // 聚合负债闸：本局房间未兑现注潜在赔付（每注封顶 maxPayout）+ 本注 > maxRoomLiability 则拒
+    const openLiability = [...state.bets.values()].filter((b) => !b.cashedOut).length * maxPayoutFor('aviator');
+    assertRoundLiability('aviator', openLiability, maxPayoutFor('aviator'));
   } catch (err) {
     if (err instanceof RiskError) {
       sendJSON(ws, { type: 'bet_rejected', reason: err.message, code: err.code });
@@ -359,14 +362,12 @@ async function handleCashout(ws) {
   try {
     const { payout, balanceAfter } = await withTransaction(async (client) => {
       // 派彩金额交给 Postgres numeric 算乘法，避免 JS 浮点乘法的精度问题。
+      // 风控封顶改为【钳制】：付 LEAST(amount×mult, maxPayout)，让玩家能兑到封顶而非被拒（与 momentum 统一）。
       const payoutResult = await client.query(
-        'SELECT ($1::numeric * $2::numeric)::numeric(18,2) AS payout',
-        [bet.amount, mult],
+        'SELECT LEAST(($1::numeric * $2::numeric)::numeric(18,2), $3::numeric)::numeric(18,2) AS payout',
+        [bet.amount, mult, String(maxPayoutFor('aviator'))],
       );
       const computedPayout = payoutResult.rows[0].payout;
-
-      // 风控封顶：派彩不得超上限。RiskError 抛出后由下面的 catch 转成 cashout_rejected（带 code）。
-      assertPayoutCap('aviator', computedPayout);
 
       const { balanceAfter: after } = await credit(client, {
         playerId,

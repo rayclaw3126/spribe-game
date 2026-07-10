@@ -11,34 +11,25 @@ import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 import { useBgm } from '../components/shell/bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 
-// 单T2: Momentum random-walk engine + bet/cashout settlement.
-//
-// 随机游走推导（禁拍脑袋）: 每根柱 X ×= F(u)，u ~ U[0,1)：
-//   u < 0.5 → F = 0.58 + 0.84u ∈ [0.58, 1.00)   （跌，均值 0.79）
-//   u ≥ 0.5 → F = 1.00 + 0.6(u − 0.5) ∈ [1.00, 1.30]（涨，均值 1.15）
-//   E[F] = (0.79 + 1.15)/2 = 0.97。
-//   E[F] ≤ 0.97 ⇒ X_n 是超鞅（E[X_n] = 0.97^n），由可选停时定理，
-//   任意停时策略（首柱后才可兑现）的期望回报 E[X_τ] ≤ E[X_1] = 0.97。
-//   崩 0 吸收（X ≤ 0.05 → 0）只会再压低回报，红线保持成立。
-const BETTING_MS = 5000        // 对齐 crash 游戏等待窗口
-const STEP_MS = 700            // 每根柱间隔
-const MAX_BARS = 31            // 比赛分钟
-const BUST_AT = 0.05           // X ≤ 0.05 → 崩 0
-const ROUND_GAP_MS = 2000
+// Momentum —— 实时 crash 随机游走（逐柱 700ms），第 21 卡（收官）。
+// 全服务器权威：连 /ws/momentum，走势线逐柱用后端广播的 x（不本地 Math.random 走），
+// 下注/兑现发 WS 消息，兑现按服务端当前柱 X 结算（前端不报 X），余额只认后端 balanceAfter。
+// 可验证公平（照 Aviator 共享 crash）：betting 广播 commitHash（无 serverSeed），done reveal serverSeed，
+// 本地可用 game/momentum.js 的 walkPath 重算整条 31 柱路径校验。
+const BETTING_MS = 5000        // 对齐后端 betting 窗口
+const MAX_BARS = 31            // 封顶 31 柱
 const round2 = x => Math.round(x * 100) / 100
-const factorOf = u => (u < 0.5 ? 0.58 + 0.84 * u : 1 + 0.6 * (u - 0.5))
-// module-level randomness (event/engine time only)
-const drawU = () => Math.random()
 // log height mapping: 0.05 → 4%, 1 → ~50%, 20 → ~94% (防爆表)
 const barH = x => Math.min(94, Math.max(4, 6 + 88 * Math.log(Math.max(x, 0.055) / 0.05) / Math.log(400)))
 
-export default function Momentum({ balance, setBalance }) {
+export default function Momentum({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  const balance = serverBalance ?? 0
   const [bet, setBet] = useState(10)
   const [phase, setPhase] = useState('betting')   // betting | running | done
   const [countdown, setCountdown] = useState(BETTING_MS / 1000)
-  const [bars, setBars] = useState([])            // {f, x} per minute
+  const [bars, setBars] = useState([])            // {x, up} per bar（后端逐柱）
   const [busted, setBusted] = useState(false)
   const [playerBet, setPlayerBet] = useState(null)   // { amount, cashed, win }
   const [autoBet, setAutoBet] = useState(false)
@@ -51,19 +42,25 @@ export default function Momentum({ balance, setBalance }) {
   const [muted, setMuted] = useState(false)
   const [bgmOn, toggleBgm] = useBgm()
   const [roundId, setRoundId] = useState(0)
+  const [commitHash, setCommitHash] = useState(null)   // betting 承诺（可验证公平）
+  const [revealedSeed, setRevealedSeed] = useState(null) // done reveal
+  const [netErr, setNetErr] = useState(null)
 
   const phaseRef = useRef('betting')
-  const xRef = useRef(1)
   const barsRef = useRef([])
-  const betRef = useRef(null)
+  const playerBetRef = useRef(null)
   const autoRef = useRef({ betOn: false, cashOn: false, mult: 2 })
-  const balanceRef = useRef(balance)
   const betAmtRef = useRef(10)
+  const roundIdRef = useRef(0)
   const timersRef = useRef([])
   const toastIdRef = useRef(0)
   const audioRef = useRef({ ctx: null, muted: false })
+  // WS
+  const wsRef = useRef(null)
+  const reconnectAttemptRef = useRef(0)
+  const reconnectTimerRef = useRef(null)
+  const cdTimerRef = useRef(null)
 
-  useEffect(() => { balanceRef.current = balance }, [balance])
   useEffect(() => { betAmtRef.current = bet }, [bet])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => { autoRef.current = { betOn: autoBet, cashOn: autoCashOn, mult: autoCashMult } }, [autoBet, autoCashOn, autoCashMult])
@@ -115,111 +112,158 @@ export default function Momentum({ balance, setBalance }) {
     setToasts(t => [...t, { id, label, win }])
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
   }
-  function credit(delta) {   // single money path for payouts
-    setBalance(b => round2(b + delta))
+  // ---------- 倒计时（betting 显示用；相位由 WS 驱动）----------
+  function startCountdown(ms) {
+    if (cdTimerRef.current) clearInterval(cdTimerRef.current)
+    const deadline = performance.now() + ms
+    setCountdown(Math.ceil(ms / 1000))
+    cdTimerRef.current = setInterval(() => {
+      const remain = Math.max(0, deadline - performance.now())
+      setCountdown(Math.ceil(remain / 1000))
+      if (remain <= 0 && cdTimerRef.current) { clearInterval(cdTimerRef.current); cdTimerRef.current = null }
+    }, 250)
   }
 
-  // ---------- round loop ----------
-  function startBetting() {
+  // ---------- WS 消息处理（唯一相位/数值/资金来源）----------
+  function onBettingMsg(msg) {
     phaseRef.current = 'betting'; setPhase('betting')
-    xRef.current = 1; barsRef.current = []
-    setBars([]); setBusted(false)
-    betRef.current = null; setPlayerBet(null)
+    barsRef.current = []; setBars([]); setBusted(false)
+    playerBetRef.current = null; setPlayerBet(null)
+    roundIdRef.current = msg.roundId; setRoundId(msg.roundId)
+    setCommitHash(msg.commitHash); setRevealedSeed(null)
     setFeedBets(makeFeedBots())
-    setRoundId(id => id + 1)
-    setCountdown(BETTING_MS / 1000)
-    for (let s = 1; s < BETTING_MS / 1000; s++) later(() => setCountdown(c => c - 1), s * 1000)
-    // auto bet places itself at window open
-    later(() => { if (autoRef.current.betOn) placeBet() }, 60)
-    later(startRound, BETTING_MS)
+    startCountdown(msg.remainingMs != null ? msg.remainingMs : (msg.waitMs || BETTING_MS))
+    // 自动下注：本局 betting 开窗就发（若上一局勾了自动）
+    if (autoRef.current.betOn && !playerBetRef.current) later(() => placeBet(), 80)
   }
-
-  function startRound() {
-    phaseRef.current = 'running'; setPhase('running')
-    later(step, STEP_MS)
-  }
-
-  function step() {
-    if (phaseRef.current !== 'running') return
-    const u = drawU()                       // draw first — nothing else may touch the queue
-    const f = factorOf(u)
-    let x = xRef.current * f
-    const bust = x <= BUST_AT
-    if (bust) x = 0
-    xRef.current = x
-    barsRef.current = [...barsRef.current, { f, x }]
+  function pushBar(barIdx, x) {
+    const prev = barsRef.current.length ? barsRef.current[barsRef.current.length - 1].x : 1
+    const up = x >= prev && x > 0
+    barsRef.current = [...barsRef.current, { x, up, barIdx }]
     setBars(barsRef.current)
-    playStep(f >= 1)
-    // auto cashout — 按目标价结算 (pays the target, not the overshoot)
-    const b = betRef.current
-    if (!bust && b && !b.cashed && autoRef.current.cashOn && x >= autoRef.current.mult) {
-      settlePlayer(autoRef.current.mult)
-    }
-    if (bust) {
-      setBusted(true)
-      playCrash()
-      endRound(0)
-    } else if (barsRef.current.length >= MAX_BARS) {
-      endRound(x)                            // 31 柱走完按最终 X 自动结算
-    } else {
-      later(step, STEP_MS)
-    }
+    if (phaseRef.current !== 'running') { phaseRef.current = 'running'; setPhase('running') }
+    playStep(up)
   }
-
-  function settlePlayer(atX) {
-    const b = betRef.current
-    if (!b || b.cashed) return
-    const payout = round2(b.amount * atX)
-    b.cashed = true; b.win = payout
-    setPlayerBet({ ...b })
-    if (payout > 0) { credit(payout); pushToast(`${atX.toFixed(2)}×`, payout); playCash() }
-  }
-
-  function endRound(finalX) {
+  function onBarMsg(msg) { pushBar(msg.barIdx, msg.x) }
+  function onDoneMsg(msg) {
     phaseRef.current = 'done'; setPhase('done')
-    const b = betRef.current
-    if (b && !b.cashed && finalX > 0) settlePlayer(finalX)   // 兑现<1 也照付
-    const xs = [1, ...barsRef.current.map(bb => bb.x)]
+    const finalX = Number(msg.finalX)
+    const bust = finalX <= 0
+    setBusted(bust)
+    setRevealedSeed(msg.serverSeed)   // reveal（可用 walkPath 本地重算校验）
+    if (bust) playCrash()
+    const xs = [1, ...barsRef.current.map(b => b.x)]
     setLastRange({ min: Math.min(...xs), max: Math.max(...xs) })
     setRoundHistory(h => [round2(finalX), ...h].slice(0, 12))
-    // fake feed rows settle: ~45% cash green, the rest grey out
     setFeedBets(list => list.map(r => Math.random() < 0.45
       ? { ...r, status: 'cashed', target: Number(r.target.toFixed(2)), payout: Number((r.bet * r.target).toFixed(2)) }
       : { ...r, status: 'crashed' }))
-    later(startBetting, ROUND_GAP_MS)
+    // 未兑现且 bust → 本局输（余额已在下注时扣，不返）；survive 由后端发 final cashout_ok 处理
+  }
+  function onBetAck(msg) {
+    if (msg.idempotent) return
+    playerBetRef.current = { amount: Number(msg.amount), cashed: false, win: 0 }
+    setPlayerBet({ ...playerBetRef.current })
+    if (msg.balanceAfter != null) setServerBalance(Number(msg.balanceAfter))
+    setNetErr(null)
+  }
+  function onBetRejected(msg) {
+    playerBetRef.current = null; setPlayerBet(null)
+    setNetErr(msg.reason || '下注被拒')
+  }
+  function onCashoutOk(msg) {
+    const b = playerBetRef.current
+    if (b) { b.cashed = true; b.win = Number(msg.payout); setPlayerBet({ ...b }) }
+    if (msg.balanceAfter != null) setServerBalance(Number(msg.balanceAfter))
+    pushToast(`${Number(msg.multiplier).toFixed(2)}×`, Number(msg.payout))
+    playCash()
+  }
+  function onCashoutRejected(msg) { setNetErr(msg.reason || '兑现被拒') }
+  function onSnapshot(msg) {
+    // 断线重连 / 中途加入：按当前相位重放
+    if (msg.phase === 'betting') { onBettingMsg(msg) }
+    else if (msg.phase === 'running') {
+      phaseRef.current = 'running'; setPhase('running')
+      roundIdRef.current = msg.roundId; setRoundId(msg.roundId)
+      setCommitHash(msg.commitHash); setRevealedSeed(null)
+      barsRef.current = (msg.bars || []).map((b, i, arr) => ({ x: b.x, up: b.x >= (i ? arr[i - 1].x : 1) && b.x > 0, barIdx: b.barIdx }))
+      setBars(barsRef.current); setBusted(false)
+    } else {
+      phaseRef.current = 'done'; setPhase('done')
+      setCommitHash(msg.commitHash); setRevealedSeed(msg.serverSeed)
+    }
   }
 
-  // ---------- player actions ----------
+  // ---------- player actions（发 WS，服务端权威）----------
   function placeBet() {
-    if (phaseRef.current !== 'betting' || betRef.current) return
+    if (phaseRef.current !== 'betting' || playerBetRef.current) return
     const amt = betAmtRef.current
-    if (amt > balanceRef.current || amt < 1) return
+    if (amt > balance || amt < 1) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) { setNetErr('连接断开，正在重连…'); return }
     ensureAudio()
-    setBalance(bb => round2(bb - amt))
-    betRef.current = { amount: amt, cashed: false, win: 0 }
-    setPlayerBet({ ...betRef.current })
-  }
-  function cancelBet() {
-    if (phaseRef.current !== 'betting' || !betRef.current) return
-    credit(betRef.current.amount)
-    betRef.current = null
-    setPlayerBet(null)
+    playerBetRef.current = { amount: amt, cashed: false, win: 0, pending: true }   // 乐观占位，等 bet_ack
+    setPlayerBet({ ...playerBetRef.current })
+    ws.send(JSON.stringify({ type: 'bet', amount: amt, autoTarget: autoRef.current.cashOn ? autoRef.current.mult : undefined }))
   }
   function cashNow() {
-    if (phaseRef.current !== 'running' || !betRef.current || betRef.current.cashed) return
-    if (barsRef.current.length === 0) return   // 首柱后才可兑现（RTP 红线前提）
-    settlePlayer(xRef.current)
+    if (phaseRef.current !== 'running' || !playerBetRef.current || playerBetRef.current.cashed) return
+    if (barsRef.current.length === 0) return   // 首柱后才可兑现
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: 'cashout' }))   // 不报 X，服务端按当前柱结算
   }
 
-  // engine lifecycle
+  // ---------- WebSocket 连接（唯一相位/数值/资金来源；照 Aviator 前端）----------
   useEffect(() => {
-    startBetting()
-    return () => {
-      timersRef.current.forEach(clearTimeout)
-      timersRef.current = []
+    if (!playerToken) return undefined
+    let cancelled = false
+    function dispatch(msg) {
+      switch (msg.type) {
+        case 'hello': if (msg.balance != null) setServerBalance(Number(msg.balance)); break
+        case 'snapshot': onSnapshot(msg); break
+        case 'betting': onBettingMsg(msg); break
+        case 'bar': onBarMsg(msg); break
+        case 'done': onDoneMsg(msg); break
+        case 'settled': break
+        case 'bet_ack': onBetAck(msg); break
+        case 'bet_rejected': onBetRejected(msg); break
+        case 'cashout_ok': onCashoutOk(msg); break
+        case 'cashout_rejected': onCashoutRejected(msg); break
+        default: break
+      }
     }
+    function connect() {
+      if (cancelled) return
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const ws = new WebSocket(`${proto}://${window.location.host}/ws/momentum?token=${encodeURIComponent(playerToken)}`)
+      wsRef.current = ws
+      ws.onopen = () => {
+        const wasReconnect = reconnectAttemptRef.current > 0
+        reconnectAttemptRef.current = 0
+        if (wasReconnect) ws.send(JSON.stringify({ type: 'sync' }))
+      }
+      ws.onmessage = e => { let m; try { m = JSON.parse(e.data) } catch { return } dispatch(m) }
+      ws.onclose = () => {
+        if (cancelled) return
+        const attempt = reconnectAttemptRef.current + 1
+        reconnectAttemptRef.current = attempt
+        reconnectTimerRef.current = setTimeout(connect, Math.min(10000, 1000 * Math.pow(2, attempt - 1)))
+      }
+      ws.onerror = () => {}
+    }
+    connect()
+    return () => {
+      cancelled = true
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null }
+      if (cdTimerRef.current) { clearInterval(cdTimerRef.current); cdTimerRef.current = null }
+      timersRef.current.forEach(clearTimeout); timersRef.current = []
+      if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.onerror = null; wsRef.current.onmessage = null; wsRef.current.close() }
+    }
+    // 相位/数值全由 WS 分发；重连只依赖 token
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [playerToken])
 
   // ---------- derived ----------
   const X = bars.length ? bars[bars.length - 1].x : 1
@@ -234,7 +278,7 @@ export default function Momentum({ balance, setBalance }) {
   }
   const shellBtn = (() => {
     if (phase === 'betting') {
-      if (playerBet) return { state: 'cancel', label: '取消', sub: `$${playerBet.amount.toFixed(2)}`, onClick: cancelBet }
+      if (playerBet) return { state: 'waiting', label: '已下注', sub: `$${playerBet.amount.toFixed(2)}`, disabled: true }
       return { state: 'bet', label: `下注 $${Number(bet).toFixed(2)}`, onClick: placeBet, disabled: bet > balance || bet < 1 }
     }
     if (phase === 'running' && playerBet && !playerBet.cashed) {
@@ -279,6 +323,25 @@ export default function Momentum({ balance, setBalance }) {
             repeating-linear-gradient(90deg, ${MOMENTUM.grid} 0px, ${MOMENTUM.grid} 1px, transparent 1px, transparent 42px)`,
         }} />
         <WinToast toasts={toasts} />
+
+        {/* ⚖ 可验证公平（共享 crash commit-reveal）：betting 显 commitHash 承诺；done reveal serverSeed */}
+        <div style={{
+          position: 'absolute', top: isDesk ? 14 : 52, right: 12, zIndex: 2,
+          padding: '3px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.35)',
+          border: '1px solid rgba(255,255,255,0.14)', maxWidth: isMobile ? 130 : 190,
+        }} title={revealedSeed ? `serverSeed(reveal): ${revealedSeed}` : `commitHash: ${commitHash || ''}`}>
+          <span style={{ color: MOMENTUM.dim, fontSize: 9, fontWeight: 800 }}>⚖ {revealedSeed ? 'seed揭晓' : '承诺'} </span>
+          <span style={{ color: revealedSeed ? MOMENTUM.green : MOMENTUM.dim, fontSize: 9, fontWeight: 700, fontFamily: 'monospace' }}>
+            {(revealedSeed || commitHash || '……').slice(0, 10)}…
+          </span>
+        </div>
+        {netErr && (
+          <div style={{
+            position: 'absolute', top: isDesk ? 44 : 84, left: '50%', transform: 'translateX(-50%)', zIndex: 4,
+            background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 8,
+            padding: '5px 12px', color: '#ff8a9a', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap',
+          }} onClick={() => setNetErr(null)}>{netErr}</div>
+        )}
 
         {/* audio toggles — card top-right */}
         <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
@@ -349,7 +412,7 @@ export default function Momentum({ balance, setBalance }) {
         <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 140, marginTop: 8 }}>
           {bars.map((b, i) => {
             const isBustBar = b.x === 0
-            const up = b.f >= 1 && !isBustBar
+            const up = b.up && !isBustBar
             return (
               <span key={i} style={{
                 position: 'absolute', bottom: 0,

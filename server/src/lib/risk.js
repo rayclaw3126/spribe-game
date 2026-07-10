@@ -93,3 +93,23 @@ export function assertExposureWithinLimit(game, currentOpenTotal, currentOpenCou
   }
   return true;
 }
+
+/**
+ * 共享 crash 房间的「本局聚合负债闸」（momentum / aviator 共用）。
+ * 一局房间的总潜在赔付 = Σ 未兑现注的潜在赔付（每注封顶 = maxPayout，钳制后单注上限）；
+ * 加上新注后超 config 的 maxRoomLiability 则拒（防单局灾难性总赔付）。
+ * currentRoomLiability / newBetPotential 由 hub 算好传入（不查 DB）。
+ * 未配 maxRoomLiability 的 game 不启用此闸。
+ * @param {string} game
+ * @param {number} currentRoomLiability 现有未兑现注潜在赔付总额
+ * @param {number} newBetPotential 本注潜在赔付（一般 = maxPayoutFor(game)）
+ */
+export function assertRoundLiability(game, currentRoomLiability, newBetPotential) {
+  const maxRoom = Number(limitsFor(game).maxRoomLiability);
+  if (!Number.isFinite(maxRoom)) return true;   // 未配则不启用
+  const total = Number(currentRoomLiability) + Number(newBetPotential);
+  if (total > maxRoom) {
+    throw new RiskError('round_liability_exceeded', `Room liability ${total.toFixed(2)} exceeds ${maxRoom.toFixed(2)}`);
+  }
+  return true;
+}
