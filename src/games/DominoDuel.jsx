@@ -8,6 +8,7 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 
 // Domino Duel — 骨牌版主客对决（闲庄→主蓝客红），第 21 卡。
@@ -212,10 +213,14 @@ function DominoTile({ a, b, size = 34, flip = false, delay = 0, dur = 0.55, back
   )
 }
 
-export default function DominoDuel({ balance, setBalance, onBack }) {
+const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `dominoduel-${Date.now()}-${Math.random()}`)
+
+export default function DominoDuel({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bet, setBet] = useState(10)
+  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -235,8 +240,10 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
   const betsRef = useRef(new Map())
   const lastBetsRef = useRef(new Map())
   const betRef = useRef(bet)
-  const balanceRef = useRef(balance)
+  const balanceRef = useRef(serverBalance)
   const pendingRef = useRef(null)
+  const pendingDataRef = useRef(null)   // 后端 /dominoduel/play 返回（settleRound 消费）
+  const transitioningRef = useRef(false)  // 开奖 POST 进行中，防 tick 重入
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
 
@@ -244,7 +251,7 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const audioRef = useRef({ ctx: null, muted: false })
 
-  useEffect(() => { balanceRef.current = balance }, [balance])
+  useEffect(() => { balanceRef.current = serverBalance }, [serverBalance])
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
@@ -343,17 +350,36 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
     timersRef.current.push(tm)
   }
 
-  // 唯一赔付点：读 pendingRef 结果，按已下注 Map 一次性入账；push = 退回本金
+  // 后端请求封装（余额只认后端 balanceAfter）
+  async function apiPost(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
+    return data
+  }
+  const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b), 0)
+
+  // 唯一赔付点：读后端 /dominoduel/play 结算结果（hit/push/lose 三态；余额只认 balanceAfter）
   function settleRound() {
     const r = pendingRef.current
-    const hits = hitsOf(r)
-    const pushes = pushesOf(r)
-    let winTotal = 0, refundTotal = 0
-    betsRef.current.forEach((stake, k) => {
-      if (hits.has(k)) winTotal = round2(winTotal + stake * MARKETS[k].odds)
-      else if (pushes.has(k)) refundTotal = round2(refundTotal + stake)
-    })
-    if (winTotal + refundTotal > 0) setBalance(b => round2(b + winTotal + refundTotal))
+    const data = pendingDataRef.current
+    let hits, pushes, winTotal = 0, refundTotal = 0
+    if (data) {
+      // 后端三态：outcome hit → 命中高亮（波胆高赔）+ winTotal；outcome push → 退注高亮 + refundTotal（退本金）
+      hits = new Set(); pushes = new Set()
+      for (const [k, v] of Object.entries(data.perKeyOutcome || {})) {
+        if (v.outcome === 'hit') { hits.add(k); winTotal = round2(winTotal + Number(v.payout)) }
+        else if (v.outcome === 'push') { pushes.add(k); refundTotal = round2(refundTotal + Number(v.payout)) }
+      }
+      if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))
+    } else {
+      // 无注/开奖失败：仅显示，不动钱
+      hits = hitsOf(r); pushes = pushesOf(r)
+    }
     if (winTotal > 0) pushToast('本期命中', winTotal)
     if (refundTotal > 0) pushToast('平局退注', refundTotal)   // push 区分文案
     setLastRound(r)
@@ -367,15 +393,32 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
 
   // 单 interval 驱动整台状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
   useEffect(() => {
-    const id = setInterval(() => {
+    const id = setInterval(async () => {
+      if (transitioningRef.current) return   // 开奖 POST 进行中，别再 tick
       cdRef.current -= 1
       if (cdRef.current > 0) { setCountdown(cdRef.current); return }
       const ph = phaseRef.current
       const go = (next, ticks) => { phaseRef.current = next; setGamePhase(next); cdRef.current = ticks; setCountdown(ticks) }
       if (ph === 'betting') {
-        let forced = null
-        if (import.meta.env.DEV && window.__DOM_FORCE) { forced = window.__DOM_FORCE; window.__DOM_FORCE = null }
-        pendingRef.current = deriveRound(forced || rollTiles())
+        // 结果此刻锁定 —— 有注则走后端开奖+结算，无注则本地开奖仅显示（不动钱）
+        if (betsRef.current.size > 0) {
+          transitioningRef.current = true
+          try {
+            const data = await apiPost('/round/dominoduel/play', { bets: Object.fromEntries(betsRef.current), idempotencyKey: genIdemKey() })
+            pendingDataRef.current = data
+            pendingRef.current = deriveRound(data.drawResult.tiles)   // ← 后端 4 骨牌（hs/as 按后端算，不本地 rollTiles）
+          } catch (e) {
+            setNetErr(e.message)
+            pendingDataRef.current = null
+            pendingRef.current = deriveRound(rollTiles())   // 失败：本地开奖仅显示，注单未扣（暂存不扣钱）
+          }
+          transitioningRef.current = false
+        } else {
+          pendingDataRef.current = null
+          let forced = null
+          if (import.meta.env.DEV && window.__DOM_FORCE) { forced = window.__DOM_FORCE; window.__DOM_FORCE = null }
+          pendingRef.current = deriveRound(forced || rollTiles())
+        }
         if (import.meta.env.DEV) window.__DOM_ANIM_LAST = pendingRef.current.tiles.map(t => t.join('|')).join(',')
         go('drawing', DRAW_T)
       } else if (ph === 'drawing') {
@@ -406,14 +449,14 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
     })
   }
 
-  // 唯一扣注点：确认/重复共用（一次性扣款后入 betsRef，照 Derby Day）
+  // 唯一暂存点：确认/重复共用（暂存不扣钱，钱只在开奖 POST 那一刻走）
   function placeBets(entries) {
     if (phaseRef.current !== 'betting') return false
     let total = 0
     entries.forEach(s => { total = round2(total + s) })
-    if (!entries.size || total <= 0 || total > balanceRef.current) return false
-    setBalance(b => round2(b - total))
-    balanceRef.current = round2(balanceRef.current - total)
+    // 暂存不扣钱：已暂存总额 + 本次不能超过后端余额
+    if (!entries.size || total <= 0 || (serverBalance != null && total > round2(serverBalance - stagedTotal()))) return false
+    setNetErr(null)
     entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
     setBetsPlaced(new Map(betsRef.current))
     return true
@@ -431,10 +474,10 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
 
   const betting = gamePhase === 'betting'
   const confirmTotal = round2(bet * picks.size)
-  const confirmOk = betting && picks.size > 0 && bet >= 1 && confirmTotal <= balance
+  const confirmOk = betting && picks.size > 0 && bet >= 1 && (serverBalance == null || confirmTotal <= round2(serverBalance - stagedTotal()))
   let lastTotal = 0
   lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
-  const repeatOk = betting && hasLast && lastTotal > 0 && lastTotal <= balance
+  const repeatOk = betting && hasLast && lastTotal > 0 && (serverBalance == null || lastTotal <= round2(serverBalance - stagedTotal()))
   const oddsStr = slot => MARKETS[slot].odds.toFixed(2)
   // 对决区当前展示局：betting 显上局回顾；drawing/settled 显本局开牌
   const shown = gamePhase !== 'betting' && pendingRef.current ? pendingRef.current : lastRound
@@ -516,9 +559,19 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
     }}>{phaseInfo.text}{phaseInfo.cd && <span style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{secs}</span>}</span>
   )
   const topBar = (
-    <GameTopBar gameName="骨牌对决" venue={VENUE}
-      roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-      phaseChip={phaseChipNode} onHowTo={() => setRulesOpen(true)} onBack={onBack} />
+    <>
+      <GameTopBar gameName="骨牌对决" venue={VENUE}
+        roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
+        phaseChip={phaseChipNode} onHowTo={() => setRulesOpen(true)} onBack={onBack} onFairness={() => setFairOpen(true)} />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={VENUE} playerToken={playerToken} game="dominoduel" />
+      {netErr && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
+          background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
+        }} onClick={() => setNetErr(null)}>{netErr}</div>
+      )}
+    </>
   )
 
   // ---- ① 对决区：主(蓝) VS 客(红)，各两张骨牌 + 比分（drawing 翻牌演出）----
@@ -767,7 +820,7 @@ export default function DominoDuel({ balance, setBalance, onBack }) {
         }}>
           <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>骨牌对决</strong>
           <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
+            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
           </span>
         </div>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>

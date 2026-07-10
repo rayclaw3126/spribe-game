@@ -70,6 +70,7 @@ import * as halfTimeEngine from '../game/halfTime.js';
 import * as wuXingEngine from '../game/wuXing.js';
 import * as lineUpEngine from '../game/lineUp.js';
 import * as derbyDayEngine from '../game/derbyDay.js';
+import * as dominoDuelEngine from '../game/dominoDuel.js';
 
 const router = Router();
 
@@ -1004,6 +1005,12 @@ const ROUND_GAME_REGISTRY = {
     hasPush: derbyDayEngine.HAS_PUSH,
     spin: derbyDayEngine.spin,
   },
+  dominoduel: {
+    MARKETS: dominoDuelEngine.MARKETS,
+    isValidMarketKey: dominoDuelEngine.isValidMarketKey,
+    hasPush: dominoDuelEngine.HAS_PUSH,
+    spin: dominoDuelEngine.spin,
+  },
 };
 
 /** 按幂等键查询已存在的某轮次游戏局（跨事务普通查询），供幂等返回 */
@@ -1207,6 +1214,7 @@ router.post('/halftime/play', requireAuth, requireType('player'), makeRoundGameH
 router.post('/wuxing/play', requireAuth, requireType('player'), makeRoundGameHandler('wuxing'));
 router.post('/lineup/play', requireAuth, requireType('player'), makeRoundGameHandler('lineup'));
 router.post('/derbyday/play', requireAuth, requireType('player'), makeRoundGameHandler('derbyday'));
+router.post('/dominoduel/play', requireAuth, requireType('player'), makeRoundGameHandler('dominoduel'));
 
 /** 按幂等键查询已存在的 plinko 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
 async function findPlinkoBetByIdempotencyKey(idempotencyKey) {
