@@ -12,6 +12,7 @@ import roundRouter from './routes/round.js';
 import agentRouter from './routes/agent.js';
 import playerRouter from './routes/player.js';
 import seedRouter from './routes/seed.js';
+import issuesRouter from './routes/issues.js';
 import { startAviatorHub } from './ws/aviatorHub.js';
 import { startMomentumHub } from './ws/momentumHub.js';
 import { RiskError } from './lib/risk.js';
@@ -66,6 +67,7 @@ app.use('/round', roundRouter);
 app.use('/agent', agentRouter);
 app.use('/player', playerRouter);
 app.use('/seed', seedRouter);
+app.use('/issues', issuesRouter);
 
 // 404 兜底
 app.use((req, res) => {
