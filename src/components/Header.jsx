@@ -29,14 +29,12 @@ export default function Header({ balance, onHome, onLogout }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 18,
         }}>⚽</span>
-        {!isMobile && (
-          <span style={{
-            fontFamily: "'Space Grotesk', sans-serif",
-            fontWeight: 800, fontSize: 19,
-            color: '#e8edf2',
-            letterSpacing: '0.4px',
-          }}>SPORTS</span>
-        )}
+        <span style={{
+          fontFamily: "'Space Grotesk', sans-serif",
+          fontWeight: 800, fontSize: isMobile ? 16 : 19,
+          color: '#e8edf2',
+          letterSpacing: '0.4px',
+        }}>SPORTS</span>
       </button>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
