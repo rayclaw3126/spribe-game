@@ -135,3 +135,11 @@ export function patchTenant(id, patch) {
 export function getDashboardStats() {
   return request('/dashboard/stats')
 }
+
+// ---- 平台费流水 ----
+export function getFees({ tenantId, range } = {}) {
+  const params = new URLSearchParams()
+  if (tenantId && tenantId !== 'all') params.set('tenant_id', tenantId)
+  if (range) params.set('range', range)
+  return request(`/fees/list?${params.toString()}`)
+}

@@ -16,8 +16,9 @@ export default defineConfig({
       '/auth': proxyTarget('http://127.0.0.1:4000'),
       '/issues': proxyTarget('http://127.0.0.1:4000'),
       '/tenants': proxyTarget('http://127.0.0.1:4000'),
-      // 注意：只代理 API 路径 /dashboard/stats，不能代理 /dashboard（那是前端页面路由，会被抢走）。
+      // 注意：只代理 API 子路径，不能代理 /dashboard 或 /fees（那是前端页面路由，会被抢走）。
       '/dashboard/stats': proxyTarget('http://127.0.0.1:4000'),
+      '/fees/list': proxyTarget('http://127.0.0.1:4000'),
       '/uploads': proxyTarget('http://127.0.0.1:4000'),
     },
   },
