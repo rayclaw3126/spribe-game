@@ -13,8 +13,8 @@ const NAV_GROUPS = [
   {
     title: '商家管理',
     items: [
+      // 「开商家」侧栏入口已删，改由商家列表页右上「+ 开商家」按钮进 /merchants/new（路由保留）。
       { to: '/merchants', label: '商家列表', icon: 'building-store' },
-      { to: '/merchants/new', label: '开商家', icon: 'plus' },
       { to: '/skins', label: '换肤配置台', icon: 'palette' },
     ],
   },

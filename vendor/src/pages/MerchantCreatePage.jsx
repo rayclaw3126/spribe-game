@@ -1,6 +1,7 @@
-// 开商家表单页（本单纯 UI，不接后端、不建表）。表单款式照 SubmitIssueModal 的 fieldStyle/Field，
-// 页头/配色照 MerchantsPage 深蓝专业风。返回/开通/取消 本单先留空（onClick 空），接线等后续单。
+// 开商家表单页（纯 UI，不接后端、不建表）。表单款式照 SubmitIssueModal 的 fieldStyle/Field，
+// 页头/配色照 MerchantsPage 深蓝专业风。返回/取消 跳回 /merchants；「开通」仍留空（接后端等后续单）。
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
 import { SKIN_OPTIONS } from '../data/merchants.js'
 
@@ -80,14 +81,17 @@ function StatusToggle({ value, onChange }) {
 }
 
 export default function MerchantCreatePage() {
+  const navigate = useNavigate()
   const [name, setName] = useState('')
   const [domain, setDomain] = useState('')
   const [skin, setSkin] = useState(SKIN_OPTIONS[0])
   const [status, setStatus] = useState('active')
 
+  const goBack = () => navigate('/merchants')
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg, maxWidth: 560 }}>
-      <PageHeader onBack={() => {}} />
+      <PageHeader onBack={goBack} />
 
       <div
         style={{
@@ -125,7 +129,7 @@ export default function MerchantCreatePage() {
         <div style={{ display: 'flex', gap: SPACE.sm, justifyContent: 'flex-end', marginTop: SPACE.xs }}>
           <button
             type="button"
-            onClick={() => {}}
+            onClick={goBack}
             style={{
               padding: '10px 18px',
               fontSize: 14,

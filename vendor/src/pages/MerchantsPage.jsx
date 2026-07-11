@@ -1,5 +1,6 @@
 // 商家管理页（本单纯 UI + 假数据，不接后端）。骨架/工具栏/表格照 SystemIssuesPage + DataTable 同款。
 // 「+ 开商家」「编辑」「停用/启用」本单先留空（onClick 空），接线/开商家页等后续单。
+import { useNavigate } from 'react-router-dom'
 import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
 import { MERCHANTS_FAKE, MERCHANT_STATUS } from '../data/merchants.js'
 import DataTable from '../components/DataTable.jsx'
@@ -100,11 +101,12 @@ const COLUMNS = [
 ]
 
 export default function MerchantsPage() {
+  const navigate = useNavigate()
   const rows = MERCHANTS_FAKE
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg, maxWidth: 1040 }}>
-      <PageHeader onCreate={() => {}} />
+      <PageHeader onCreate={() => navigate('/merchants/new')} />
       <div style={{ fontSize: 12.5, color: COLORS.textFaint }}>共 {rows.length} 个商家</div>
       <DataTable columns={COLUMNS} rows={rows} rowKey="id" emptyText="还没有开通任何商家" />
     </div>
