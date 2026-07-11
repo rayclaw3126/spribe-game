@@ -2,7 +2,7 @@
 // 「保存皮肤」→ PATCH /tenants/:id {skin}（复用 patchTenant），成功 toast + 该商家当前皮肤更新、保存钮回禁用。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
-import { SKIN_OPTIONS, SKIN_COLORS } from '../data/skins.js'
+import { SKINS, skinLabel, skinColor } from '../data/skins.js'
 import { listTenants, patchTenant } from '../api/client.js'
 import { useToast } from '../state/ToastContext.jsx'
 import EmptyState from '../components/EmptyState.jsx'
@@ -39,13 +39,13 @@ function PageHeader({ tenants, selectedId, onSelect }) {
   )
 }
 
-// 单张皮肤卡：主色块 + 皮肤名 + 选中态（打勾高亮）。
-function SkinCard({ name, selected, onSelect }) {
-  const color = SKIN_COLORS[name]
+// 单张皮肤卡：主色块 + 皮肤名(中文 label) + 选中态（打勾高亮）。code 为存库代号。
+function SkinCard({ code, label, selected, onSelect }) {
+  const color = skinColor(code)
   return (
     <button
       type="button"
-      onClick={() => onSelect(name)}
+      onClick={() => onSelect(code)}
       style={{
         flex: '1 1 150px',
         minWidth: 150,
@@ -62,7 +62,7 @@ function SkinCard({ name, selected, onSelect }) {
     >
       <div style={{ height: 56, borderRadius: RADIUS.sm, background: color }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 13.5, fontWeight: 600, color: COLORS.text }}>{name}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: COLORS.text }}>{label}</span>
         {selected && <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.primary }}>✓ 已选</span>}
       </div>
     </button>
@@ -71,10 +71,10 @@ function SkinCard({ name, selected, onSelect }) {
 
 // 预览区：套选中皮肤主色的小 mock（顶栏 + 按钮 + 卡片）。
 function PreviewMock({ skin }) {
-  const color = SKIN_COLORS[skin]
+  const color = skinColor(skin)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.sm }}>
-      <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.text }}>皮肤预览 · {skin}</span>
+      <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.text }}>皮肤预览 · {skinLabel(skin)}</span>
       <div style={{ maxWidth: 380, border: `1px solid ${COLORS.border}`, borderRadius: RADIUS.md, overflow: 'hidden', background: COLORS.bg }}>
         <div style={{ height: 40, background: color, display: 'flex', alignItems: 'center', gap: 8, padding: `0 ${SPACE.md}px` }}>
           <span style={{ width: 18, height: 18, borderRadius: 5, background: 'rgba(255,255,255,0.9)' }} />
@@ -98,7 +98,7 @@ export default function SkinsPage() {
   const { push } = useToast()
   const [tenants, setTenants] = useState([])
   const [selectedId, setSelectedId] = useState('')
-  const [skin, setSkin] = useState(SKIN_OPTIONS[0])
+  const [skin, setSkin] = useState(SKINS[0].code)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -113,7 +113,7 @@ export default function SkinsPage() {
       setTenants(items)
       if (items.length) {
         setSelectedId(String(items[0].id))
-        setSkin(items[0].skin || SKIN_OPTIONS[0])
+        setSkin(items[0].skin || SKINS[0].code)
       }
     } catch (err) {
       setError(err.message || '加载失败')
@@ -131,7 +131,7 @@ export default function SkinsPage() {
   function pickMerchant(id) {
     setSelectedId(id)
     const t = tenants.find((x) => String(x.id) === String(id))
-    setSkin(t?.skin || SKIN_OPTIONS[0])
+    setSkin(t?.skin || SKINS[0].code)
   }
 
   const dirty = Boolean(current) && skin !== currentSkin
@@ -172,12 +172,12 @@ export default function SkinsPage() {
       <PageHeader tenants={tenants} selectedId={selectedId} onSelect={pickMerchant} />
 
       <div style={{ fontSize: 12.5, color: COLORS.textFaint }}>
-        {current?.name} 当前皮肤：<strong style={{ color: COLORS.textMuted }}>{currentSkin || '—'}</strong>
+        {current?.name} 当前皮肤：<strong style={{ color: COLORS.textMuted }}>{skinLabel(currentSkin)}</strong>
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.md }}>
-        {SKIN_OPTIONS.map((s) => (
-          <SkinCard key={s} name={s} selected={skin === s} onSelect={setSkin} />
+        {SKINS.map((s) => (
+          <SkinCard key={s.code} code={s.code} label={s.label} selected={skin === s.code} onSelect={setSkin} />
         ))}
       </div>
 

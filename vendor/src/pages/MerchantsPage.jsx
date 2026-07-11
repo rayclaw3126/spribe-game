@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
 import { MERCHANT_STATUS } from '../data/merchants.js'
+import { skinLabel } from '../data/skins.js'
 import { listTenants, patchTenant } from '../api/client.js'
 import { useToast } from '../state/ToastContext.jsx'
 import DataTable from '../components/DataTable.jsx'
@@ -142,7 +143,7 @@ export default function MerchantsPage() {
   const columns = [
     { key: 'name', label: '商家名', render: (r) => <strong style={{ color: COLORS.text, fontWeight: 600 }}>{r.name}</strong> },
     { key: 'domain', label: '域名', render: (r) => <span style={{ color: COLORS.textMuted }}>{r.domain || '—'}</span> },
-    { key: 'skin', label: '皮肤', render: (r) => r.skin || '—' },
+    { key: 'skin', label: '皮肤', render: (r) => skinLabel(r.skin) },
     { key: 'status', label: '状态', render: (r) => <StatusBadge status={r.status} /> },
     { key: 'created_at', label: '开通时间', render: (r) => <span style={{ color: COLORS.textMuted }}>{(r.created_at || '').slice(0, 10)}</span> },
     { key: 'ops', label: '操作', render: (r) => <OpsCell row={r} busy={busyId === r.id} onEdit={(row) => navigate(`/merchants/${row.id}/edit`)} onToggle={toggleStatus} /> },

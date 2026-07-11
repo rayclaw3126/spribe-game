@@ -27,13 +27,14 @@ CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants (status);
 
 -- 种子：前端原 6 条假数据，仅在空表时灌入（可重复执行）。
 -- created_at 取当天正午（12:00），避免午夜时间戳在非 UTC 时区显示成前一天。
+-- skin 存英文代号（navy/purple/green/gold），前端查表显示中文——因 prod 库是 LATIN1 存不了中文。
 INSERT INTO tenants (name, domain, skin, status, created_at)
 SELECT * FROM (VALUES
-    ('GameHub',  'gamehub.dad',  '深蓝专业', 'active',   '2025-11-02 12:00:00'::timestamptz),
-    ('RedPlay',  'redplay.gg',   '电竞紫',   'active',   '2026-01-15 12:00:00'::timestamptz),
-    ('LuckyBet', 'luckybet.io',  '足球绿',   'active',   '2026-03-08 12:00:00'::timestamptz),
-    ('StarWin',  'starwin.bet',  '午夜黑金', 'disabled', '2026-04-21 12:00:00'::timestamptz),
-    ('AceArena', 'acearena.club','深蓝专业', 'active',   '2026-05-30 12:00:00'::timestamptz),
-    ('NeoSpin',  'neospin.vip',  '电竞紫',   'disabled', '2026-06-12 12:00:00'::timestamptz)
+    ('GameHub',  'gamehub.dad',  'navy',   'active',   '2025-11-02 12:00:00'::timestamptz),
+    ('RedPlay',  'redplay.gg',   'purple', 'active',   '2026-01-15 12:00:00'::timestamptz),
+    ('LuckyBet', 'luckybet.io',  'green',  'active',   '2026-03-08 12:00:00'::timestamptz),
+    ('StarWin',  'starwin.bet',  'gold',   'disabled', '2026-04-21 12:00:00'::timestamptz),
+    ('AceArena', 'acearena.club','navy',   'active',   '2026-05-30 12:00:00'::timestamptz),
+    ('NeoSpin',  'neospin.vip',  'purple', 'disabled', '2026-06-12 12:00:00'::timestamptz)
 ) AS seed(name, domain, skin, status, created_at)
 WHERE NOT EXISTS (SELECT 1 FROM tenants);

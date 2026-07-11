@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
-import { SKIN_OPTIONS } from '../data/merchants.js'
+import { SKINS } from '../data/skins.js'
 import { createTenant, listTenants, patchTenant } from '../api/client.js'
 import { useToast } from '../state/ToastContext.jsx'
 import EmptyState from '../components/EmptyState.jsx'
@@ -93,7 +93,7 @@ export default function MerchantCreatePage() {
 
   const [name, setName] = useState('')
   const [domain, setDomain] = useState('')
-  const [skin, setSkin] = useState(SKIN_OPTIONS[0])
+  const [skin, setSkin] = useState(SKINS[0].code)
   const [status, setStatus] = useState('active')
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -118,7 +118,7 @@ export default function MerchantCreatePage() {
         }
         setName(t.name || '')
         setDomain(t.domain || '')
-        setSkin(t.skin || SKIN_OPTIONS[0])
+        setSkin(t.skin || SKINS[0].code)
         setStatus(t.status || 'active')
       })
       .catch((err) => {
@@ -202,9 +202,9 @@ export default function MerchantCreatePage() {
 
         <Field label="皮肤">
           <select value={skin} onChange={(e) => setSkin(e.target.value)} style={fieldStyle}>
-            {SKIN_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
+            {SKINS.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.label}
               </option>
             ))}
           </select>

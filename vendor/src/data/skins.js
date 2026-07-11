@@ -1,14 +1,21 @@
-// 换肤配置台假数据（纯前端，本单不接后端）。皮肤名复用 merchants 的 SKIN_OPTIONS。
-// 主色预览块尽量用现有 token：深蓝→primary、足球绿→success、午夜黑金→warning。
-// 电竞紫：vendor token 无紫，用仓库已有的紫（游戏头像同源 #7c3aed）作为该皮肤品牌色（属假数据，非新增设计 token）。
+// 皮肤配置（唯一来源）。DB 是 LATIN1 存不了中文 → skin 字段存英文代号(code)，前端查表显示中文(label)。
+// 主色尽量用现有 token：navy→primary、green→success、gold→warning；purple token 无紫，用仓库已有的紫 #7c3aed。
 import { COLORS } from '../theme/tokens.js'
-import { SKIN_OPTIONS } from './merchants.js'
 
-export const SKIN_COLORS = {
-  深蓝专业: COLORS.primary,
-  电竞紫: '#7c3aed',
-  足球绿: COLORS.success,
-  午夜黑金: COLORS.warning,
+export const SKINS = [
+  { code: 'navy', label: '深蓝专业', color: COLORS.primary },
+  { code: 'purple', label: '电竞紫', color: '#7c3aed' },
+  { code: 'green', label: '足球绿', color: COLORS.success },
+  { code: 'gold', label: '午夜黑金', color: COLORS.warning },
+]
+
+const LABEL = Object.fromEntries(SKINS.map((s) => [s.code, s.label]))
+const COLOR = Object.fromEntries(SKINS.map((s) => [s.code, s.color]))
+
+// 代号 → 中文（未知代号原样返回，兜底 —）。
+export function skinLabel(code) {
+  return LABEL[code] || code || '—'
 }
-
-export { SKIN_OPTIONS }
+export function skinColor(code) {
+  return COLOR[code] || COLORS.slate
+}
