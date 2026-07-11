@@ -1,7 +1,7 @@
 // 单条问题行：折叠态一行摘要，点开展开时按需拉详情（GET /issues/:id）——描述 + 来源 + 图片 + 状态操作。
 // 已忽略行整行 opacity .6。状态操作走 PATCH /issues/:id（回调到父层刷新）。
-import { useState } from 'react'
-import { COLORS, SPACE } from '../../theme/tokens.js'
+import { useEffect, useState } from 'react'
+import { COLORS, RADIUS, SPACE } from '../../theme/tokens.js'
 import { STATUS_META } from '../../data/issues.js'
 import { getIssue, imageUrl } from '../../api/client.js'
 import { padId, formatTime } from '../../lib/format.js'
@@ -44,6 +44,84 @@ function Chevron({ open }) {
       color={COLORS.textMuted}
       style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }}
     />
+  )
+}
+
+// 输入框款式 —— 复用 SubmitIssueModal 的 fieldStyle（不新增 hex）。
+const fieldStyle = {
+  padding: '9px 10px',
+  fontSize: 14,
+  color: COLORS.text,
+  background: COLORS.surface,
+  border: `1px solid ${COLORS.border}`,
+  borderRadius: RADIUS.sm,
+  outline: 'none',
+  width: '100%',
+  boxSizing: 'border-box',
+}
+
+function fieldLabel(text) {
+  return <span style={{ fontSize: 13, color: COLORS.textMuted }}>{text}</span>
+}
+
+// 保存按钮款式：实心蓝，hover 提亮(brightness 1.08)，禁用态 slate（样式先写好，本单不接 dirty）。
+function saveButtonStyle(disabled, hover) {
+  return {
+    alignSelf: 'flex-start',
+    padding: '9px 20px',
+    fontSize: 13.5,
+    fontWeight: 600,
+    color: COLORS.white,
+    background: disabled ? COLORS.slate : COLORS.primary,
+    border: 'none',
+    borderRadius: RADIUS.sm,
+    cursor: disabled ? 'default' : 'pointer',
+    filter: !disabled && hover ? 'brightness(1.08)' : 'none',
+  }
+}
+
+// 处理回复 + 负责人编辑区。本单纯 UI：本地态可编辑，「保存」暂不接 PATCH（下一单接）。
+function HandleFields({ detail }) {
+  const [reply, setReply] = useState('')
+  const [assignee, setAssignee] = useState('')
+  const [hover, setHover] = useState(false)
+
+  // 详情到达后回填已有 reply/assignee。
+  useEffect(() => {
+    setReply(detail?.reply || '')
+    setAssignee(detail?.assignee || '')
+  }, [detail])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.md }}>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {fieldLabel('处理回复')}
+        <textarea
+          value={reply}
+          onChange={(e) => setReply(e.target.value)}
+          placeholder="输入处理回复…"
+          style={{ ...fieldStyle, minHeight: 72, resize: 'vertical', lineHeight: 1.6 }}
+        />
+      </label>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {fieldLabel('负责人')}
+        <input
+          value={assignee}
+          onChange={(e) => setAssignee(e.target.value)}
+          placeholder="负责人（如 tester02）"
+          style={fieldStyle}
+        />
+      </label>
+      <button
+        type="button"
+        onClick={() => {}}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={saveButtonStyle(false, hover)}
+      >
+        保存
+      </button>
+    </div>
   )
 }
 
@@ -107,6 +185,7 @@ function IssueDetail({ issue, detail, loading, onSetStatus }) {
           </button>
         ))}
       </div>
+      <HandleFields detail={detail} />
     </div>
   )
 }
