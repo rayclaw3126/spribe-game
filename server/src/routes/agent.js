@@ -82,7 +82,7 @@ router.post('/create', async (req, res, next) => {
     const passwordHash = await bcrypt.hash(password, 10);
 
     const result = await withTransaction(async (client) => {
-      const meResult = await client.query('SELECT id, path, level FROM agents WHERE id = $1', [
+      const meResult = await client.query('SELECT id, path, level, tenant_id FROM agents WHERE id = $1', [
         meId,
       ]);
       if (meResult.rowCount === 0) {
@@ -92,11 +92,12 @@ router.post('/create', async (req, res, next) => {
       const newLevel = (me.level || 1) + 1;
 
       // 两段式：先 INSERT 拿到新代理 id，再用它拼出 path（path 需要新 id 本身才能算完整）
+      // tenant_id 继承父代理（商家=顶级代理，全树同 tenant）。
       const insertResult = await client.query(
-        `INSERT INTO agents (parent_id, username, password_hash, level, role, status)
-         VALUES ($1, $2, $3, $4, $5, 'active')
+        `INSERT INTO agents (parent_id, username, password_hash, level, role, status, tenant_id)
+         VALUES ($1, $2, $3, $4, $5, 'active', $6)
          RETURNING id, username, level`,
-        [me.id, username, passwordHash, newLevel, role || 'agent']
+        [me.id, username, passwordHash, newLevel, role || 'agent', me.tenant_id]
       );
       const newAgent = insertResult.rows[0];
 
