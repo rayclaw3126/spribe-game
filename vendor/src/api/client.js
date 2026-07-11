@@ -117,3 +117,16 @@ export function uploadIssueImages(issueId, files) {
   for (const f of files) form.append('images', f)
   return requestForm(`/issues/${encodeURIComponent(issueId)}/images`, form)
 }
+
+// ---- 白标商家 tenants ----
+export function listTenants() {
+  return request('/tenants')
+}
+
+export function createTenant(payload) {
+  return request('/tenants', { method: 'POST', body: payload })
+}
+
+export function patchTenant(id, patch) {
+  return request(`/tenants/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch })
+}

@@ -1,9 +1,11 @@
-// 开商家表单页（纯 UI，不接后端、不建表）。表单款式照 SubmitIssueModal 的 fieldStyle/Field，
-// 页头/配色照 MerchantsPage 深蓝专业风。返回/取消 跳回 /merchants；「开通」仍留空（接后端等后续单）。
+// 开商家表单页。表单款式照 SubmitIssueModal 的 fieldStyle/Field，页头/配色照 MerchantsPage 深蓝专业风。
+// 返回/取消 跳回 /merchants；「开通」POST /tenants 成功后 toast + 跳回列表；name 必填校验。
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
 import { SKIN_OPTIONS } from '../data/merchants.js'
+import { createTenant } from '../api/client.js'
+import { useToast } from '../state/ToastContext.jsx'
 
 const fieldStyle = {
   padding: '9px 10px',
@@ -82,12 +84,35 @@ function StatusToggle({ value, onChange }) {
 
 export default function MerchantCreatePage() {
   const navigate = useNavigate()
+  const { push } = useToast()
   const [name, setName] = useState('')
   const [domain, setDomain] = useState('')
   const [skin, setSkin] = useState(SKIN_OPTIONS[0])
   const [status, setStatus] = useState('active')
+  const [formError, setFormError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const goBack = () => navigate('/merchants')
+
+  async function handleCreate() {
+    if (!name.trim()) {
+      setFormError('请填写商家名')
+      return
+    }
+    setFormError('')
+    setSubmitting(true)
+    try {
+      await createTenant({ name: name.trim(), domain: domain.trim() || undefined, skin, status })
+      push('商家已开通', 'success')
+      navigate('/merchants')
+    } catch (err) {
+      const msg = err.message || '开通失败'
+      setFormError(msg)
+      push(msg, 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg, maxWidth: 560 }}>
@@ -126,6 +151,21 @@ export default function MerchantCreatePage() {
           <StatusToggle value={status} onChange={setStatus} />
         </Field>
 
+        {formError && (
+          <div
+            style={{
+              fontSize: 13,
+              color: COLORS.danger,
+              background: COLORS.dangerTint,
+              border: '1px solid rgba(226,86,74,0.35)',
+              borderRadius: RADIUS.sm,
+              padding: '8px 12px',
+            }}
+          >
+            {formError}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: SPACE.sm, justifyContent: 'flex-end', marginTop: SPACE.xs }}>
           <button
             type="button"
@@ -145,19 +185,20 @@ export default function MerchantCreatePage() {
           </button>
           <button
             type="button"
-            onClick={() => {}}
+            onClick={handleCreate}
+            disabled={submitting}
             style={{
               padding: '10px 20px',
               fontSize: 14,
               fontWeight: 600,
               color: COLORS.white,
-              background: COLORS.primary,
+              background: submitting ? COLORS.slate : COLORS.primary,
               border: 'none',
               borderRadius: RADIUS.sm,
-              cursor: 'pointer',
+              cursor: submitting ? 'default' : 'pointer',
             }}
           >
-            开通
+            {submitting ? '开通中…' : '开通'}
           </button>
         </div>
       </div>
