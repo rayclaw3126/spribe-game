@@ -1,12 +1,11 @@
-// 换肤配置台（本单纯 UI + 假数据，不接后端）。页头/下拉照 MerchantsPage 深蓝专业风。
-// 选商家 → 高亮其当前皮肤；选皮肤卡 → 预览区套该主色；「保存皮肤」本单先留空。
-import { useState } from 'react'
+// 换肤配置台（接后端）。商家/当前皮肤来自 /tenants；选皮肤卡 → 预览套主色；
+// 「保存皮肤」→ PATCH /tenants/:id {skin}（复用 patchTenant），成功 toast + 该商家当前皮肤更新、保存钮回禁用。
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
-import { MERCHANTS_FAKE } from '../data/merchants.js'
 import { SKIN_OPTIONS, SKIN_COLORS } from '../data/skins.js'
-
-// 各商家当前皮肤（复用商家列表假数据）。
-const MERCHANT_SKIN = Object.fromEntries(MERCHANTS_FAKE.map((m) => [m.name, m.skin]))
+import { listTenants, patchTenant } from '../api/client.js'
+import { useToast } from '../state/ToastContext.jsx'
+import EmptyState from '../components/EmptyState.jsx'
 
 const selectStyle = {
   padding: '9px 12px',
@@ -19,21 +18,19 @@ const selectStyle = {
   cursor: 'pointer',
 }
 
-function PageHeader({ merchant, onMerchant }) {
+function PageHeader({ tenants, selectedId, onSelect }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: SPACE.md }}>
       <div>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: COLORS.text }}>换肤配置台</h1>
-        <p style={{ margin: '6px 0 0', fontSize: 13.5, color: COLORS.textMuted }}>
-          为各商家挑选并预览皮肤主题（示例数据）
-        </p>
+        <p style={{ margin: '6px 0 0', fontSize: 13.5, color: COLORS.textMuted }}>为各商家挑选并预览皮肤主题</p>
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm }}>
         <span style={{ fontSize: 13, color: COLORS.textMuted }}>配置商家</span>
-        <select value={merchant} onChange={(e) => onMerchant(e.target.value)} style={selectStyle}>
-          {MERCHANTS_FAKE.map((m) => (
-            <option key={m.name} value={m.name}>
-              {m.name}
+        <select value={selectedId} onChange={(e) => onSelect(e.target.value)} style={selectStyle}>
+          {tenants.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
             </option>
           ))}
         </select>
@@ -98,23 +95,84 @@ function PreviewMock({ skin }) {
 }
 
 export default function SkinsPage() {
-  const [merchant, setMerchant] = useState(MERCHANTS_FAKE[0].name)
-  const [skin, setSkin] = useState(MERCHANT_SKIN[MERCHANTS_FAKE[0].name])
+  const { push } = useToast()
+  const [tenants, setTenants] = useState([])
+  const [selectedId, setSelectedId] = useState('')
+  const [skin, setSkin] = useState(SKIN_OPTIONS[0])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  // 切商家：皮肤重置为该商家当前皮肤。
-  function pickMerchant(next) {
-    setMerchant(next)
-    setSkin(MERCHANT_SKIN[next] || SKIN_OPTIONS[0])
+  // 拉真商家，默认选第一个并预填其皮肤。
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const r = await listTenants()
+      const items = r.items || []
+      setTenants(items)
+      if (items.length) {
+        setSelectedId(String(items[0].id))
+        setSkin(items[0].skin || SKIN_OPTIONS[0])
+      }
+    } catch (err) {
+      setError(err.message || '加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const current = useMemo(() => tenants.find((t) => String(t.id) === String(selectedId)), [tenants, selectedId])
+  const currentSkin = current?.skin
+
+  // 切商家：皮肤预填为该商家真实当前皮肤。
+  function pickMerchant(id) {
+    setSelectedId(id)
+    const t = tenants.find((x) => String(x.id) === String(id))
+    setSkin(t?.skin || SKIN_OPTIONS[0])
   }
 
-  const currentSkin = MERCHANT_SKIN[merchant]
+  const dirty = Boolean(current) && skin !== currentSkin
+  const disabled = saving || !dirty
+
+  async function handleSave() {
+    if (disabled) return
+    setSaving(true)
+    try {
+      await patchTenant(selectedId, { skin })
+      // 本地更新该商家 skin → currentSkin=skin → dirty 归零、保存钮回禁用；切走再回也在。
+      setTenants((prev) => prev.map((t) => (String(t.id) === String(selectedId) ? { ...t, skin } : t)))
+      push('皮肤已保存', 'success')
+    } catch (err) {
+      push(err.message || '保存失败', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg, maxWidth: 1040 }}>
+        <EmptyState text="加载中…" />
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg, maxWidth: 1040 }}>
+        <EmptyState text={error} />
+      </div>
+    )
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg, maxWidth: 1040 }}>
-      <PageHeader merchant={merchant} onMerchant={pickMerchant} />
+      <PageHeader tenants={tenants} selectedId={selectedId} onSelect={pickMerchant} />
 
       <div style={{ fontSize: 12.5, color: COLORS.textFaint }}>
-        {merchant} 当前皮肤：<strong style={{ color: COLORS.textMuted }}>{currentSkin}</strong>
+        {current?.name} 当前皮肤：<strong style={{ color: COLORS.textMuted }}>{currentSkin || '—'}</strong>
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.md }}>
@@ -128,20 +186,20 @@ export default function SkinsPage() {
       <div>
         <button
           type="button"
-          onClick={() => {}}
-          disabled={skin === currentSkin}
+          onClick={handleSave}
+          disabled={disabled}
           style={{
             padding: '10px 20px',
             fontSize: 14,
             fontWeight: 600,
             color: COLORS.white,
-            background: skin === currentSkin ? COLORS.slate : COLORS.primary,
+            background: disabled ? COLORS.slate : COLORS.primary,
             border: 'none',
             borderRadius: RADIUS.sm,
-            cursor: skin === currentSkin ? 'default' : 'pointer',
+            cursor: disabled ? 'default' : 'pointer',
           }}
         >
-          保存皮肤
+          {saving ? '保存中…' : '保存皮肤'}
         </button>
       </div>
     </div>
