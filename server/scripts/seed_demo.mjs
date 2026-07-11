@@ -32,16 +32,32 @@ async function main() {
       console.log('demo 数据已存在，跳过（幂等）。');
       return;
     }
-    // demo 玩家复用一个现成密码哈希（仅测试种子）。
-    const pw = (await c.query("SELECT password_hash FROM agents WHERE username = 'boss'")).rows[0].password_hash;
+    // demo 玩家复用一个现成密码哈希（仅测试种子）。boss 不存在则退回任意代理的哈希（prod 兼容）。
+    const bossHash = (await c.query("SELECT password_hash FROM agents WHERE username = 'boss'")).rows[0];
+    const anyHash = bossHash || (await c.query('SELECT password_hash FROM agents ORDER BY id LIMIT 1')).rows[0];
+    if (!anyHash) {
+      throw new Error('agents 表为空，无法取密码哈希；请先跑 008 迁移建好各商家代理');
+    }
+    const pw = anyHash.password_hash;
 
     for (const t of TENANTS) {
-      // 该商家的顶级代理（players/commissions 都挂到它，tenant 归属由 agents.tenant_id 决定）。
-      const root = await c.query(
-        'SELECT id FROM agents WHERE tenant_id = $1 AND parent_id IS NULL ORDER BY id LIMIT 1',
-        [t.tid]
-      );
-      const agentId = root.rows[0].id;
+      // 该商家的任一代理（players/commissions 挂到它，tenant 归属由 agents.tenant_id 决定）。
+      // prod 若某商家没跑对应种子（如 ml_boss 树未建），会没有代理——此时现建一个顶级代理兜底，保证该商家也有 demo 数据。
+      let agentRow = (
+        await c.query('SELECT id FROM agents WHERE tenant_id = $1 ORDER BY id LIMIT 1', [t.tid])
+      ).rows[0];
+      if (!agentRow) {
+        const ins = await c.query(
+          `INSERT INTO agents (parent_id, username, password_hash, level, role, status, tenant_id)
+           VALUES (NULL, $1, $2, 1, 'agent', 'active', $3)
+           RETURNING id`,
+          [`demo_tenant${t.tid}_root`, pw, t.tid]
+        );
+        await c.query('UPDATE agents SET path = ARRAY[id::text] WHERE id = $1', [ins.rows[0].id]);
+        agentRow = ins.rows[0];
+        console.log(`tenant #${t.tid}: 无代理，已现建顶级代理 #${agentRow.id}`);
+      }
+      const agentId = agentRow.id;
 
       // 造玩家
       const playerIds = [];
