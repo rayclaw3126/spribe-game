@@ -6,6 +6,7 @@ import VendorLayout from './pages/VendorLayout.jsx'
 import SystemIssuesPage from './pages/SystemIssuesPage.jsx'
 import MerchantsPage from './pages/MerchantsPage.jsx'
 import MerchantCreatePage from './pages/MerchantCreatePage.jsx'
+import DashboardPage from './pages/DashboardPage.jsx'
 import PlaceholderPage from './pages/PlaceholderPage.jsx'
 
 // 路由守卫：未登录一律打回 /login（照抄 admin/App.jsx）。
@@ -30,7 +31,7 @@ export default function App() {
             }
           >
             <Route index element={<SystemIssuesPage />} />
-            <Route path="dashboard" element={<PlaceholderPage title="全平台看板" />} />
+            <Route path="dashboard" element={<DashboardPage />} />
             <Route path="merchants" element={<MerchantsPage />} />
             <Route path="merchants/new" element={<MerchantCreatePage />} />
             <Route path="merchants/:id/edit" element={<MerchantCreatePage />} />
