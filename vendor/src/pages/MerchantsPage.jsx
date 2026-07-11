@@ -82,12 +82,12 @@ function linkButtonStyle(tone, disabled) {
   }
 }
 
-// 编辑（本单留空）+ 停用/启用（PATCH status）。busy 时禁用防重复点。
-function OpsCell({ row, busy, onToggle }) {
+// 编辑（跳编辑页）+ 停用/启用（PATCH status）。busy 时禁用防重复点。
+function OpsCell({ row, busy, onEdit, onToggle }) {
   const toActive = row.status !== 'active'
   return (
     <div style={{ display: 'flex', gap: SPACE.sm }}>
-      <button type="button" onClick={() => {}} style={linkButtonStyle()}>
+      <button type="button" onClick={() => onEdit(row)} style={linkButtonStyle()}>
         编辑
       </button>
       <button
@@ -145,7 +145,7 @@ export default function MerchantsPage() {
     { key: 'skin', label: '皮肤', render: (r) => r.skin || '—' },
     { key: 'status', label: '状态', render: (r) => <StatusBadge status={r.status} /> },
     { key: 'created_at', label: '开通时间', render: (r) => <span style={{ color: COLORS.textMuted }}>{(r.created_at || '').slice(0, 10)}</span> },
-    { key: 'ops', label: '操作', render: (r) => <OpsCell row={r} busy={busyId === r.id} onToggle={toggleStatus} /> },
+    { key: 'ops', label: '操作', render: (r) => <OpsCell row={r} busy={busyId === r.id} onEdit={(row) => navigate(`/merchants/${row.id}/edit`)} onToggle={toggleStatus} /> },
   ]
 
   return (

@@ -33,6 +33,7 @@ export default function App() {
             <Route path="dashboard" element={<PlaceholderPage title="全平台看板" />} />
             <Route path="merchants" element={<MerchantsPage />} />
             <Route path="merchants/new" element={<MerchantCreatePage />} />
+            <Route path="merchants/:id/edit" element={<MerchantCreatePage />} />
             <Route path="skins" element={<PlaceholderPage title="换肤配置台" />} />
             <Route path="fees" element={<PlaceholderPage title="平台费流水" />} />
             <Route path="risk" element={<PlaceholderPage title="跨商家风控" />} />
