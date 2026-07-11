@@ -7,6 +7,9 @@ export const MERCHANT_STATUS = {
   disabled: { label: '停用', tone: 'muted' },
 }
 
+// 皮肤下拉选项（假数据，与列表里出现的皮肤名同源）。
+export const SKIN_OPTIONS = ['深蓝专业', '电竞紫', '足球绿', '午夜黑金']
+
 export const MERCHANTS_FAKE = [
   { id: 1, name: 'GameHub', domain: 'gamehub.dad', skin: '深蓝专业', status: 'active', createdAt: '2025-11-02' },
   { id: 2, name: 'RedPlay', domain: 'redplay.gg', skin: '电竞紫', status: 'active', createdAt: '2026-01-15' },

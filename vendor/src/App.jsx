@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage.jsx'
 import VendorLayout from './pages/VendorLayout.jsx'
 import SystemIssuesPage from './pages/SystemIssuesPage.jsx'
 import MerchantsPage from './pages/MerchantsPage.jsx'
+import MerchantCreatePage from './pages/MerchantCreatePage.jsx'
 import PlaceholderPage from './pages/PlaceholderPage.jsx'
 
 // 路由守卫：未登录一律打回 /login（照抄 admin/App.jsx）。
@@ -31,7 +32,7 @@ export default function App() {
             <Route index element={<SystemIssuesPage />} />
             <Route path="dashboard" element={<PlaceholderPage title="全平台看板" />} />
             <Route path="merchants" element={<MerchantsPage />} />
-            <Route path="merchants/new" element={<PlaceholderPage title="开商家" />} />
+            <Route path="merchants/new" element={<MerchantCreatePage />} />
             <Route path="skins" element={<PlaceholderPage title="换肤配置台" />} />
             <Route path="fees" element={<PlaceholderPage title="平台费流水" />} />
             <Route path="risk" element={<PlaceholderPage title="跨商家风控" />} />
