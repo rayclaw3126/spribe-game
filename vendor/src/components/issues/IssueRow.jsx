@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { COLORS, RADIUS, SPACE } from '../../theme/tokens.js'
 import { STATUS_META } from '../../data/issues.js'
-import { getIssue, imageUrl } from '../../api/client.js'
+import { getIssue, patchIssue, imageUrl } from '../../api/client.js'
+import { useToast } from '../../state/ToastContext.jsx'
 import { padId, formatTime } from '../../lib/format.js'
 import useIsMobile from '../../hooks/useIsMobile.js'
 import Icon from '../Icon.jsx'
@@ -80,17 +81,40 @@ function saveButtonStyle(disabled, hover) {
   }
 }
 
-// 处理回复 + 负责人编辑区。本单纯 UI：本地态可编辑，「保存」暂不接 PATCH（下一单接）。
-function HandleFields({ detail }) {
+// 处理回复 + 负责人编辑区。保存走 PATCH /issues/:id（复用 api.patchIssue + 现有 toast）。
+// dirty 检测：相对详情原值没改动时禁用保存；提交中禁用防重复点；成功回填最新值→回禁用态。
+function HandleFields({ issueId, detail, onSaved }) {
+  const { push } = useToast()
   const [reply, setReply] = useState('')
   const [assignee, setAssignee] = useState('')
   const [hover, setHover] = useState(false)
+  const [saving, setSaving] = useState(false)
 
-  // 详情到达后回填已有 reply/assignee。
+  const baseReply = detail?.reply || ''
+  const baseAssignee = detail?.assignee || ''
+
+  // 详情到达/刷新后回填已有 reply/assignee（保存成功后也走这条回落基线）。
   useEffect(() => {
-    setReply(detail?.reply || '')
-    setAssignee(detail?.assignee || '')
-  }, [detail])
+    setReply(baseReply)
+    setAssignee(baseAssignee)
+  }, [baseReply, baseAssignee])
+
+  const dirty = reply !== baseReply || assignee !== baseAssignee
+  const disabled = saving || !dirty
+
+  async function handleSave() {
+    if (disabled) return
+    setSaving(true)
+    try {
+      const res = await patchIssue(issueId, { reply, assignee })
+      onSaved(res.issue) // 拿回最新值刷新详情（保留 images），基线随之更新→保存钮回禁用
+      push('已保存', 'success')
+    } catch (err) {
+      push(err.message || '保存失败', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.md }}>
@@ -114,12 +138,13 @@ function HandleFields({ detail }) {
       </label>
       <button
         type="button"
-        onClick={() => {}}
+        onClick={handleSave}
+        disabled={disabled}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        style={saveButtonStyle(false, hover)}
+        style={saveButtonStyle(disabled, hover)}
       >
-        保存
+        {saving ? '保存中…' : '保存'}
       </button>
     </div>
   )
@@ -151,7 +176,7 @@ function ImageGrid({ images }) {
   )
 }
 
-function IssueDetail({ issue, detail, loading, onSetStatus }) {
+function IssueDetail({ issue, detail, loading, onSetStatus, onDetailUpdate }) {
   const src = detail || issue
   return (
     <div
@@ -185,7 +210,7 @@ function IssueDetail({ issue, detail, loading, onSetStatus }) {
           </button>
         ))}
       </div>
-      <HandleFields detail={detail} />
+      <HandleFields issueId={issue.id} detail={detail} onSaved={onDetailUpdate} />
     </div>
   )
 }
@@ -252,7 +277,15 @@ export default function IssueRow({ issue, onSetStatus }) {
       >
         {isMobile ? <RowHeaderMobile issue={issue} open={open} /> : <RowHeaderDesktop issue={issue} open={open} />}
       </button>
-      {open && <IssueDetail issue={issue} detail={detail} loading={loading} onSetStatus={onSetStatus} />}
+      {open && (
+        <IssueDetail
+          issue={issue}
+          detail={detail}
+          loading={loading}
+          onSetStatus={onSetStatus}
+          onDetailUpdate={(updated) => setDetail((prev) => ({ ...prev, ...updated }))}
+        />
+      )}
     </div>
   )
 }
