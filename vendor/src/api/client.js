@@ -143,3 +143,11 @@ export function getFees({ tenantId, range } = {}) {
   if (range) params.set('range', range)
   return request(`/fees/list?${params.toString()}`)
 }
+
+// ---- 跨商家风控 ----
+export function getRisk({ level, tenantId } = {}) {
+  const params = new URLSearchParams()
+  if (level && level !== 'all') params.set('level', level)
+  if (tenantId && tenantId !== 'all') params.set('tenant_id', tenantId)
+  return request(`/risk/list?${params.toString()}`)
+}

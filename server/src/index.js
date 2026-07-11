@@ -18,6 +18,7 @@ import issuesRouter from './routes/issues.js';
 import tenantsRouter from './routes/tenants.js';
 import dashboardRouter from './routes/dashboard.js';
 import feesRouter from './routes/fees.js';
+import riskRouter from './routes/risk.js';
 import { startAviatorHub } from './ws/aviatorHub.js';
 import { startMomentumHub } from './ws/momentumHub.js';
 import { RiskError } from './lib/risk.js';
@@ -84,6 +85,7 @@ app.use('/issues', issuesRouter);
 app.use('/tenants', tenantsRouter);
 app.use('/dashboard', dashboardRouter);
 app.use('/fees', feesRouter);
+app.use('/risk', riskRouter);
 
 // 404 兜底
 app.use((req, res) => {

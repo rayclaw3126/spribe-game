@@ -19,6 +19,7 @@ export default defineConfig({
       // 注意：只代理 API 子路径，不能代理 /dashboard 或 /fees（那是前端页面路由，会被抢走）。
       '/dashboard/stats': proxyTarget('http://127.0.0.1:4000'),
       '/fees/list': proxyTarget('http://127.0.0.1:4000'),
+      '/risk/list': proxyTarget('http://127.0.0.1:4000'),
       '/uploads': proxyTarget('http://127.0.0.1:4000'),
     },
   },

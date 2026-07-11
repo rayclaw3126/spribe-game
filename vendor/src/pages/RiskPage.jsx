@@ -1,10 +1,13 @@
-// 跨商家风控（本单纯 UI + 假数据，不接后端）。页头/概览/筛选/表格照 FeesPage + MerchantsPage 深蓝专业风。
-// 等级/商家做前端筛选（轻量）；「查看」本单先留空。接真那单聚合风控信号。
-import { useMemo, useState } from 'react'
+// 跨商家风控（接后端 /risk/list）。概览/明细来自 risk_alerts，join tenants 取商家名。
+// 商家下拉来自 /tenants；等级 + 商家传后端参数重查；loading/错误态照 SystemIssuesPage。
+import { useCallback, useEffect, useState } from 'react'
 import { COLORS, RADIUS, SPACE } from '../theme/tokens.js'
-import { RISK_MERCHANTS, LEVEL_OPTIONS, OVERVIEW, RISK_TYPE, RISK_LEVEL, RISK_STATUS, RISK_ROWS } from '../data/risk.js'
+import { LEVEL_OPTIONS, RISK_TYPE, RISK_LEVEL, RISK_STATUS } from '../data/risk.js'
+import { getRisk, listTenants } from '../api/client.js'
+import { formatTime } from '../lib/format.js'
 import KpiCard from '../components/KpiCard.jsx'
 import DataTable from '../components/DataTable.jsx'
+import EmptyState from '../components/EmptyState.jsx'
 
 const TONE_COLOR = {
   danger: { color: COLORS.danger, bg: COLORS.dangerTint },
@@ -39,9 +42,22 @@ function PageHeader() {
   return (
     <div>
       <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: COLORS.text }}>跨商家风控</h1>
-      <p style={{ margin: '6px 0 0', fontSize: 13.5, color: COLORS.textMuted }}>
-        跨商家风险告警汇总与处置（示例数据）
-      </p>
+      <p style={{ margin: '6px 0 0', fontSize: 13.5, color: COLORS.textMuted }}>跨商家风险告警汇总与处置</p>
+    </div>
+  )
+}
+
+function OverviewRow({ overview }) {
+  const cards = [
+    { label: '待处理告警', value: overview.pending },
+    { label: '高风险商家数', value: overview.highRiskMerchants },
+    { label: '今日拦截', value: overview.blockedToday },
+  ]
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.md }}>
+      {cards.map((k) => (
+        <KpiCard key={k.label} label={k.label} value={String(k.value)} />
+      ))}
     </div>
   )
 }
@@ -57,7 +73,7 @@ const selectStyle = {
   cursor: 'pointer',
 }
 
-function FilterRow({ level, onLevel, merchant, onMerchant }) {
+function FilterRow({ level, onLevel, tenants, tenantId, onTenant }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.md, alignItems: 'center' }}>
       <div style={{ display: 'flex', gap: SPACE.sm }}>
@@ -84,11 +100,11 @@ function FilterRow({ level, onLevel, merchant, onMerchant }) {
           )
         })}
       </div>
-      <select value={merchant} onChange={(e) => onMerchant(e.target.value)} style={selectStyle}>
+      <select value={tenantId} onChange={(e) => onTenant(e.target.value)} style={selectStyle}>
         <option value="all">全部商家</option>
-        {RISK_MERCHANTS.map((m) => (
-          <option key={m} value={m}>
-            {m}
+        {tenants.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
           </option>
         ))}
       </select>
@@ -97,7 +113,7 @@ function FilterRow({ level, onLevel, merchant, onMerchant }) {
 }
 
 const COLUMNS = [
-  { key: 'time', label: '时间', render: (r) => <span style={{ color: COLORS.textMuted, whiteSpace: 'nowrap' }}>{r.time}</span> },
+  { key: 'time', label: '时间', render: (r) => <span style={{ color: COLORS.textMuted, whiteSpace: 'nowrap' }}>{formatTime(r.time)}</span> },
   { key: 'merchant', label: '商家', render: (r) => <strong style={{ color: COLORS.text, fontWeight: 600 }}>{r.merchant}</strong> },
   { key: 'type', label: '风险类型', render: (r) => <Badge meta={RISK_TYPE[r.type]} /> },
   { key: 'level', label: '等级', render: (r) => <Badge meta={RISK_LEVEL[r.level]} /> },
@@ -128,28 +144,48 @@ const COLUMNS = [
 ]
 
 export default function RiskPage() {
+  const [tenants, setTenants] = useState([])
   const [level, setLevel] = useState('all')
-  const [merchant, setMerchant] = useState('all')
+  const [tenantId, setTenantId] = useState('all')
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  const rows = useMemo(
-    () =>
-      RISK_ROWS.filter(
-        (r) => (level === 'all' || r.level === level) && (merchant === 'all' || r.merchant === merchant)
-      ),
-    [level, merchant]
-  )
+  useEffect(() => {
+    listTenants().then((r) => setTenants(r.items || [])).catch(() => setTenants([]))
+  }, [])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      setData(await getRisk({ level, tenantId }))
+    } catch (err) {
+      setError(err.message || '加载失败')
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [level, tenantId])
+
+  useEffect(() => { load() }, [load])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg, maxWidth: 1040 }}>
       <PageHeader />
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.md }}>
-        {OVERVIEW.map((k) => (
-          <KpiCard key={k.label} label={k.label} value={k.value} />
-        ))}
-      </div>
-      <FilterRow level={level} onLevel={setLevel} merchant={merchant} onMerchant={setMerchant} />
-      <div style={{ fontSize: 12.5, color: COLORS.textFaint }}>共 {rows.length} 条</div>
-      <DataTable columns={COLUMNS} rows={rows} rowKey="id" emptyText="没有符合条件的告警" />
+      {data && <OverviewRow overview={data.overview} />}
+      <FilterRow level={level} onLevel={setLevel} tenants={tenants} tenantId={tenantId} onTenant={setTenantId} />
+
+      {error ? (
+        <EmptyState text={error} />
+      ) : loading || !data ? (
+        <EmptyState text="加载中…" />
+      ) : (
+        <>
+          <div style={{ fontSize: 12.5, color: COLORS.textFaint }}>共 {data.items.length} 条</div>
+          <DataTable columns={COLUMNS} rows={data.items} rowKey="id" emptyText="没有符合条件的告警" />
+        </>
+      )}
     </div>
   )
 }
