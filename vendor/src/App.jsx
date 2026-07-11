@@ -8,6 +8,7 @@ import MerchantsPage from './pages/MerchantsPage.jsx'
 import MerchantCreatePage from './pages/MerchantCreatePage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import FeesPage from './pages/FeesPage.jsx'
+import RiskPage from './pages/RiskPage.jsx'
 import PlaceholderPage from './pages/PlaceholderPage.jsx'
 
 // 路由守卫：未登录一律打回 /login（照抄 admin/App.jsx）。
@@ -38,7 +39,7 @@ export default function App() {
             <Route path="merchants/:id/edit" element={<MerchantCreatePage />} />
             <Route path="skins" element={<PlaceholderPage title="换肤配置台" />} />
             <Route path="fees" element={<FeesPage />} />
-            <Route path="risk" element={<PlaceholderPage title="跨商家风控" />} />
+            <Route path="risk" element={<RiskPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
