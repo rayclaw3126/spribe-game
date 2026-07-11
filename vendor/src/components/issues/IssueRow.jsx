@@ -215,6 +215,17 @@ function IssueDetail({ issue, detail, loading, onSetStatus, onDetailUpdate }) {
   )
 }
 
+// 负责人小标签：ti-user 图标 + 名字。空值不渲染（保持行干净）。
+function AssigneeTag({ name }) {
+  if (!name) return null
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12.5, color: COLORS.textMuted, whiteSpace: 'nowrap' }}>
+      <Icon name="user" size={14} color={COLORS.textFaint} />
+      <span style={{ color: COLORS.text, fontWeight: 600 }}>{name}</span>
+    </span>
+  )
+}
+
 function RowHeaderDesktop({ issue, open }) {
   return (
     <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: SPACE.md }}>
@@ -222,6 +233,7 @@ function RowHeaderDesktop({ issue, open }) {
       <StatusBadge status={issue.status} />
       <PriorityDot priority={issue.priority} />
       <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.text, flex: 1, minWidth: 0 }}>{issue.title}</span>
+      <AssigneeTag name={issue.assignee} />
       <span style={metaStyle}>{issue.submitter || '—'} · {formatTime(issue.created_at)}</span>
       <Chevron open={open} />
     </div>
@@ -239,7 +251,15 @@ function RowHeaderMobile({ issue, open }) {
         <Chevron open={open} />
       </div>
       <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.text }}>{issue.title}</div>
-      <div style={{ ...metaStyle, color: COLORS.textFaint }}>{issue.submitter || '—'} · {formatTime(issue.created_at)}</div>
+      <div style={{ ...metaStyle, color: COLORS.textFaint, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', whiteSpace: 'normal' }}>
+        <span>{issue.submitter || '—'} · {formatTime(issue.created_at)}</span>
+        {issue.assignee && (
+          <>
+            <span>·</span>
+            <AssigneeTag name={issue.assignee} />
+          </>
+        )}
+      </div>
     </div>
   )
 }
