@@ -16,6 +16,7 @@ import playerRouter from './routes/player.js';
 import seedRouter from './routes/seed.js';
 import issuesRouter from './routes/issues.js';
 import tenantsRouter from './routes/tenants.js';
+import dashboardRouter from './routes/dashboard.js';
 import { startAviatorHub } from './ws/aviatorHub.js';
 import { startMomentumHub } from './ws/momentumHub.js';
 import { RiskError } from './lib/risk.js';
@@ -80,6 +81,7 @@ app.use('/player', playerRouter);
 app.use('/seed', seedRouter);
 app.use('/issues', issuesRouter);
 app.use('/tenants', tenantsRouter);
+app.use('/dashboard', dashboardRouter);
 
 // 404 兜底
 app.use((req, res) => {

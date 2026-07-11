@@ -130,3 +130,8 @@ export function createTenant(payload) {
 export function patchTenant(id, patch) {
   return request(`/tenants/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch })
 }
+
+// ---- 全平台看板 ----
+export function getDashboardStats() {
+  return request('/dashboard/stats')
+}
