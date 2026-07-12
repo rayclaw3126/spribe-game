@@ -1208,132 +1208,141 @@ function makeRoundGameHandler(gameName) {
 }
 
 // ==================================================================
-// SpeedGrid【排期器接入】（#43 单1）—— 不走 per-player makeRoundGameHandler。
-// 开奖由 ws/roundHub.js 按房间相位机统一驱动（全局期号、全场共享一局），本端点只负责：
-//   查 hub 相位（非 betting → 409 round_locked，在 debit 之前）→ 校验/风控/防负注（照通用 handler 口径）
-//   → debit 扣注 → INSERT bets(round_id=当期共享 round, selections 明细, outcome='pending') → 返回受理。
-// 结算（逐 key 三态 + 派彩/分成）延后到 roundHub 的 drawn 相位统一做，本端点【不结算、不开奖】。
-// 其余 9 款轮次游戏路径零改动，仍走下方的 makeRoundGameHandler。
+// 排期器接入【通用调度 handler 工厂】（#43 单1 试点 speedgrid，单3 铺 numberup/derbyday/dominoduel）
+// —— 不走 per-player makeRoundGameHandler。开奖由 ws/roundHub.js 按房间相位机统一驱动
+// （全局期号、全场共享一局），本端点只负责：查 hub 相位（非 betting → 409 round_locked，在 debit 之前）
+// → 校验/风控/防负注（照通用 handler 口径）→ debit 扣注 → INSERT bets(round_id=当期共享 round,
+// selections 明细, outcome='pending') → 返回受理。结算（逐 key 三态含 push 退本金 + 派彩/分成）延后到
+// roundHub 的 drawn 相位统一做，本端点【不结算、不开奖】。未接排期器的轮次款仍走下方 makeRoundGameHandler。
 // ==================================================================
-const SG_MARKET_COUNT = Object.keys(speedGridEngine.MARKETS).length;
 
-/** 按幂等键回查已受理的 speedgrid 下注（供重复请求幂等返回），带回当期期号。 */
-async function findSpeedgridBet(idempotencyKey) {
+/** 按幂等键回查已受理的某调度款下注（供重复请求幂等返回），带回当期期号。 */
+async function findScheduledBet(idempotencyKey, gameName) {
   const r = await query(
     `SELECT b.round_id, r.round_no
        FROM bets b JOIN rounds r ON r.id = b.round_id
-      WHERE b.idempotency_key = $1 AND r.game = 'speedgrid'`,
-    [idempotencyKey],
+      WHERE b.idempotency_key = $1 AND r.game = $2`,
+    [idempotencyKey, gameName],
   );
   return r.rowCount > 0 ? r.rows[0] : null;
 }
 
-router.post('/speedgrid/play', requireAuth, requireType('player'), async (req, res, next) => {
-  try {
-    const playerId = req.user.sub;
-    const { bets, idempotencyKey } = req.body || {};
-
-    if (!idempotencyKey) {
-      return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
-    }
-    if (!bets || typeof bets !== 'object' || Array.isArray(bets)) {
-      return res.status(400).json({ error: 'bets 必须是 {marketKey: amount} 对象' });
-    }
-    const betEntries = Object.entries(bets);
-    if (betEntries.length < 1) {
-      return res.status(400).json({ error: 'bets 不能为空' });
-    }
-    if (betEntries.length > SG_MARKET_COUNT) {
-      return res.status(400).json({ error: `下注项过多（上限 ${SG_MARKET_COUNT}）` });
-    }
-    // 逐项校验：market key 合法 + amount 严格 > 0（防负注额刷钱/绕过总额上限）
-    let total = 0;
-    for (const [key, amt] of betEntries) {
-      if (!speedGridEngine.isValidMarketKey(key)) {
-        return res.status(400).json({ error: `非法盘口 key：${key}` });
-      }
-      const a = Number(amt);
-      if (!Number.isFinite(a) || !(a > 0)) {
-        return res.status(400).json({ error: `下注金额必须 > 0（key ${key}）` });
-      }
-      total += a;
-    }
-    const totalStr = total.toFixed(2);
-
-    // 风控前置：按服务端算出的总注额校验（RiskError 由全局中间件转 4xx）
-    assertBetWithinLimits('speedgrid', totalStr);
-
-    // 幂等先查：重复请求直接回已受理信息，不重复扣钱。
-    const dup = await findSpeedgridBet(idempotencyKey);
-    if (dup) {
-      return res.json({
-        roundNo: dup.round_no,
-        roundId: dup.round_id,
-        accepted: true,
-        balanceAfter: await getBalance(playerId),
-        idempotent: true,
-      });
-    }
-
-    // 相位闸（在 debit 之前）：只有当前房间处于 betting 才收注；否则 409 round_locked。
-    const rs = getRoomState('speedgrid');
-    if (!rs || rs.phase !== 'betting' || !rs.roundId) {
-      return res.status(409).json({ error: 'round_locked' });
-    }
-    const roundId = rs.roundId;
-    const roundNo = rs.roundNo;
-
-    // 下注明细快照（{key: 数字注额}）落 bets.selections，供 roundHub 结算时逐 key 三态。
-    const selections = Object.fromEntries(betEntries.map(([k, a]) => [k, Number(a)]));
-
+/**
+ * 造一个排期器接入的下注 handler（参数化引擎）。请求 { bets:{marketKey:amount}, idempotencyKey }。
+ * @param {string} gameName - 注册表键（= DB rounds.game = roundHub room key = 风控 config key）
+ */
+function makeScheduledRoundHandler(gameName) {
+  const entry = ROUND_GAME_REGISTRY[gameName];
+  const marketCount = Object.keys(entry.MARKETS).length;
+  return async (req, res, next) => {
     try {
-      const balanceAfter = await withTransaction(async (client) => {
-        const { balanceAfter: after } = await debit(client, {
-          playerId,
-          amount: totalStr,
-          type: 'speedgrid_bet',
-          idempotencyKey,
-          roundId,
-        });
-        await client.query(
-          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome, selections)
-           VALUES ($1, $2, $3::numeric, $4, 'pending', $5::jsonb)`,
-          [roundId, playerId, totalStr, idempotencyKey, JSON.stringify(selections)],
-        );
-        return after;
-      });
+      const playerId = req.user.sub;
+      const { bets, idempotencyKey } = req.body || {};
 
-      return res.json({ roundNo, roundId, accepted: true, balanceAfter, idempotent: false });
-    } catch (err) {
-      if (err.code === '23505') {
-        // 唯一键冲突（并发重复请求）：回查已受理记录按幂等命中返回，不重复扣钱。
-        const existing = await findSpeedgridBet(idempotencyKey);
-        if (existing) {
-          return res.json({
-            roundNo: existing.round_no,
-            roundId: existing.round_id,
-            accepted: true,
-            balanceAfter: await getBalance(playerId),
-            idempotent: true,
-          });
-        }
+      if (!idempotencyKey) {
+        return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
       }
-      throw err;
-    }
-  } catch (err) {
-    return next(err);
-  }
-});
+      if (!bets || typeof bets !== 'object' || Array.isArray(bets)) {
+        return res.status(400).json({ error: 'bets 必须是 {marketKey: amount} 对象' });
+      }
+      const betEntries = Object.entries(bets);
+      if (betEntries.length < 1) {
+        return res.status(400).json({ error: 'bets 不能为空' });
+      }
+      if (betEntries.length > marketCount) {
+        return res.status(400).json({ error: `下注项过多（上限 ${marketCount}）` });
+      }
+      // 逐项校验：market key 合法 + amount 严格 > 0（防负注额刷钱/绕过总额上限）
+      let total = 0;
+      for (const [key, amt] of betEntries) {
+        if (!entry.isValidMarketKey(key)) {
+          return res.status(400).json({ error: `非法盘口 key：${key}` });
+        }
+        const a = Number(amt);
+        if (!Number.isFinite(a) || !(a > 0)) {
+          return res.status(400).json({ error: `下注金额必须 > 0（key ${key}）` });
+        }
+        total += a;
+      }
+      const totalStr = total.toFixed(2);
 
-// 注册轮次开奖游戏路由（后续 9 个游戏在此加一行 + 注册表加一条 entry 即可）
-router.post('/numberup/play', requireAuth, requireType('player'), makeRoundGameHandler('numberup'));
-router.post('/hattrick/play', requireAuth, requireType('player'), makeRoundGameHandler('hattrick'));
-router.post('/goldenboot/play', requireAuth, requireType('player'), makeRoundGameHandler('goldenboot'));
-router.post('/halftime/play', requireAuth, requireType('player'), makeRoundGameHandler('halftime'));
-router.post('/wuxing/play', requireAuth, requireType('player'), makeRoundGameHandler('wuxing'));
-router.post('/lineup/play', requireAuth, requireType('player'), makeRoundGameHandler('lineup'));
-router.post('/derbyday/play', requireAuth, requireType('player'), makeRoundGameHandler('derbyday'));
-router.post('/dominoduel/play', requireAuth, requireType('player'), makeRoundGameHandler('dominoduel'));
+      // 风控前置：按服务端算出的总注额校验（RiskError 由全局中间件转 4xx）
+      assertBetWithinLimits(gameName, totalStr);
+
+      // 幂等先查：重复请求直接回已受理信息，不重复扣钱。
+      const dup = await findScheduledBet(idempotencyKey, gameName);
+      if (dup) {
+        return res.json({
+          roundNo: dup.round_no,
+          roundId: dup.round_id,
+          accepted: true,
+          balanceAfter: await getBalance(playerId),
+          idempotent: true,
+        });
+      }
+
+      // 相位闸（在 debit 之前）：只有当前房间处于 betting 才收注；否则 409 round_locked。
+      const rs = getRoomState(gameName);
+      if (!rs || rs.phase !== 'betting' || !rs.roundId) {
+        return res.status(409).json({ error: 'round_locked' });
+      }
+      const roundId = rs.roundId;
+      const roundNo = rs.roundNo;
+
+      // 下注明细快照（{key: 数字注额}）落 bets.selections，供 roundHub 结算时逐 key 三态。
+      const selections = Object.fromEntries(betEntries.map(([k, a]) => [k, Number(a)]));
+
+      try {
+        const balanceAfter = await withTransaction(async (client) => {
+          const { balanceAfter: after } = await debit(client, {
+            playerId,
+            amount: totalStr,
+            type: `${gameName}_bet`,
+            idempotencyKey,
+            roundId,
+          });
+          await client.query(
+            `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome, selections)
+             VALUES ($1, $2, $3::numeric, $4, 'pending', $5::jsonb)`,
+            [roundId, playerId, totalStr, idempotencyKey, JSON.stringify(selections)],
+          );
+          return after;
+        });
+
+        return res.json({ roundNo, roundId, accepted: true, balanceAfter, idempotent: false });
+      } catch (err) {
+        if (err.code === '23505') {
+          // 唯一键冲突（并发重复请求）：回查已受理记录按幂等命中返回，不重复扣钱。
+          const existing = await findScheduledBet(idempotencyKey, gameName);
+          if (existing) {
+            return res.json({
+              roundNo: existing.round_no,
+              roundId: existing.round_id,
+              accepted: true,
+              balanceAfter: await getBalance(playerId),
+              idempotent: true,
+            });
+          }
+        }
+        throw err;
+      }
+    } catch (err) {
+      return next(err);
+    }
+  };
+}
+
+// —— 全 9 款轮次已接排期器（roundHub 多房间统一开奖）：单1 speedgrid、单3 批1 numberup/derbyday/dominoduel、
+//    单3 批2 hattrick/goldenboot/halftime/wuxing/lineup。RollingBall 连开 3 球仍走下方 bespoke。——
+router.post('/speedgrid/play', requireAuth, requireType('player'), makeScheduledRoundHandler('speedgrid'));
+router.post('/numberup/play', requireAuth, requireType('player'), makeScheduledRoundHandler('numberup'));
+router.post('/derbyday/play', requireAuth, requireType('player'), makeScheduledRoundHandler('derbyday'));
+router.post('/dominoduel/play', requireAuth, requireType('player'), makeScheduledRoundHandler('dominoduel'));
+router.post('/hattrick/play', requireAuth, requireType('player'), makeScheduledRoundHandler('hattrick'));
+router.post('/goldenboot/play', requireAuth, requireType('player'), makeScheduledRoundHandler('goldenboot'));
+router.post('/halftime/play', requireAuth, requireType('player'), makeScheduledRoundHandler('halftime'));
+router.post('/wuxing/play', requireAuth, requireType('player'), makeScheduledRoundHandler('wuxing'));
+router.post('/lineup/play', requireAuth, requireType('player'), makeScheduledRoundHandler('lineup'));
 
 // ==================================================================
 // RollingBall（连开 3 球）—— bespoke 多步 handler（不走通用轮次脚手架）

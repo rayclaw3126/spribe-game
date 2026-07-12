@@ -19,16 +19,39 @@ import { distributeLoss } from '../lib/commission.js';
 import { maxPayoutFor } from '../lib/risk.js';
 import { makeSeededRng } from '../lib/seededRng.js';
 import * as speedGridEngine from '../game/speedGrid.js';
+import * as numberUpEngine from '../game/numberUp.js';
+import * as derbyDayEngine from '../game/derbyDay.js';
+import * as dominoDuelEngine from '../game/dominoDuel.js';
+import * as hatTrickEngine from '../game/hatTrick.js';
+import * as goldenBootEngine from '../game/goldenBoot.js';
+import * as halfTimeEngine from '../game/halfTime.js';
+import * as wuXingEngine from '../game/wuXing.js';
+import * as lineUpEngine from '../game/lineUp.js';
 
 // 相位时长（ms）。
-const BETTING_MS = 30000;
-const LOCKED_MS = 2000;
-const IDLE_MS = 5000;
+// 相位时长（ms）——每房独立。betting/locked 统一，idle（开奖后到下一期的停顿）按各款开奖舞台动画长度定制：
+// idle 必须 ≥ 前端 DRAW_ANIM_MS，否则下一期 betting 会切断动画。默认 idle 5s（speedgrid 舞台 ~4.6s）。
+const DEFAULT_TIMINGS = { bettingMs: 30000, lockedMs: 2000, idleMs: 5000 };
+const ROOM_TIMINGS = {
+  speedgrid: { idleMs: 5000 },   // 冲线舞台 ~4.6s
+  numberup: { idleMs: 8000 },    // 举牌+LED 翻数 ~6s
+  dominoduel: { idleMs: 8000 },  // 四张骨牌翻开 ~3.5s + 悬念/结算展示（前端 DRAW_ANIM_MS 6s）
+  derbyday: { idleMs: 24000 },   // 半场20珠+定格+全场20珠 两段 ~22s
+  hattrick: { idleMs: 8000 },    // 三骰错峰弹入滚动+TOTAL 定格金闪 ~7s
+  goldenboot: { idleMs: 9000 },  // 十车起跑+冲刺+撞线定格 ~8s
+  halftime: { idleMs: 11000 },   // 20 球连发+SCORE 定格 ~10s
+  wuxing: { idleMs: 5500 },      // 开奖舞台 ~4.5s
+  lineup: { idleMs: 5500 },      // 开奖舞台 ~4.5s
+};
+function timingsFor(gameName) {
+  return { ...DEFAULT_TIMINGS, ...(ROOM_TIMINGS[gameName] || {}) };
+}
 
 const round2 = (x) => Math.round(x * 100) / 100;
 
 // —— 房间引擎表：gameName → { prefix(期号前缀), MARKETS, isValidMarketKey, hasPush, spin(rng) } ——
-// 与 round.js 的 ROUND_GAME_REGISTRY.speedgrid 同源（同一 engine），spin 一行逐位一致。
+// 与 round.js 的 ROUND_GAME_REGISTRY 同源（同一 engine），spin 逐位一致；prefix = 期号前缀（各房独立）。
+// spin 返回 { drawResult, hits:Set, pushes:Set }；DerbyDay/DominoDuel hasPush=true（push→退本金，settle 已含分支）。
 const ROOM_ENGINES = {
   speedgrid: {
     prefix: 'SG',
@@ -40,7 +63,69 @@ const ROOM_ENGINES = {
       return { drawResult: { n }, hits: speedGridEngine.hitsOf(n), pushes: new Set() };
     },
   },
+  numberup: {
+    prefix: 'NU',
+    MARKETS: numberUpEngine.MARKETS,
+    isValidMarketKey: numberUpEngine.isValidMarketKey,
+    hasPush: numberUpEngine.HAS_PUSH,
+    spin: numberUpEngine.spin,
+  },
+  derbyday: {
+    prefix: 'DD',
+    MARKETS: derbyDayEngine.MARKETS,
+    isValidMarketKey: derbyDayEngine.isValidMarketKey,
+    hasPush: derbyDayEngine.HAS_PUSH,
+    spin: derbyDayEngine.spin,
+  },
+  dominoduel: {
+    prefix: 'DM',
+    MARKETS: dominoDuelEngine.MARKETS,
+    isValidMarketKey: dominoDuelEngine.isValidMarketKey,
+    hasPush: dominoDuelEngine.HAS_PUSH,
+    spin: dominoDuelEngine.spin,
+  },
+  // —— 单3 批次2：HatTrick/GoldenBoot/HalfTime/WuXing/LineUp（均 HAS_PUSH=false；
+  //    HalfTime.draw / WuXing.龙虎和局 是独立 hit/lose 市场——和局判【输】不退本金，
+  //    通用 settle 的 push 分支因 hasPush=false 天然不触发，draw 未中即 lose，符合埋尸点）——
+  hattrick: {
+    prefix: 'HT',
+    MARKETS: hatTrickEngine.MARKETS,
+    isValidMarketKey: hatTrickEngine.isValidMarketKey,
+    hasPush: hatTrickEngine.HAS_PUSH,
+    spin: hatTrickEngine.spin,
+  },
+  goldenboot: {
+    prefix: 'GB',
+    MARKETS: goldenBootEngine.MARKETS,
+    isValidMarketKey: goldenBootEngine.isValidMarketKey,
+    hasPush: goldenBootEngine.HAS_PUSH,
+    spin: goldenBootEngine.spin,
+  },
+  halftime: {
+    prefix: 'HF',
+    MARKETS: halfTimeEngine.MARKETS,
+    isValidMarketKey: halfTimeEngine.isValidMarketKey,
+    hasPush: halfTimeEngine.HAS_PUSH,
+    spin: halfTimeEngine.spin,
+  },
+  wuxing: {
+    prefix: 'WX',
+    MARKETS: wuXingEngine.MARKETS,
+    isValidMarketKey: wuXingEngine.isValidMarketKey,
+    hasPush: wuXingEngine.HAS_PUSH,
+    spin: wuXingEngine.spin,
+  },
+  lineup: {
+    prefix: 'LU',
+    MARKETS: lineUpEngine.MARKETS,
+    isValidMarketKey: lineUpEngine.isValidMarketKey,
+    hasPush: lineUpEngine.HAS_PUSH,
+    spin: lineUpEngine.spin,
+  },
 };
+
+// 本轮启动的房间列表（backendId = room key）。单3 全 9 款轮次上排期器。
+const ROOMS_TO_START = ['speedgrid', 'numberup', 'derbyday', 'dominoduel', 'hattrick', 'goldenboot', 'halftime', 'wuxing', 'lineup'];
 
 // 模块级房间表：gameName → room。round.js 的下注端点通过 getRoomState() 读同一活对象判相位。
 const rooms = new Map();
@@ -52,6 +137,7 @@ function makeRoom(gameName) {
   return {
     gameName,
     engine,
+    timings: timingsFor(gameName), // { bettingMs, lockedMs, idleMs }（idle 按各款舞台动画长度）
     phase: 'idle', // 'betting' | 'locked' | 'drawn' | 'settled' | 'idle'
     dateKey: null, // 'YYYYMMDD'，跨零点重置期号序号
     seq: 0, // 当日期号序号（NNN）
@@ -145,41 +231,41 @@ async function runBetting(room) {
     // 落库失败：本期无 roundId → 下注端点会因 phase 判定/roundId 缺失兜住；短暂跳到 idle 再重试。
     console.error(`[roundHub:${gameName}] betting round 落库失败：`, err.message);
     room.phase = 'idle';
-    room.endsAt = Date.now() + IDLE_MS;
-    room.timer = setTimeout(() => { room.nonce += 1; runBetting(room).catch(logLoopErr(gameName)); }, IDLE_MS);
+    room.endsAt = Date.now() + room.timings.idleMs;
+    room.timer = setTimeout(() => { room.nonce += 1; runBetting(room).catch(logLoopErr(gameName)); }, room.timings.idleMs);
     return;
   }
 
-  room.endsAt = Date.now() + BETTING_MS;
+  room.endsAt = Date.now() + room.timings.bettingMs;
   broadcast(room, {
     type: 'phase',
     phase: 'betting',
     roundNo,
     roundId: room.roundId,
     endsAt: room.endsAt,
-    durationMs: BETTING_MS,
+    durationMs: room.timings.bettingMs,
     serverSeedHash,
     clientSeed,
     nonce,
   });
 
-  room.timer = setTimeout(() => runLocked(room), BETTING_MS);
+  room.timer = setTimeout(() => runLocked(room), room.timings.bettingMs);
 }
 
 // —— locked：封盘缓冲（2s），给「betting 末刻刚通过相位判定的 HTTP 下注」留出提交窗口 ——
 // 保证任何被接受的下注都在 drawn 的结算 SELECT 之前落库，规避截止边界竞态。
 function runLocked(room) {
   room.phase = 'locked';
-  room.endsAt = Date.now() + LOCKED_MS;
+  room.endsAt = Date.now() + room.timings.lockedMs;
   broadcast(room, {
     type: 'phase',
     phase: 'locked',
     roundNo: room.roundNo,
     roundId: room.roundId,
     endsAt: room.endsAt,
-    durationMs: LOCKED_MS,
+    durationMs: room.timings.lockedMs,
   });
-  room.timer = setTimeout(() => { runDrawn(room).catch(logLoopErr(room.gameName)); }, LOCKED_MS);
+  room.timer = setTimeout(() => { runDrawn(room).catch(logLoopErr(room.gameName)); }, room.timings.lockedMs);
 }
 
 // —— drawn：一次 spin 开奖 → reveal（广播 serverSeed + UPDATE 落 result/server_seed）→ 结算全员 → settled ——
@@ -328,22 +414,22 @@ async function settleRound(room, hits, pushes) {
   }
 }
 
-// —— idle：结算完到下一期的停顿（5s）——
+// —— idle：结算完到下一期的停顿（各房独立，≥ 开奖舞台动画长度，防下一期切断动画）——
 function runIdle(room) {
   room.phase = 'idle';
-  room.endsAt = Date.now() + IDLE_MS;
+  room.endsAt = Date.now() + room.timings.idleMs;
   broadcast(room, {
     type: 'phase',
     phase: 'idle',
     roundNo: room.roundNo,
     roundId: room.roundId,
     endsAt: room.endsAt,
-    durationMs: IDLE_MS,
+    durationMs: room.timings.idleMs,
   });
   room.timer = setTimeout(() => {
     room.nonce += 1;
     runBetting(room).catch(logLoopErr(room.gameName));
-  }, IDLE_MS);
+  }, room.timings.idleMs);
 }
 
 function logLoopErr(gameName) {
@@ -393,8 +479,19 @@ export function getRoomState(gameName) {
   return { phase: room.phase, roundNo: room.roundNo, roundId: room.roundId, endsAt: room.endsAt };
 }
 
+// 从 WS 升级请求的 query 解析目标房间（?game=<backendId>）。缺省/非法 → 兜底 speedgrid（向后兼容旧连接）。
+function roomNameOf(req) {
+  try {
+    const g = new URL(req.url, 'http://localhost').searchParams.get('game');
+    return g && rooms.has(g) ? g : 'speedgrid';
+  } catch {
+    return 'speedgrid';
+  }
+}
+
 /**
- * 启动轮次排期器：建 speedgrid 房间、恢复当日期号、挂新连接快照、起相位循环。
+ * 启动轮次排期器：为 ROOMS_TO_START 每款各建一个独立房间（独立相位循环 + 独立期号前缀），
+ * 恢复各自当日期号、挂新连接快照（按 ?game= 路由到对应房间）、起各房相位循环。
  * 模块级单例，重复调用忽略（避免起两个并行循环）。
  * @param {import('ws').WebSocketServer} wss - /ws/rounds 的 WSS
  */
@@ -405,13 +502,17 @@ export function startRoundHub(wss) {
   }
   started = true;
 
-  // 目前只开 speedgrid 一个房间；未来多房间可按 ?room= 分派，这里默认全部并入 speedgrid。
-  const room = makeRoom('speedgrid');
-  rooms.set('speedgrid', room);
+  // 建所有房间对象（先 set 进 rooms，roomNameOf 才能识别合法 game）。
+  for (const gameName of ROOMS_TO_START) {
+    rooms.set(gameName, makeRoom(gameName));
+  }
 
-  wss.on('connection', (ws) => {
+  // 单一 connection handler 按 ?game= 路由到对应房间（各房独立 clients 集合，广播互不串扰）。
+  wss.on('connection', (ws, req) => {
     // 未认证的连接已被 index.js 握手 handler close，ws.playerId 不会挂上；显式跳过。
     if (!ws.playerId) return;
+    const room = rooms.get(roomNameOf(req));
+    if (!room) return;
 
     room.clients.add(ws);
     ws.on('close', () => room.clients.delete(ws));
@@ -429,11 +530,14 @@ export function startRoundHub(wss) {
     });
   });
 
-  // 恢复当日期号序号后再起循环（防重启撞号）。
-  recoverSeq('speedgrid', room.engine.prefix, dateKeyNow()).then((mx) => {
-    room.dateKey = dateKeyNow();
-    room.seq = mx; // 首个 runBetting 会 +1
-    console.log(`[roundHub:speedgrid] 排期器启动，当日已用序号 ${mx}，下一期 ${mx + 1}`);
-    runBetting(room).catch(logLoopErr('speedgrid'));
-  });
+  // 每房恢复当日期号序号后各自起循环（防重启撞号）。
+  for (const gameName of ROOMS_TO_START) {
+    const room = rooms.get(gameName);
+    recoverSeq(gameName, room.engine.prefix, dateKeyNow()).then((mx) => {
+      room.dateKey = dateKeyNow();
+      room.seq = mx; // 首个 runBetting 会 +1
+      console.log(`[roundHub:${gameName}] 排期器启动（前缀 ${room.engine.prefix}），当日已用序号 ${mx}，下一期 ${mx + 1}`);
+      runBetting(room).catch(logLoopErr(gameName));
+    });
+  }
 }
