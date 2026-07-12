@@ -12,6 +12,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 const G = GAME_BY_ID['Momentum']
 
@@ -47,6 +48,7 @@ const barH = x => Math.min(94, Math.max(4, 6 + 88 * Math.log(Math.max(x, 0.055) 
 
 export default function Momentum({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 仅用 wsUrl 收口 token 拼法
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const balance = serverBalance ?? 0
   const [bet, setBet] = useState(10)
@@ -259,8 +261,7 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
     function connect() {
       if (cancelled) return
       if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return
-      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      const ws = new WebSocket(`${proto}://${window.location.host}/ws/momentum?token=${encodeURIComponent(playerToken)}`)
+      const ws = new WebSocket(api.wsUrl(G.backendId, playerToken))
       wsRef.current = ws
       ws.onopen = () => {
         const wasReconnect = reconnectAttemptRef.current > 0

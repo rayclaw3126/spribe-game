@@ -13,6 +13,7 @@ import GameTopBar from '../components/shell/GameTopBar'
 import HowToPlay from '../components/shell/HowToPlay'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 const G = GAME_BY_ID['Aviator']
 const GREEN = '#16C784'
@@ -70,6 +71,7 @@ function makePanel() {
 export default function Aviator({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 仅用 wsUrl 收口 token 拼法
   const canvasRef = useRef(null)
   const ballRef = useRef(null)
   const frameRef = useRef(null)
@@ -692,8 +694,7 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
         return
       }
       setConnStatus(reconnectAttemptRef.current > 0 ? 'reconnecting' : 'connecting')
-      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      const ws = new WebSocket(`${proto}://${window.location.host}/ws/aviator?token=${encodeURIComponent(playerToken)}`)
+      const ws = new WebSocket(api.wsUrl(G.backendId, playerToken))
       wsRef.current = ws
 
       ws.onopen = () => {
