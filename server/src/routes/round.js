@@ -1607,9 +1607,11 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
         const mult = multsFor(rowsNum, risk)[bucket];
 
         const amountStr = amountNum.toFixed(2);
+        // 派彩钳制（LEAST，非拒绝）：即时局打出 red/16 大奖若超 cap，钳到 maxPayout 落袋，
+        // 而非 assertPayoutCap 把整局 rollback（那会让本该中奖变成下注报错）。落库/ledger 用钳后值。
         const payoutResult = await client.query(
-          'SELECT trunc($1::numeric * $2::numeric, 2) AS payout',
-          [amountStr, mult]
+          'SELECT LEAST(trunc($1::numeric * $2::numeric, 2), $3::numeric) AS payout',
+          [amountStr, String(mult), String(maxPayoutFor('plinko'))]
         );
         const payout = payoutResult.rows[0].payout;
         const win = mult >= 1;
@@ -1643,8 +1645,7 @@ router.post('/plinko/play', requireAuth, requireType('player'), async (req, res,
         let balanceAfter = balanceAfterDebit;
         const payoutCheck = await client.query('SELECT $1::numeric > 0 AS positive', [payout]);
         if (payoutCheck.rows[0].positive) {
-          // 5a. 派彩加钱（资金唯一出入口）
-          assertPayoutCap('plinko', payout);
+          // 5a. 派彩加钱（资金唯一出入口）。payout 已在算式里 LEAST 钳到 cap，无需再拒绝。
           const creditResult = await credit(client, {
             playerId,
             amount: payout,
@@ -2162,14 +2163,13 @@ router.post('/mines/reveal', requireAuth, requireType('player'), async (req, res
 
       if (gems >= safeTotal) {
         // 揭满全部安全格：自动结算赢
+        // 派彩钳制（LEAST，非拒绝）：满清倍数中段爆炸（mines13 3.6M×），任何注都超 cap，
+        // 钳到 maxPayout 落袋而非 rollback（否则玩家揭满/滚倍到大奖反而兑不出）。落库/ledger 用钳后值。
         const payoutResult = await client.query(
-          'SELECT round($1::numeric * $2::numeric, 2) AS payout',
-          [round.bet_amount, mult]
+          'SELECT LEAST(round($1::numeric * $2::numeric, 2), $3::numeric) AS payout',
+          [round.bet_amount, String(mult), String(maxPayoutFor('mines'))]
         );
         const payout = payoutResult.rows[0].payout;
-
-        // 风控封顶：揭满自动结算这条 credit 同样不得超上限（否则大注揭满是绕过 cap 的后门）
-        assertPayoutCap('mines', payout);
 
         const { balanceAfter } = await credit(client, {
           playerId,
@@ -2256,14 +2256,13 @@ router.post('/mines/cashout', requireAuth, requireType('player'), async (req, re
       const gems = revealed.length;
       const mult = calcMultiplier(gems, mineCount);
 
+      // 派彩钳制（LEAST，非拒绝）：多步滚倍后 payout 超 cap 钳到 maxPayout 落袋，同揭满口径，
+      // 而非 rollback 让玩家兑不出大奖。落库/ledger 用钳后值。
       const payoutResult = await client.query(
-        'SELECT round($1::numeric * $2::numeric, 2) AS payout',
-        [round.bet_amount, mult]
+        'SELECT LEAST(round($1::numeric * $2::numeric, 2), $3::numeric) AS payout',
+        [round.bet_amount, String(mult), String(maxPayoutFor('mines'))]
       );
       const payout = payoutResult.rows[0].payout;
-
-      // 风控封顶：多步滚倍后派彩不得超上限（credit 之前拦，防超封顶提现）
-      assertPayoutCap('mines', payout);
 
       const { balanceAfter } = await credit(client, {
         playerId,

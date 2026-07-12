@@ -90,8 +90,8 @@ const g1 = await api('goal/start', { amount: '3', tier: 'lg', idempotencyKey: kk
 check('第 1 个 goal lg 开（39714<50000）', g1.status === 200);
 const g2 = await api('goal/start', { amount: '3', tier: 'lg', idempotencyKey: kkey('e2') }); // 79428>50000
 check('第 2 个 goal lg → exposure_over_limit', g2.status === 400 && g2.code === 'exposure_over_limit', `${g2.status}/${g2.code}`);
-// 混合：留着 g1(39714) 再开 mines bet1000 mines1(潜在12035) → 51749>50000
-const mx = await api('mines/start', { amount: '1000', mines: 1, idempotencyKey: kkey('em') });
+// 混合：留着 g1(39714) 再开 mines bet100 mines2(潜在14889) → 54603>50000
+const mx = await api('mines/start', { amount: '100', mines: 2, idempotencyKey: kkey('em') });
 check('goal lg + mines 混合敞口 → mines 被拦 exposure_over_limit', mx.status === 400 && mx.code === 'exposure_over_limit', `${mx.status}/${mx.code}`);
 await cleanup();
 

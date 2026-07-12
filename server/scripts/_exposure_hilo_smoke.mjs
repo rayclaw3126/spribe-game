@@ -26,11 +26,11 @@ let ok1 = 0; for (let i = 0; i < 5; i++) if ((await hilo(10)).status === 200) ok
 check('开 5 个 bet10 hilo 全成功（total=10000）', ok1 === 5, `opened=${ok1}`);
 await cleanup();
 
-// 2. hilo + mines 混玩不互锁（mines1000/mines1=12035 + 5×hilo10=10000 = 22035 < 50000）
+// 2. hilo + mines 混玩不互锁（mines100/mines2=14889 + 5×hilo10=10000 = 24889 < 50000）
 console.log('\n== hilo + mines 混玩不互锁 ==');
-const mx = await mines(1000, 1);
+const mx = await mines(100, 2);
 let ok2 = 0; for (let i = 0; i < 5; i++) if ((await hilo(10)).status === 200) ok2++;
-check('1 局 mines(12035) + 5 局小注 hilo 共存', mx.status === 200 && ok2 === 5, `mines=${mx.status} hilo=${ok2}`);
+check('1 局 mines(14889) + 5 局小注 hilo 共存', mx.status === 200 && ok2 === 5, `mines=${mx.status} hilo=${ok2}`);
 await cleanup();
 
 // 3. 大注 hilo 严管（bet250 潜在=50000，开 1 个占满，第 2 个任何局被拦）
@@ -43,8 +43,8 @@ await cleanup();
 
 // 4. 双闸没坏
 console.log('\n== 双闸没坏 ==');
-for (let i = 0; i < 4; i++) await mines(1000, 1); // 48141
-const g1 = await mines(1000, 1); // 第5局超敞口
+for (let i = 0; i < 3; i++) await mines(100, 2); // 3×14889=44667
+const g1 = await mines(100, 2); // 第4局 59556>50000 超敞口
 check('exposure_over_limit 仍拦', g1.status === 400 && g1.code === 'exposure_over_limit', `${g1.status}/${g1.code}`);
 await cleanup();
 for (let i = 0; i < 10; i++) await mines(1, 1); // 10 局小注

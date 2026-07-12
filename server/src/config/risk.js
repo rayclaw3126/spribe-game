@@ -4,6 +4,8 @@ export default {
   perGame: {
     dice:    { maxBet: '500.00' },
     limbo:   { maxBet: '200.00' },
+    plinko:  { maxBet: '100.00' }, // red/16 顶 425×，bet100 顶赔 42500<cap；派彩走 LEAST 钳制兜底（非拒绝）
+    mines:   { maxBet: '100.00' }, // 满清峰值 mines13 3.6M×，任何注都超 cap，靠 LEAST 钳制到 50000（非拒绝，否则大奖兑不出）
     hilo:    { exposureMult: 200 }, // 敞口口径：潜在=bet×200（clamp cap），代替理论无界的满 cap
     keno:    { maxBet: '20.00', maxPayout: '50000.00' }, // maxBet 20 降 RTP 侵蚀（小注顶赔零侵蚀）
     goal:    { maxBet: '3.00', maxPayout: '50000.00' }, // lg 满清 13238×，bet3 顶赔 39714<cap（不触顶，靠钳制兜）

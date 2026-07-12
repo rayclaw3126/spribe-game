@@ -26,15 +26,15 @@ const startHilo = (bet) => api('hilo/start', { amount: String(bet), idempotencyK
 await cleanup();
 console.log('清理旧 playing 局，起点 open =', await openCount(), '\n');
 
-// ===== A. 堆敞口 → exposure_over_limit（bet1000 mines1 潜在≈12035，4 局≈48141<50000，第5局超）=====
+// ===== A. 堆敞口 → exposure_over_limit（bet100 mines2 潜在≈14889，3 局≈44667<50000，第4局超）=====
 console.log('== A. 堆敞口拦 exposure_over_limit ==');
 let openedA = 0;
-for (let i = 1; i <= 4; i++) { const r = await startMines(1000, 1); if (r.status === 200) openedA++; else console.log(`  意外: 第${i}局 ${r.status} ${r.code}`); }
-check('前 4 局 bet1000 mines1 正常开', openedA === 4, `opened=${openedA}, openCount=${await openCount()}`);
+for (let i = 1; i <= 3; i++) { const r = await startMines(100, 2); if (r.status === 200) openedA++; else console.log(`  意外: 第${i}局 ${r.status} ${r.code}`); }
+check('前 3 局 bet100 mines2 正常开', openedA === 3, `opened=${openedA}, openCount=${await openCount()}`);
 const balBeforeRej = await balance();
 const cntBeforeRej = await openCount();
-const rej = await startMines(1000, 1); // 第5局应超敞口
-check('第 5 局超敞口 → 400 + exposure_over_limit', rej.status === 400 && rej.code === 'exposure_over_limit', `HTTP ${rej.status} code ${rej.code}`);
+const rej = await startMines(100, 2); // 第4局应超敞口（59556>50000）
+check('第 4 局超敞口 → 400 + exposure_over_limit', rej.status === 400 && rej.code === 'exposure_over_limit', `HTTP ${rej.status} code ${rej.code}`);
 check('拒后不扣钱（余额没变）', await balance() === balBeforeRej, `before=${balBeforeRej} after=${await balance()}`);
 check('拒后不开局（playing 数没增）', await openCount() === cntBeforeRej, `before=${cntBeforeRej} after=${await openCount()}`);
 
