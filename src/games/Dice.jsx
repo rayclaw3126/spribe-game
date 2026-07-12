@@ -9,6 +9,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 const G = GAME_BY_ID['Dice']
 
@@ -25,8 +26,6 @@ const TARGET_MAX = 96
 const ROLL_MS = 1200
 const round2 = x => Math.round(x * 100) / 100
 const payoutFor = chance => round2(RTP * 100 / chance)
-// 生成幂等键：优先用 crypto.randomUUID，不支持则退化拼接时间戳+随机数
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `dice-${Date.now()}-${Math.random()}`)
 
 // slider handle: block-face football (white ball, black patches — no star)
 function BallHandle({ size = 24 }) {
@@ -44,6 +43,7 @@ function BallHandle({ size = 24 }) {
 
 export default function Dice({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装（鉴权/401登出/余额回写/幂等）
   const [bet, setBet] = useState(10)
   const [target, setTarget] = useState(48.5)     // slider-set target line
   const [rolling, setRolling] = useState(false)
@@ -240,24 +240,15 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
     if (lossTimerRef.current) clearTimeout(lossTimerRef.current)
     setFeedBets(makeFeedBots())   // fresh fake round rides along (display only; after the roll)
 
-    const idempotencyKey = genIdemKey()
-
     let data
     try {
-      const resp = await fetch('/round/dice/play', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-        body: JSON.stringify({ amount: bet, target, direction: side, idempotencyKey }),
-      })
-      data = await resp.json()
-      if (!resp.ok) {
-        setRolling(false)
-        pushToast(data?.error || '下注失败，请重试', 0)
-        return
-      }
-    } catch {
+      // autoBalance:false —— 余额不即时回写，留到骰子落定回调（保留原视觉时序）；幂等键由 apiPlay 内部生成
+      data = await api.apiPlay(G.backendId, { amount: bet, target, direction: side }, { autoBalance: false })
+    } catch (err) {
       setRolling(false)
-      pushToast('网络异常，请稍后重试', 0)
+      // 服务端业务错（有 err.data）沿用原「下注失败」兜底；网络层异常（无 err.data）显「网络异常」
+      if (err?.data) pushToast(err.data.error || '下注失败，请重试', 0)
+      else pushToast('网络异常，请稍后重试', 0)
       return
     }
 
@@ -265,7 +256,7 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
     const pay = Number(payout)
 
     animateRoll(roll, () => {
-      setServerBalance(Number(balanceAfter))   // 余额只认后端 balanceAfter，不本地加减
+      setServerBalance(Number(balanceAfter))   // 余额只认后端 balanceAfter，落定瞬间才回写（不本地加减）
       setProof({ serverSeedHash, nonce })
       if (win) {
         pushToast(`开点 ${roll.toFixed(2)}`, pay)
