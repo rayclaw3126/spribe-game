@@ -25,6 +25,9 @@ const G = GAME_BY_ID['HiLo']
 //   猜对倍数累乘（内部保留全精度，显示才 round2），CASHOUT = 注金 × 累乘。
 const RTP = 0.97
 const SKIPS_PER_ROUND = 3   // 每局 skip 限次（后端 game/hilo.js SKIPS_PER_ROUND 同步）
+// 单局派彩封顶，对齐 server risk.js perGame.hilo.maxPayout（改 cap 两边同步）。
+// cum 理论无界；兑现真实到账由后端钳制并回 data.payout，此常量仅用于「兑现前」按钮预估不虚高过 cap。
+const MAX_PAYOUT = 50000
 const round2 = x => Math.round(x * 100) / 100
 const pHigh = n => (14 - n) / 13
 const pLow = n => n / 13
@@ -179,10 +182,12 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
   const [fairOpen, setFairOpen] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明弹窗
   const [toastMsg, setToastMsg] = useState('')
+  const [winMsg, setWinMsg] = useState('')   // 兑现赢额提示，认后端 data.payout（钳后真实到账）
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   const audioRef = useRef({ ctx: null, muted: false })
   const toastTimer = useRef(null)
+  const winTimer = useRef(null)
   const timersRef = useRef([])
   const [anim, setAnim] = useState(null)       // { id, num, kind, onReveal } — presentation only
   const animIdRef = useRef(0)
@@ -194,6 +199,13 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
     setToastMsg(msg)
     if (toastTimer.current) clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToastMsg(''), 3000)
+  }
+
+  // 赢额提示：一律用后端 data.payout（已钳到 MAX_PAYOUT），不再本地 bet×cum 估算
+  function pushWin(payout) {
+    setWinMsg(`WIN +${round2(Number(payout)).toFixed(2)} USD`)
+    if (winTimer.current) clearTimeout(winTimer.current)
+    winTimer.current = setTimeout(() => setWinMsg(''), 3500)
   }
 
   // ---------- server API (服务器权威：牌序/判定/累乘/派彩全部以后端返回为准，
@@ -264,6 +276,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
   useEffect(() => () => {
     timersRef.current.forEach(clearTimeout)
     if (toastTimer.current) clearTimeout(toastTimer.current)
+    if (winTimer.current) clearTimeout(winTimer.current)
   }, [])
 
   // Kick off the deal animation. The number is already decided by the caller;
@@ -291,6 +304,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
       setServerBalance(Number(data.balanceAfter))
       setRoundId(data.roundId)
       setCum(1)
+      setWinMsg('')                 // 新局清上局赢额提示
       setCard(data.card)            // server-issued first card
       setSteps([])
       setSkips(SKIPS_PER_ROUND)
@@ -374,6 +388,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
       setProof(p => ({ ...p, serverSeedHash: data.serverSeedHash, nonce: data.nonce }))
       setPhase('done')
       settleFeed()
+      pushWin(data.payout)   // 认后端钳后 payout，非本地 bet×cum
       playCash()
     } catch (err) {
       pushToast(err.message)
@@ -632,6 +647,16 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
           }}>{toastMsg}</div>
         )}
 
+        {winMsg && (
+          <div style={{
+            position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 11, padding: '6px 16px', borderRadius: RADIUS.pill,
+            background: '#f7c948', color: '#3a2c00',
+            fontSize: 13, fontWeight: 900, whiteSpace: 'nowrap',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+          }}>{winMsg}</div>
+        )}
+
         </div>{/* /middle zone */}
 
         {/* ---- bottom bet band — pinned to the card bottom, full-bleed strip ---- */}
@@ -679,7 +704,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
               display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
             }}>
               <span>CASHOUT</span>
-              <span style={{ fontSize: 12, opacity: 0.92 }}>{round2(bet * cum).toFixed(2)} USD</span>
+              <span style={{ fontSize: 12, opacity: 0.92 }}>{round2(Math.min(bet * cum, MAX_PAYOUT)).toFixed(2)} USD</span>
             </button>
           ) : (
             <button type="button" onClick={startGame} disabled={busy || bet > (serverBalance ?? 0) || bet < 1} style={{

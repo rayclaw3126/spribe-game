@@ -24,6 +24,9 @@ const FILL_TOP = '#5DCAA5'
 const AMBER = '#F59E0B'
 const HOUSE_EDGE = 0.99
 const MAX_MULT = 1000000
+// 单局派彩封顶，对齐 server risk.js perGame.limbo.maxPayout（改 cap 两边同步）。
+// target 上限动态钳到 MAX_PAYOUT/bet，使 bet×target 永不虚高过 cap；后端另有 LEAST 钳制兜底。
+const MAX_PAYOUT = 50000
 const CLIMB_MS = 1400
 const TICKS = [1, 1.5, 2, 3, 5, 10, 100]
 
@@ -101,10 +104,19 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
   }
 
-  const t = Math.max(1.01, target || 1.01)
+  // target 动态上限：使 bet×target ≤ MAX_PAYOUT（截断到 2 位小数，向下取整不越界）
+  const maxTarget = Math.max(1.01, Math.floor((MAX_PAYOUT / Math.max(bet, 1)) * 100) / 100)
+  // 统一 target 落点：钳到 [1.01, maxTarget]，输入框/预设/回落都走这里
+  const applyTarget = (v) => setTarget(Math.min(Math.max(1.01, Number(v) || 1.01), maxTarget))
+  const t = Math.min(Math.max(1.01, target || 1.01), maxTarget)
   const winChance = Math.min(99, (HOUSE_EDGE / t) * 100)
-  const payout = parseFloat((bet * t).toFixed(2))
+  const payout = parseFloat(Math.min(bet * t, MAX_PAYOUT).toFixed(2))
   targetRef.current = t
+
+  // bet 改变时若当前 target 超新上限，自动回落到 maxTarget
+  useEffect(() => {
+    if (target > maxTarget) setTarget(maxTarget)
+  }, [bet, maxTarget, target])
   isMobileRef.current = isMobile
 
   function ensureAudio() {
@@ -451,7 +463,7 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
 
   const side = (
         <SideControls
-          bet={bet} target={target} setTarget={setTarget}
+          bet={bet} target={target} setTarget={applyTarget} maxTarget={maxTarget}
           rolling={rolling} result={result}
           t={t} winChance={winChance} payout={payout}
         />
@@ -463,12 +475,12 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'nowrap' }}>
         <span style={{ color: '#8a97a6', fontSize: 12, fontWeight: 600, flex: '0 0 auto' }}>Target Odds</span>
-        <input type="number" min="1.01" step="0.01" value={target} disabled={rolling}
-          onChange={e => setTarget(Math.max(1.01, Number(e.target.value)))}
+        <input type="number" min="1.01" max={maxTarget} step="0.01" value={target} disabled={rolling}
+          onChange={e => applyTarget(e.target.value)}
           style={{ ...darkInput, width: 86, padding: '7px 10px', flex: '0 0 auto' }}
         />
         {[1.5, 2, 5, 10].map(v => (
-          <button key={v} onClick={() => setTarget(v)} disabled={rolling}
+          <button key={v} onClick={() => applyTarget(v)} disabled={rolling}
             style={{ ...darkChip, flex: '0 0 auto', padding: '6px 10px', borderColor: t === v ? 'rgba(22,199,132,0.5)' : '#243142', color: t === v ? COLOR : '#8a97a6' }}>{v}×</button>
         ))}
       </div>
@@ -706,7 +718,7 @@ const darkChip = {
   background: '#1a2230', color: '#8a97a6', border: '1.5px solid #243142',
 }
 
-function SideControls({ bet, target, setTarget, rolling, result, t, winChance, payout, fill }) {
+function SideControls({ bet, target, setTarget, maxTarget, rolling, result, t, winChance, payout, fill }) {
   return (
     <Panel style={{
       background: '#101923', borderColor: '#243142', padding: 18,
@@ -715,8 +727,8 @@ function SideControls({ bet, target, setTarget, rolling, result, t, winChance, p
     }}>
       <div style={{ marginBottom: 16 }}>
         <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Target Odds</label>
-        <input type="number" min="1.01" step="0.01" value={target}
-          onChange={e => setTarget(Math.max(1.01, Number(e.target.value)))}
+        <input type="number" min="1.01" max={maxTarget} step="0.01" value={target}
+          onChange={e => setTarget(e.target.value)}
           disabled={rolling}
           style={darkInput}
         />

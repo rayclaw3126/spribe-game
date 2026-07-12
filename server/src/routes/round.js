@@ -1788,11 +1788,13 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
 
         const amountStr = amountNum.toFixed(2);
         // payout = amount × target（不是 × finalMult），SQL numeric 计算、禁 JS 浮点
+        // 派彩钳制（LEAST，非拒绝）：target 上限 MAX_MULT=1e6，高 target 中奖时 bet×target 可远超 cap，
+        // 钳到 maxPayout 落袋而非 assertPayoutCap 抛错 rollback（那会让高 target 中奖反被拒、永远收不到）。同 mines/hilo 口径。
         let payout = '0.00';
         if (win) {
           const payoutResult = await client.query(
-            'SELECT trunc($1::numeric * $2::numeric, 2) AS payout',
-            [amountStr, targetNum]
+            'SELECT LEAST(trunc($1::numeric * $2::numeric, 2), $3::numeric) AS payout',
+            [amountStr, targetNum, String(maxPayoutFor('limbo'))]
           );
           payout = payoutResult.rows[0].payout;
         }
@@ -1825,8 +1827,7 @@ router.post('/limbo/play', requireAuth, requireType('player'), async (req, res, 
 
         let balanceAfter = balanceAfterDebit;
         if (win) {
-          // 5a. 赢：派彩加钱（资金唯一出入口）
-          assertPayoutCap('limbo', payout);
+          // 5a. 赢：派彩加钱（资金唯一出入口）。payout 已在算式里 LEAST 钳到 cap，无需再拒绝。
           const creditResult = await credit(client, {
             playerId,
             amount: payout,
@@ -2639,14 +2640,14 @@ router.post('/hilo/cashout', requireAuth, requireType('player'), async (req, res
       }
 
       // status === 'playing'：正常兑现，SQL numeric 做乘法+round，禁 JS 浮点做金额计算
+      // 派彩钳制（LEAST，非拒绝）：cum 理论无界，多步滚倍超 cap 钳到 maxPayout 落袋，
+      // 而非 assertPayoutCap 抛错 rollback（那会让局锁死 playing、合法赢额兑不出）。同 mines 口径，
+      // 落库/ledger 用钳后值。
       const payoutResult = await client.query(
-        'SELECT round($1::numeric * $2::numeric, 2) AS payout',
-        [round.bet_amount, r.cum]
+        'SELECT LEAST(round($1::numeric * $2::numeric, 2), $3::numeric) AS payout',
+        [round.bet_amount, r.cum, String(maxPayoutFor('hilo'))]
       );
       const payout = payoutResult.rows[0].payout;
-
-      // 风控封顶：多步滚倍后派彩不得超上限（credit 之前拦，防超封顶提现）
-      assertPayoutCap('hilo', payout);
 
       const { balanceAfter } = await credit(client, {
         playerId,
