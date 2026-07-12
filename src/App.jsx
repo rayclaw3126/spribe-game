@@ -1,34 +1,53 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import Lobby from './components/Lobby'
 import Header from './components/Header'
 import GameLogin from './pages/GameLogin'
+import { COLORS } from './components/shell/tokens'
 // 单2改：前台反馈钮暂隐藏（挪去代理后台）。组件文件保留，需要时取消注释即可恢复。
 // import FeedbackWidget from './components/feedback/FeedbackWidget'
-import Aviator from './games/Aviator'
-import Dice from './games/Dice'
-import Plinko from './games/Plinko'
-import Goal from './games/Goal'
-import HiLo from './games/HiLo'
-import Mines from './games/Mines'
-import Keno from './games/Keno'
-import Limbo from './games/Limbo'
-import StreakRoll from './games/StreakRoll'
-import MiniRoulette from './games/MiniRoulette'
-import Momentum from './games/Momentum'
-import HalfTime from './games/HalfTime'
-import GoldenBoot from './games/GoldenBoot'
-import NumberUp from './games/NumberUp'
-import HatTrick from './games/HatTrick'
-import DerbyDay from './games/DerbyDay'
-import LineUp from './games/LineUp'
-import SpeedGrid from './games/SpeedGrid'
-import WuXing from './games/WuXing'
-import RollingBall from './games/RollingBall'
-import DominoDuel from './games/DominoDuel'
+// 每款游戏按需加载（lazy）：进哪款才拉该款 chunk，大厅首屏不含任何游戏 JS/资产。
+const Aviator = lazy(() => import('./games/Aviator'))
+const Dice = lazy(() => import('./games/Dice'))
+const Plinko = lazy(() => import('./games/Plinko'))
+const Goal = lazy(() => import('./games/Goal'))
+const HiLo = lazy(() => import('./games/HiLo'))
+const Mines = lazy(() => import('./games/Mines'))
+const Keno = lazy(() => import('./games/Keno'))
+const Limbo = lazy(() => import('./games/Limbo'))
+const StreakRoll = lazy(() => import('./games/StreakRoll'))
+const MiniRoulette = lazy(() => import('./games/MiniRoulette'))
+const Momentum = lazy(() => import('./games/Momentum'))
+const HalfTime = lazy(() => import('./games/HalfTime'))
+const GoldenBoot = lazy(() => import('./games/GoldenBoot'))
+const NumberUp = lazy(() => import('./games/NumberUp'))
+const HatTrick = lazy(() => import('./games/HatTrick'))
+const DerbyDay = lazy(() => import('./games/DerbyDay'))
+const LineUp = lazy(() => import('./games/LineUp'))
+const SpeedGrid = lazy(() => import('./games/SpeedGrid'))
+const WuXing = lazy(() => import('./games/WuXing'))
+const RollingBall = lazy(() => import('./games/RollingBall'))
+const DominoDuel = lazy(() => import('./games/DominoDuel'))
 
-// id → 游戏组件映射。保持静态 import（code-split 另期）；游戏元数据（名/封面/分类/backendId）
-// 单一数据源见 src/gameRegistry.js —— 此处的键须与 GAME_REGISTRY 的 id 一一对应。
+// id → 游戏组件映射（lazy 组件）。游戏元数据（名/封面/分类/backendId）单一数据源见
+// src/gameRegistry.js —— 此处的键须与 GAME_REGISTRY 的 id 一一对应。
 const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum, HalfTime, GoldenBoot, NumberUp, HatTrick, DerbyDay, LineUp, SpeedGrid, WuXing, RollingBall, DominoDuel }
+
+// 游戏 chunk 加载中的过渡态（一般一闪而过）：深色 chrome 底 + 绿点 + 加载中，色值走 tokens。
+function GameLoading() {
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      gap: 10, background: COLORS.bg, color: COLORS.textMuted,
+      fontSize: 15, fontWeight: 700, letterSpacing: 1,
+    }}>
+      <span style={{
+        width: 10, height: 10, borderRadius: '50%', background: COLORS.green,
+        boxShadow: `0 0 12px ${COLORS.green}`, animation: 'fadeIn 0.8s ease-in-out infinite alternate',
+      }} />
+      加载中…
+    </div>
+  )
+}
 
 const TOKEN_KEY = 'spribe_player_token'
 const NAME_KEY = 'spribe_player_username'
@@ -90,13 +109,15 @@ export default function App() {
   if (GameComponent) {
     return (
       <div style={{ minHeight: '100vh', background: '#0e1520' }}>
-        <GameComponent
-          serverBalance={serverBalance}
-          setServerBalance={setServerBalance}
-          playerToken={playerToken}
-          onLogout={handlePlayerLogout}
-          onBack={() => setActiveGame(null)}
-        />
+        <Suspense fallback={<GameLoading />}>
+          <GameComponent
+            serverBalance={serverBalance}
+            setServerBalance={setServerBalance}
+            playerToken={playerToken}
+            onLogout={handlePlayerLogout}
+            onBack={() => setActiveGame(null)}
+          />
+        </Suspense>
         {/* {feedback} */}
       </div>
     )

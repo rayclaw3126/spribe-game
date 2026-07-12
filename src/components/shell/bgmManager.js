@@ -3,9 +3,9 @@
 // One Audio for the whole site; games and the header share it via useBgm().
 
 import { useSyncExternalStore } from 'react'
-import bgmUrl from '../../assets/covers/bgm.mp3'
 
-const audio = new Audio(bgmUrl)
+// bgm.mp3（2.3MB）放 public/ 按 URL 引用，不打进 bundle：既不进大厅首屏，也不重复进各 game chunk。
+const audio = new Audio('/bgm.mp3')
 audio.loop = true
 audio.volume = 0.25   // quiet — stays under the per-game WebAudio SFX
 // 2.3MB 的 mp3：安卓 Chrome 常把隐式 preload 降级成 none，首次手势时零缓冲 → play() 直接 reject。
