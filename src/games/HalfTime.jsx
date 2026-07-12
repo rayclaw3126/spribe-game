@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { usePlayerApi } from '../lib/playerApi'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { GAME_BY_ID } from '../gameRegistry'
 import { COLORS, RADIUS, LAYOUT, HALFTIME } from '../components/shell/tokens'
@@ -418,9 +419,8 @@ function DrawStage({ round, height, shakeRef, sfx, onFinale }) {
   return <canvas ref={canvasRef} style={{ width: '100%', height, display: 'block' }} aria-hidden />
 }
 
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `halftime-${Date.now()}-${Math.random()}`)
-
 export default function HalfTime({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
@@ -513,17 +513,6 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
     timersRef.current.push(tm)
   }
 
-  // 后端请求封装（余额只认后端 balanceAfter）
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
-    return data
-  }
   const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b), 0)
 
   // 唯一赔付点：读后端 /halftime/play 结算结果（命中/赔付/余额全认后端）
@@ -563,7 +552,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         if (betsRef.current.size > 0) {
           transitioningRef.current = true
           try {
-            const data = await apiPost('/round/halftime/play', { bets: Object.fromEntries(betsRef.current), idempotencyKey: genIdemKey() })
+            const data = await api.apiPlay(G.backendId, { bets: Object.fromEntries(betsRef.current) }, { autoBalance: false })
             pendingDataRef.current = data
             pendingRef.current = deriveRound(data.drawResult.balls)   // ← 后端 20 球（和值/低区按后端球算，不本地 drawRound）
           } catch (e) {

@@ -11,6 +11,7 @@ import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 // 五行 WuXing — KENO 20 球快开五项皮（80 池无放回抽 20 比总和），第 19 卡。
 // X2：结算引擎 + 轮次状态机 + 赔率定稿（官方原生赔率 14 键出带 → 单据逐档调价，
@@ -267,9 +268,8 @@ function DrawStage({ round, sfx, onFinale, children }) {
   return children(animViewAt(round, plan, reduced ? ANIM_WX + 500 : tRef.current))
 }
 
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `wuxing-${Date.now()}-${Math.random()}`)
-
 export default function WuXing({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bet, setBet] = useState(10)
@@ -364,17 +364,6 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     timersRef.current.push(tm)
   }
 
-  // 后端请求封装（余额只认后端 balanceAfter）
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
-    return data
-  }
   const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b), 0)
 
   // 唯一赔付点：读后端 /wuxing/play 结算结果（命中/赔付/余额全认后端；无 push 项）
@@ -416,7 +405,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         if (betsRef.current.size > 0) {
           transitioningRef.current = true
           try {
-            const data = await apiPost('/round/wuxing/play', { bets: Object.fromEntries(betsRef.current), idempotencyKey: genIdemKey() })
+            const data = await api.apiPlay(G.backendId, { bets: Object.fromEntries(betsRef.current) }, { autoBalance: false })
             pendingDataRef.current = data
             pendingRef.current = deriveRound(data.drawResult.balls)   // ← 后端 20 球（龙虎/和值按后端球算，不本地 drawKeno）
           } catch (e) {

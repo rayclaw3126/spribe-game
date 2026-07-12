@@ -11,6 +11,7 @@ import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 import carSpritesImg from '../assets/speedgrid/car_sprites.png'
 
 // Speed Grid — DD24 结构 F1 皮（1-24 均匀抽 1 开冠军车号），第 18 卡。
@@ -371,9 +372,8 @@ function RaceStage({ champ, sfx }) {
   return <canvas ref={canvasRef} data-champ={champ} style={{ width: '100%', height: 128, display: 'block' }} aria-hidden />
 }
 
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `speedgrid-${Date.now()}-${Math.random()}`)
-
 export default function SpeedGrid({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
@@ -510,16 +510,6 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   }
 
   // 唯一赔付点：读 pendingRef 结果，按已下注 Map 一次性入账（无 push 项）
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
-    return data
-  }
   const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b), 0)
 
   function settleRound() {
@@ -560,7 +550,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
         if (betsRef.current.size > 0) {
           transitioningRef.current = true
           try {
-            const data = await apiPost('/round/speedgrid/play', { bets: Object.fromEntries(betsRef.current), idempotencyKey: genIdemKey() })
+            const data = await api.apiPlay(G.backendId, { bets: Object.fromEntries(betsRef.current) }, { autoBalance: false })
             pendingDataRef.current = data
             pendingRef.current = data.drawResult.n   // ← 后端冠军车号（不本地 drawCar）
           } catch (e) {

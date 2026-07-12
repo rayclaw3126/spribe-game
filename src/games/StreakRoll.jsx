@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 import flameUrl from '../assets/shared/flame_tier_sm.png'
 import ballUrl from '../assets/covers/ball-3d.png'
 import silKeeperUrl from '../assets/shared/silhouette_keeper.png'
@@ -58,11 +59,10 @@ const COLOR_LABEL = { R: 'RED', B: 'BLACK', F: 'FIRE' }
 const SPRING_W = 1.55       // rad/s — ≈4.2s of glide + settle
 const SPRING_KICK = 1.15
 
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `streak-${Date.now()}-${Math.random()}`)
-
 const G = GAME_BY_ID['StreakRoll']
 
 export default function StreakRoll({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const [bet, setBet] = useState(10)
   const [offset, setOffset] = useState(0)
   const [rolling, setRolling] = useState(false)
@@ -266,17 +266,6 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
   }
 
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
-    return data
-  }
-
   // 押色 + 开滚 —— 落格/命中/赔付全走后端 /round/streak/play，动画滚到后端指定 idx。
   // 前端只提供 color + risk（风险档）；余额只认后端 balanceAfter。
   async function betOn(color) {
@@ -290,7 +279,7 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
     const mode = highRisk ? 'high' : 'normal'
     let data
     try {
-      data = await apiPost('/round/streak/play', { amount: bet, color, risk: mode, idempotencyKey: genIdemKey() })
+      data = await api.apiPlay(G.backendId, { amount: bet, color, risk: mode }, { autoBalance: false })
     } catch (e) {
       setNetErr(e.message); setRolling(false); busyRef.current = false; return
     }

@@ -11,6 +11,7 @@ import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 // Domino Duel — 骨牌版主客对决（闲庄→主蓝客红），第 21 卡。
 // X2：真引擎 + 真赔率 + 真算钱（抄 Derby Day 结构）。翻牌动画留 X3。
@@ -214,9 +215,8 @@ function DominoTile({ a, b, size = 34, flip = false, delay = 0, dur = 0.55, back
   )
 }
 
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `dominoduel-${Date.now()}-${Math.random()}`)
-
 export default function DominoDuel({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bet, setBet] = useState(10)
@@ -351,17 +351,6 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     timersRef.current.push(tm)
   }
 
-  // 后端请求封装（余额只认后端 balanceAfter）
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
-    return data
-  }
   const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b), 0)
 
   // 唯一赔付点：读后端 /dominoduel/play 结算结果（hit/push/lose 三态；余额只认 balanceAfter）
@@ -405,7 +394,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         if (betsRef.current.size > 0) {
           transitioningRef.current = true
           try {
-            const data = await apiPost('/round/dominoduel/play', { bets: Object.fromEntries(betsRef.current), idempotencyKey: genIdemKey() })
+            const data = await api.apiPlay(G.backendId, { bets: Object.fromEntries(betsRef.current) }, { autoBalance: false })
             pendingDataRef.current = data
             pendingRef.current = deriveRound(data.drawResult.tiles)   // ← 后端 4 骨牌（hs/as 按后端算，不本地 rollTiles）
           } catch (e) {

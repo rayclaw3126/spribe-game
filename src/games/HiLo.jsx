@@ -8,6 +8,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 import ballUrl from '../assets/covers/ball-3d.png'
 
 const G = GAME_BY_ID['HiLo']
@@ -26,7 +27,6 @@ const SKIPS_PER_ROUND = 3   // 每局 skip 限次（后端 game/hilo.js SKIPS_PE
 const round2 = x => Math.round(x * 100) / 100
 const pHigh = n => (14 - n) / 13
 const pLow = n => n / 13
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `hilo-${Date.now()}-${Math.random()}`)
 
 // flat block-style football jersey: body + sleeves + collar, deep green,
 // big squad number (1–13) on the chest
@@ -142,6 +142,7 @@ function DealAnim({ num, kind, dx, w, h, onFlip, onReveal, onDone }) {
 
 export default function HiLo({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装
   const [bet, setBet] = useState(10)
   const [phase, setPhase] = useState('idle')   // idle | playing | done
   const [roundId, setRoundId] = useState(null)
@@ -175,20 +176,6 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
 
   // ---------- server API (服务器权威：牌序/判定/累乘/派彩全部以后端返回为准，
   // 前端不再自己发牌/算钱) ----------
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) {
-      const err = new Error(data?.error || '请求失败，请重试')
-      err.data = data
-      throw err
-    }
-    return data
-  }
 
   // ---------- audio ----------
   function ensureAudio() {
@@ -277,8 +264,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
     ensureAudio()
     setBusy(true)
     try {
-      const idempotencyKey = genIdemKey()
-      const data = await apiPost('/round/hilo/start', { amount: bet, idempotencyKey })
+      const data = await api.apiPost(`/round/${G.backendId}/start`, { amount: bet, idempotencyKey: api.genIdemKey(G.backendId) }, { autoBalance: false })
       setFeedBets(makeFeedBots())   // fresh fake round rides along (display only)
       setServerBalance(Number(data.balanceAfter))
       setRoundId(data.roundId)
@@ -302,7 +288,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
     if (phase !== 'playing' || flipping || busy) return
     setBusy(true)
     try {
-      const data = await apiPost('/round/hilo/guess', { roundId, dir })
+      const data = await api.apiPost(`/round/${G.backendId}/guess`, { roundId, dir }, { autoBalance: false })
       const { card: next, correct } = data
       setFlipping(true)
 
@@ -337,7 +323,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
     if (phase !== 'playing' || flipping || busy || skips <= 0) return
     setBusy(true)
     try {
-      const data = await apiPost('/round/hilo/skip', { roundId })
+      const data = await api.apiPost(`/round/${G.backendId}/skip`, { roundId }, { autoBalance: false })
       setSkips(data.skipsLeft)     // server-authoritative remaining skips
       setCard(data.card)           // committed instantly, exactly as before — spam-safe
       beginDeal(data.card, 'skip', null)
@@ -361,7 +347,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
     if (phase !== 'playing' || flipping || busy) return
     setBusy(true)
     try {
-      const data = await apiPost('/round/hilo/cashout', { roundId })
+      const data = await api.apiPost(`/round/${G.backendId}/cashout`, { roundId }, { autoBalance: false })
       setServerBalance(Number(data.balanceAfter))
       setProof(p => ({ ...p, serverSeedHash: data.serverSeedHash, nonce: data.nonce }))
       setPhase('done')

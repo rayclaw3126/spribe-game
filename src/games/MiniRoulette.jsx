@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 const G = GAME_BY_ID['MiniRoulette']
 
@@ -78,9 +79,8 @@ function timeForProgress(y) {
   return (lo + hi) / 2
 }
 
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `roulette-${Date.now()}-${Math.random()}`)
-
 export default function MiniRoulette({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [hoverNum, setHoverNum] = useState(null)
@@ -184,16 +184,6 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
 
   // 服务器权威：钱只在「转」那一刻走后端（POST /roulette/play 一次扣总注额 + 结算派彩）。
   // 放/撤/清/复用注只在本地【暂存】bets map，不动余额；可下注额 = serverBalance − totalBet。
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
-    return data
-  }
 
   const chipValue = CHIPS.find(c => c.label === chip).value
   const totalBet = Object.values(bets).reduce((a, b) => a + b, 0)
@@ -252,7 +242,7 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
     ensureAudio(); setNote('')
     let data
     try {
-      data = await apiPost('/round/roulette/play', { bets: betsRef.current, idempotencyKey: genIdemKey() })
+      data = await api.apiPlay(G.backendId, { bets: betsRef.current }, { autoBalance: false })
     } catch (e) { setNote(e.message); busyRef.current = false; return }
     pendingDataRef.current = data
     const n = data.n   // ← 后端落号（不本地 rollNumber）

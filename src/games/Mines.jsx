@@ -9,6 +9,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 
 const G = GAME_BY_ID['Mines']
@@ -28,7 +29,6 @@ const G = GAME_BY_ID['Mines']
 const GRID = 25  // 5x5
 const RTP = 0.97
 const round2 = x => Math.round(x * 100) / 100
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `mines-${Date.now()}-${Math.random()}`)
 
 function calcMultiplier(gems, mines) {
   if (gems <= 0) return 1
@@ -72,6 +72,7 @@ function BallLineArt({ size }) {
 
 export default function Mines({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装
   const [bet, setBet] = useState(10)
   const [mineCount, setMineCount] = useState(3)
   const [defOpen, setDefOpen] = useState(false)
@@ -165,20 +166,6 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
   }
 
   // ---------- game (服务器权威：所有钱/雷位置以后端返回为准) ----------
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) {
-      const err = new Error(data?.error || '请求失败，请重试')
-      err.data = data
-      throw err
-    }
-    return data
-  }
 
   // 单局结束的收尾：写历史条 + 假 feed 结算（展示用），phase 置 done
   function finishRound(finalMult) {
@@ -194,10 +181,9 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
     ensureAudio()
     setBusy(true)
     try {
-      const idempotencyKey = genIdemKey()
-      const data = await apiPost('/round/mines/start', {
-        amount: bet, mines: mineCount, idempotencyKey,
-      })
+      const data = await api.apiPost(`/round/${G.backendId}/start`, {
+        amount: bet, mines: mineCount, idempotencyKey: api.genIdemKey(G.backendId),
+      }, { autoBalance: false })
       setRoundId(data.roundId)
       setServerBalance(Number(data.balanceAfter))
       setProof({ serverSeedHash: data.serverSeedHash, nonce: data.nonce })
@@ -218,7 +204,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
     if (phase !== 'playing' || busy || revealed.includes(idx) || cashedOut) return
     setBusy(true)
     try {
-      const data = await apiPost('/round/mines/reveal', { roundId, cell: idx })
+      const data = await api.apiPost(`/round/${G.backendId}/reveal`, { roundId, cell: idx }, { autoBalance: false })
       if (!data.safe) {
         // 踩雷：服务器此刻才 reveal 雷位置 + seed
         setExploded(idx)
@@ -254,7 +240,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
     if (phase !== 'playing' || busy || cashedOut) return
     setBusy(true)
     try {
-      const data = await apiPost('/round/mines/cashout', { roundId })
+      const data = await api.apiPost(`/round/${G.backendId}/cashout`, { roundId }, { autoBalance: false })
       setCashedOut(true)
       setMinesRevealed(data.mines)
       setRevealed(prev => [...new Set([...prev, ...data.mines])])

@@ -11,6 +11,7 @@ import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
 // X2：连开 3 球引擎 + 剩余池动态赔率 + 逐球结算状态机（前 19 卡无此结构）。
@@ -281,9 +282,8 @@ function BettingBall({ size }) {
   )
 }
 
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `rollingball-${Date.now()}-${Math.random()}`)
-
 export default function RollingBall({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bet, setBet] = useState(10)
@@ -446,17 +446,6 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
     timersRef.current.push(tm)
   }
 
-  // 后端请求封装（余额只认后端 balanceAfter）
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
-    return data
-  }
   const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b.stake), 0)
 
   // 唯一赔付点：结算第 idx 球——命中/赔付/余额全认后端 perKeyOutcome（锁定 odds 在后端算）
@@ -507,9 +496,9 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
         if (betsRef.current.size === 0) { endRound(); return }
         transitioningRef.current = true
         try {
-          const body = { bets: Object.fromEntries([...betsRef.current].map(([k, v]) => [k, v.stake])), idempotencyKey: genIdemKey() }
+          const body = { bets: Object.fromEntries([...betsRef.current].map(([k, v]) => [k, v.stake])) }
           if (bi > 0 && roundIdRef.current) body.roundId = roundIdRef.current   // 续球线程 roundId
-          const data = await apiPost('/round/rollingball/play', body)
+          const data = await api.apiPlay(G.backendId, body, { autoBalance: false })
           roundIdRef.current = data.roundId
           pendingDataRef.current = data
           if (!Array.isArray(pendingRef.current)) pendingRef.current = []

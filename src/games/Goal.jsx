@@ -11,6 +11,7 @@ import ballUrl from '../assets/covers/ball-3d.png'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 const G = GAME_BY_ID['Goal']
 
@@ -27,7 +28,6 @@ const COLS = 7
 const ROWS = 4
 const TIERS = { sm: { label: '▪', bombs: 1 }, md: { label: '▪▪', bombs: 2 }, lg: { label: '▪▪▪', bombs: 3 } }
 const stepMult = tier => RTP / ((ROWS - TIERS[tier].bombs) / ROWS)   // 仅用于「下一列倍数」展示；真 cum 以后端为准
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `goal-${Date.now()}-${Math.random()}`)
 const round2 = x => Math.round(x * 100) / 100
 
 // 本地随机挑一行（仅 AUTO / RANDOM 用来"替玩家点哪一格"，雷位仍由后端判定）
@@ -35,6 +35,7 @@ const randomRow = () => Math.floor(Math.random() * ROWS)
 
 export default function Goal({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装
 
   const [bet, setBet] = useState(10)
   const [phase, setPhase] = useState('idle')      // idle | playing | done
@@ -160,16 +161,6 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
 
   // ---------- flow（服务器权威：雷位/累乘/派彩全走后端；余额只认 balanceAfter）----------
-  async function apiPost(path, body) {
-    const resp = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-      body: JSON.stringify(body),
-    })
-    const data = await resp.json()
-    if (!resp.ok) { const e = new Error(data?.error || '请求失败，请重试'); e.data = data; throw e }
-    return data
-  }
 
   // 单局收尾：历史条 + 假 feed 结算（展示用），phase 置 done
   function finishRound(finalMult) {
@@ -187,7 +178,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
     setFeedBets(makeFeedBots())
     let data
     try {
-      data = await apiPost('/round/goal/start', { amount: bet, tier: tierRef.current, idempotencyKey: genIdemKey() })
+      data = await api.apiPost(`/round/${G.backendId}/start`, { amount: bet, tier: tierRef.current, idempotencyKey: api.genIdemKey(G.backendId) }, { autoBalance: false })
     } catch (e) { setNetErr(e.message); busyRef.current = false; return }
     roundIdRef.current = data.roundId; setRoundId(data.roundId)
     if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))   // 余额只认后端
@@ -207,7 +198,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
     playRun()
     let data
     try {
-      data = await apiPost('/round/goal/pick', { roundId: roundIdRef.current, row })
+      data = await api.apiPost(`/round/${G.backendId}/pick`, { roundId: roundIdRef.current, row }, { autoBalance: false })
     } catch (e) {
       revealingRef.current = false; setRevealing(false); busyRef.current = false
       setNetErr(e.message); return
@@ -256,7 +247,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
     if (phaseRef.current !== 'playing' || revealingRef.current || busyRef.current) return
     busyRef.current = true
     let data
-    try { data = await apiPost('/round/goal/cashout', { roundId: roundIdRef.current }) }
+    try { data = await api.apiPost(`/round/${G.backendId}/cashout`, { roundId: roundIdRef.current }, { autoBalance: false }) }
     catch (e) { setNetErr(e.message); busyRef.current = false; return }
     if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))   // 余额只认后端
     cumRef.current = data.cum; setCum(data.cum)
