@@ -26,6 +26,8 @@ import WuXing from './games/WuXing'
 import RollingBall from './games/RollingBall'
 import DominoDuel from './games/DominoDuel'
 
+// id → 游戏组件映射。保持静态 import（code-split 另期）；游戏元数据（名/封面/分类/backendId）
+// 单一数据源见 src/gameRegistry.js —— 此处的键须与 GAME_REGISTRY 的 id 一一对应。
 const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum, HalfTime, GoldenBoot, NumberUp, HatTrick, DerbyDay, LineUp, SpeedGrid, WuXing, RollingBall, DominoDuel }
 
 const TOKEN_KEY = 'spribe_player_token'
