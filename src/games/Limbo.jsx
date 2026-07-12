@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
-import { COLORS, LAYOUT, LIMBO } from '../components/shell/tokens'
+import { COLORS, RADIUS, LAYOUT, LIMBO } from '../components/shell/tokens'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetPanel from '../components/shell/BetPanel'
 import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import ballUrl from '../assets/covers/ball-3d.png'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 import WinToast from '../components/shell/WinToast'
 import badgeWinUrl from '../assets/shared/badge_win.png'
 import badgeLoseUrl from '../assets/shared/badge_lose.png'
@@ -22,6 +23,25 @@ const HOUSE_EDGE = 0.99
 const MAX_MULT = 1000000
 const CLIMB_MS = 1400
 const TICKS = [1, 1.5, 2, 3, 5, 10, 100]
+
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '先设定一个目标赔率（1.01× 起）。开球后力量表从 1.00× 向上攀升，随机停在某个赔率。若这一局最终攀升到的赔率 ≥ 你的目标赔率，即赢，按目标赔率赔付；没够到目标则输掉本金。',
+  },
+  {
+    icon: '📊', title: '赔率与胜率',
+    body: '目标赔率越高，赢了赔得越多，但中奖率越低。中奖率 ≈ 99% ÷ 目标赔率——目标 2.00× 约 49.5% 中，5.00× 约 19.8%，10.00× 约 9.9%。理论返还率约 99%。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '在「Target Odds」输入目标赔率，或点 1.5× / 2× / 5× / 10× 预设一键设定；设好本金后点「下注」开球。每局独立结算，上一局不影响下一局，结算后即可再来一局。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 求稳押低目标（1.5–2×），中奖率高、波动小；想搏大赔押高目标。\n· 力量表停点由服务器随机生成、可验证公平（点顶栏 ⚖ 查看），前端无法预知。\n· 属娱乐性质，量力而行，理性游戏。',
+  },
+]
 
 function rand(min, max) {
   return min + Math.random() * (max - min)
@@ -67,11 +87,11 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
   const [multiplier, setMultiplier] = useState(1)
   const [roundHistory, setRoundHistory] = useState([])   // final multiplier per round, newest first
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
-  const [muted, setMuted] = useState(false)
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [toasts, setToasts] = useState([])
   const [proof, setProof] = useState(null)   // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
   const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
-  const [bgmOn, toggleBgm] = useBgm()
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
 
   function pushToast(label) {
     const id = ++toastIdRef.current
@@ -543,6 +563,18 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {climbScene}
+
+        {/* 共享顶栏（PC 单行 / 手机两行自适应；← 大厅 + 名 + 余额 + ⚖/?/音乐/静音）*/}
+        <GameTopBar
+          balance={serverBalance ?? 0}
+          venue="Odds Climb"
+          onBack={onBack}
+          onFairness={() => setFairOpen(true)}
+          onHowTo={() => setRulesOpen(true)}
+        />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+          venue="Odds Climb" title="Odds Climb 玩法说明" sections={RULES} />
+
         {/* DEMO 条 — arena 系打法（同 Breakaway 顶部金条，无顶栏胶囊碰撞问题） */}
         {isDesk && (
           <div style={{
@@ -562,7 +594,7 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
           display: 'flex', flexDirection: 'column', justifyContent: 'center',
           padding: isMobile ? 12 : 18, boxSizing: 'border-box',
         }}>
-        {!isDesk && <div style={{ marginBottom: 12 }}><RoundHistoryBar rounds={roundHistory} /></div>}
+        <div style={{ marginBottom: 12 }}><RoundHistoryBar rounds={roundHistory} /></div>
         <WinToast toasts={toasts} />
         <style>{`
           @keyframes ocFlash {
@@ -571,58 +603,8 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
             50% { color: #EF4444; }
           }
         `}</style>
-        {/* ⚖ 可验证公平 — game-card top-right，与音频钮同排（绿系区分） */}
-        <button
-          type="button"
-          onClick={() => setFairOpen(true)}
-          style={{
-            position: 'absolute', top: isDesk ? 32 : 10, right: 106, zIndex: 3,
-            width: 40, height: 40, borderRadius: '50%',
-            background: 'rgba(53,208,127,0.18)', color: '#35d07f',
-            border: '1px solid rgba(53,208,127,0.5)', fontSize: 18, fontWeight: 900,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-          }}
-          title="可验证公平"
-        >⚖</button>
+        {/* 可验证公平抽屉（触发钮已并入 GameTopBar 的 ⚖，音乐/静音同理走顶栏内建）*/}
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="ODDS CLIMB" playerToken={playerToken} game="limbo" />
-
-        {/* BGM toggle — game-card top-right, anchored to the card not the meter */}
-        <button
-          type="button"
-          onClick={toggleBgm}
-          style={{
-            position: 'absolute', top: isDesk ? 32 : 10, right: 58, zIndex: 3,
-            width: 40,
-            height: 40,
-            borderRadius: '50%',
-            background: bgmOn ? 'rgba(22,199,132,0.18)' : LIMBO.band,
-            color: bgmOn ? COLOR : '#7d8a99',
-            border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : 'rgba(0,0,0,0.3)'}`,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}
-          title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
-        >
-          <MusicNoteIcon on={bgmOn} size={18} />
-        </button>
-
-        {/* Mute — game-card top-right */}
-        <button
-          type="button"
-          onClick={() => setMuted(v => !v)}
-          style={{
-            position: 'absolute', top: isDesk ? 32 : 10, right: 10, zIndex: 3,
-            width: 40,
-            height: 40,
-            borderRadius: '50%',
-            background: LIMBO.band,
-            color: muted ? '#7d8a99' : COLOR,
-            border: '1px solid rgba(0,0,0,0.3)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}
-          title={muted ? '取消静音' : '静音'}
-        >
-          <SpeakerIcon on={!muted} size={18} />
-        </button>
 
         <div style={{ position: 'relative', ...(isDesk ? { width: '100%', maxWidth: 720, margin: '0 auto' } : {}) }}>
           <canvas ref={canvasRef} style={{ width: '100%', height: isMobile ? 300 : 420, display: 'block', borderRadius: 12 }} />
@@ -685,26 +667,11 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
         background: COLORS.bg,
       }}>
-        <div style={{
-          height: LAYOUT.headerH, flex: '0 0 auto',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 16px', background: COLORS.panel,
-          borderBottom: `1px solid ${COLORS.border}`,
-        }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Odds Climb</strong>
-          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(serverBalance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
-          </span>
-        </div>
-
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
-            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
-              <RoundHistoryBar rounds={roundHistory} />
-            </div>
             {/* game card full-width, meter+number combo stays centered */}
             <div style={{ flex: 1, minHeight: 0 }}>{mainPanel}</div>
             {/* full-bleed bottom bay strip — params left, bay right, ~900 centered */}
