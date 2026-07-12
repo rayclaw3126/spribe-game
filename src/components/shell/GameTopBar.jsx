@@ -75,13 +75,15 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         }}>⚖</button>
       )}
-      {/* ? 橙圆钮：无下拉，直接触发玩法说明 */}
-      <button type="button" onClick={() => onHowTo?.()} title="玩法说明" style={{
-        width: 28, height: 28, borderRadius: RADIUS.pill, flex: '0 0 auto',
-        background: DERBY.orange, color: COLORS.white, border: 'none',
-        fontSize: 14, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      }}>?</button>
+      {/* ? 橙圆钮：仅当传入 onHowTo 才渲染（与 ⚖ 对称，避免没接玩法说明的款出死钮） */}
+      {onHowTo && (
+        <button type="button" onClick={() => onHowTo()} title="玩法说明" style={{
+          width: 28, height: 28, borderRadius: RADIUS.pill, flex: '0 0 auto',
+          background: DERBY.orange, color: COLORS.white, border: 'none',
+          fontSize: 14, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}>?</button>
+      )}
       {roundBtn(toggleBgm, bgmOn ? '关闭背景音乐' : '开启背景音乐', bgmOn, <MusicNoteIcon on={bgmOn} />)}
       {roundBtn(toggleMuted, muted ? '取消静音' : '静音', !muted, <SpeakerIcon on={!muted} />)}
     </>
