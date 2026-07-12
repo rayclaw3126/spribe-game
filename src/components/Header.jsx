@@ -1,13 +1,17 @@
+import { useState } from 'react'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { COLORS } from './shell/tokens'
 import { useBgm } from './shell/bgmManager'
+import BillDrawer from './BillDrawer'
 
-export default function Header({ balance, onHome, onLogout }) {
+export default function Header({ balance, onHome, onLogout, playerToken }) {
   const isMobile = useMediaQuery('(max-width: 900px)')
   // BGM master switch — global singleton state, shared with every game's toggle.
   const [bgmUiOn, toggleBgm] = useBgm()
+  const [billOpen, setBillOpen] = useState(false)
 
   return (
+    <>
     <header style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
       height: '52px',
@@ -73,6 +77,27 @@ export default function Header({ balance, onHome, onLogout }) {
           </span>
         </div>
 
+        <button
+          type="button"
+          onClick={() => setBillOpen(true)}
+          aria-label="我的账单"
+          title="我的账单"
+          style={{
+            width: 34, height: 34, borderRadius: '50%',
+            flex: '0 0 auto', padding: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.textMuted,
+            cursor: 'pointer',
+          }}
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M6 2h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" />
+            <line x1="8.5" y1="9" x2="15" y2="9" />
+            <line x1="8.5" y1="13" x2="15" y2="13" />
+            <line x1="8.5" y1="17" x2="12.5" y2="17" />
+          </svg>
+        </button>
+
         <button type="button" onClick={onLogout} style={{
           background: 'none',
           color: '#8a97a6',
@@ -85,5 +110,7 @@ export default function Header({ balance, onHome, onLogout }) {
         }}>登出</button>
       </div>
     </header>
+    <BillDrawer open={billOpen} onClose={() => setBillOpen(false)} playerToken={playerToken} onLogout={onLogout} />
+    </>
   )
 }

@@ -46,6 +46,25 @@ export function createPlayerApi({ playerToken, onLogout, setServerBalance }) {
     return data
   }
 
+  // 只读 GET（账单/流水等）：Bearer 鉴权、401→onLogout、错误 throw 带 err.data。无 body、无余额回写。
+  async function apiGet(path) {
+    const resp = await fetch(path, { headers: { Authorization: `Bearer ${playerToken}` } })
+    let data = null
+    try { data = await resp.json() } catch { /* 无 JSON body */ }
+    if (resp.status === 401) {
+      onLogout?.()
+      const err = new Error(data?.error || '登录已失效，请重新登录')
+      err.data = data
+      throw err
+    }
+    if (!resp.ok) {
+      const err = new Error(data?.error || '请求失败，请重试')
+      err.data = data
+      throw err
+    }
+    return data
+  }
+
   // 幂等键：crypto.randomUUID 优先，兜底 `${prefix}-<ts>-<rand>`
   function genIdemKey(prefix) {
     return crypto.randomUUID ? crypto.randomUUID() : `${prefix}-${Date.now()}-${Math.random()}`
@@ -62,7 +81,7 @@ export function createPlayerApi({ playerToken, onLogout, setServerBalance }) {
     return `${proto}://${window.location.host}/ws/${backendId}?token=${encodeURIComponent(token)}`
   }
 
-  return { apiPost, apiPlay, genIdemKey, wsUrl }
+  return { apiPost, apiGet, apiPlay, genIdemKey, wsUrl }
 }
 
 export function usePlayerApi({ playerToken, onLogout, setServerBalance }) {

@@ -130,6 +130,7 @@ export default function App() {
         balance={serverBalance ?? 0}
         onHome={() => setActiveGame(null)}
         onLogout={handlePlayerLogout}
+        playerToken={playerToken}
       />
       <main style={{ paddingTop: '52px' }}>
         <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} />

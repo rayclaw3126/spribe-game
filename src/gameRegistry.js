@@ -66,6 +66,8 @@ export const GAME_REGISTRY = [
 
 // id → 配置 快查
 export const GAME_BY_ID = Object.fromEntries(GAME_REGISTRY.map(g => [g.id, g]))
+// backendId → 配置 反查（账单 ledger.type 前缀=backendId，用来映射中文 displayName）
+export const GAME_BY_BACKEND_ID = GAME_REGISTRY.reduce((m, g) => (m[g.backendId] = g, m), {})
 
 // —— 大厅精选/curation（从 Lobby.jsx 原样挪来，按 id）——
 export const TOP_IDS = ['RollingBall', 'WuXing', 'SpeedGrid', 'LineUp', 'DerbyDay']
