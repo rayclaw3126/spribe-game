@@ -16,6 +16,7 @@ import badgeLoseUrl from '../assets/shared/badge_lose.png'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 import SeedFairness from '../components/shell/SeedFairness'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 const G = GAME_BY_ID['Limbo']
 const COLOR = '#16C784'
@@ -62,11 +63,10 @@ function easeOutCubic(p) {
   return 1 - Math.pow(1 - p, 3)
 }
 
-// 生成幂等键：优先用 crypto.randomUUID，不支持则退化拼接时间戳+随机数
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `limbo-${Date.now()}-${Math.random()}`)
 
 export default function Limbo({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装
   const canvasRef = useRef(null)
   const ballRef = useRef(null)
   const frameRef = useRef(null)
@@ -208,23 +208,15 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
     setResult(null)
     setRolling(true)
 
-    const idempotencyKey = genIdemKey()
     let data
     try {
-      const resp = await fetch('/round/limbo/play', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-        body: JSON.stringify({ amount: bet, target: t, idempotencyKey }),
-      })
-      data = await resp.json()
-      if (!resp.ok) {
-        setRolling(false)
-        pushToast(data?.error || '下注失败，请重试')
-        return
-      }
-    } catch {
+      // 余额（balanceAfter）留到下方 pending 结算回调回写；幂等键由 apiPlay 内部生成
+      data = await api.apiPlay(G.backendId, { amount: bet, target: t }, { autoBalance: false })
+    } catch (err) {
       setRolling(false)
-      pushToast('网络异常，请稍后重试')
+      // 服务端业务错（有 err.data）沿用原「下注失败」兜底；网络层异常（无 err.data）显「网络异常」
+      if (err?.data) pushToast(err.data.error || '下注失败，请重试')
+      else pushToast('网络异常，请稍后重试')
       return
     }
 

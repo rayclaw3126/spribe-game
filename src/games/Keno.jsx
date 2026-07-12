@@ -11,6 +11,7 @@ import SeedFairness from '../components/shell/SeedFairness'
 import ballUrl from '../assets/covers/ball-3d.png'
 import badgeWinUrl from '../assets/shared/badge_win.png'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 const G = GAME_BY_ID['Keno']
 
@@ -36,10 +37,10 @@ const PAYOUTS = {
   10: { 5: 3, 6: 25, 7: 150, 8: 2500, 9: 10000, 10: 10000 },
 }
 // 幂等键：优先 crypto.randomUUID，不支持则退化拼接
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `keno-${Date.now()}-${Math.random()}`)
 
 export default function Keno({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
   const [bet, setBet] = useState(10)
@@ -141,19 +142,11 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
     // 开奖不信前端：摇号/命中/赔付全走后端 /round/keno/play，前端只提供 selected
     let data
     try {
-      const resp = await fetch('/round/keno/play', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-        body: JSON.stringify({ amount: bet, selected, idempotencyKey: genIdemKey() }),
-      })
-      data = await resp.json()
-      if (!resp.ok) {
-        setMessage({ text: data?.error || '下注失败，请重试', win: false })
-        setPhase('idle'); setDrawing(false)
-        return
-      }
-    } catch {
-      setMessage({ text: '网络异常，请稍后重试', win: false })
+      // 余额（balanceAfter）留到下方开奖流程手动回写；幂等键由 apiPlay 内部生成
+      data = await api.apiPlay(G.backendId, { amount: bet, selected }, { autoBalance: false })
+    } catch (err) {
+      // 服务端业务错（有 err.data）沿用原「下注失败」兜底；网络层异常（无 err.data）显「网络异常」
+      setMessage({ text: err?.data ? (err.data.error || '下注失败，请重试') : '网络异常，请稍后重试', win: false })
       setPhase('idle'); setDrawing(false)
       return
     }

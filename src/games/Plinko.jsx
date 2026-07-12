@@ -9,6 +9,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import { GAME_BY_ID } from '../gameRegistry'
+import { usePlayerApi } from '../lib/playerApi'
 
 const G = GAME_BY_ID['Plinko']
 
@@ -54,7 +55,6 @@ function multsFor(n, tier) {
   return raw.map(r => roundMult(s * r))
 }
 // 生成幂等键：优先用 crypto.randomUUID，不支持则退化拼接时间戳+随机数
-const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `plinko-${Date.now()}-${Math.random()}`)
 
 // ---------- audio (module-level, mechanical recipe + shared compressor bus) ----------
 function ensureAudio(audio) {
@@ -184,6 +184,7 @@ function Football({ size = 16 }) {
 
 export default function Plinko({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
+  const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装
   const [bet, setBet] = useState(10)
   const [pins, setPins] = useState(14)
   const [pinsOpen, setPinsOpen] = useState(false)
@@ -294,22 +295,14 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
     sfxChip(audioRef.current)
     setFeedBets(makeFeedBots())     // fresh fake round rides along (display only; after the roll)
 
-    const idempotencyKey = genIdemKey()
-
     let data
     try {
-      const resp = await fetch('/round/plinko/play', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${playerToken}` },
-        body: JSON.stringify({ amount: bet, risk: tier, rows, idempotencyKey }),
-      })
-      data = await resp.json()
-      if (!resp.ok) {
-        pushToast(data?.error || '下注失败，请重试', 0)
-        return
-      }
-    } catch {
-      pushToast('网络异常，请稍后重试', 0)
+      // 余额（balanceAfter）留到落球动画回调回写；幂等键由 apiPlay 内部生成
+      data = await api.apiPlay(G.backendId, { amount: bet, risk: tier, rows }, { autoBalance: false })
+    } catch (err) {
+      // 服务端业务错（有 err.data）沿用原「下注失败」兜底；网络层异常（无 err.data）显「网络异常」
+      if (err?.data) pushToast(err.data.error || '下注失败，请重试', 0)
+      else pushToast('网络异常，请稍后重试', 0)
       return
     }
 
