@@ -21,6 +21,7 @@ import feesRouter from './routes/fees.js';
 import riskRouter from './routes/risk.js';
 import { startAviatorHub } from './ws/aviatorHub.js';
 import { startMomentumHub } from './ws/momentumHub.js';
+import { startRoundHub } from './ws/roundHub.js';
 import { RiskError } from './lib/risk.js';
 
 // ESM 下手动还原 __dirname，供 express.static 定位 uploads/ 目录。
@@ -174,6 +175,25 @@ momentumWss.on('connection', (ws, req) => {
 });
 startMomentumHub(momentumWss);
 
+// 轮次排期器实时通道走 /ws/rounds（独立 path，与 aviator/momentum 互不干扰）。同款握手认证（token + Origin）。
+const roundsWss = new WebSocketServer({ noServer: true });
+roundsWss.on('connection', (ws, req) => {
+  try {
+    const origin = req.headers.origin;
+    if (origin && !allowedOrigins.includes(origin)) { ws.close(1008, '来源不允许'); return; }
+    const url = new URL(req.url, 'http://localhost');
+    const token = url.searchParams.get('token');
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    if (payload.type !== 'player') throw new Error('仅玩家可连');
+    ws.playerId = payload.sub;
+    ws.playerName = payload.username;
+  } catch (e) {
+    console.error('[ws] Rounds WS 认证失败');
+    try { ws.close(1008, '认证失败'); } catch { /* 连接已异常 */ }
+  }
+});
+startRoundHub(roundsWss);
+
 // 单一 upgrade 路由：按 pathname 分发到对应 WSS（noServer 模式各自不 hook upgrade，这里统一路由）。
 server.on('upgrade', (req, socket, head) => {
   let pathname;
@@ -182,6 +202,8 @@ server.on('upgrade', (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   } else if (pathname === '/ws/momentum') {
     momentumWss.handleUpgrade(req, socket, head, (ws) => momentumWss.emit('connection', ws, req));
+  } else if (pathname === '/ws/rounds') {
+    roundsWss.handleUpgrade(req, socket, head, (ws) => roundsWss.emit('connection', ws, req));
   } else {
     socket.destroy();
   }
@@ -192,4 +214,5 @@ server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
   console.log(`spribe-server 已启动，监听 ${process.env.HOST || '0.0.0.0'}:${PORT}`);
   console.log(`WebSocket 实时通道已就绪：ws://localhost:${PORT}/ws/aviator`);
   console.log(`Momentum 实时通道已就绪：ws://localhost:${PORT}/ws/momentum`);
+  console.log(`轮次排期器实时通道已就绪：ws://localhost:${PORT}/ws/rounds`);
 });
