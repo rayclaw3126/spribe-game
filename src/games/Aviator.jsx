@@ -12,7 +12,9 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import HowToPlay from '../components/shell/HowToPlay'
 import bayBgUrl from '../assets/shared/bay_bg.png'
+import { GAME_BY_ID } from '../gameRegistry'
 
+const G = GAME_BY_ID['Aviator']
 const GREEN = '#16C784'
 const HISTORY_SEED = [1.42, 2.81, 1.06, 5.24, 1.88, 3.37, 9.12, 1.19, 2.05, 4.63]
 
@@ -844,12 +846,12 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
             ⚖ 不接：Aviator 公平为共享局 inline commit-reveal 角标（见下方），无抽屉可开 */}
         <GameTopBar
           balance={serverBalance ?? 0}
-          venue="Breakaway"
+          venue={G.venue ?? G.displayName}
           onBack={onBack}
           onHowTo={() => setRulesOpen(true)}
         />
         <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-          venue="Breakaway" title="Breakaway 玩法说明" sections={RULES} />
+          venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         {isDesk && (
           <div style={{
@@ -1001,7 +1003,7 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
 
   // ---- stacked layout (<1024): unchanged mobile arrangement ----
   return (
-    <GameLayout title="Breakaway" color={GREEN}>
+    <GameLayout color={GREEN}>
       {arena}
       <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bay}</div>
       <div style={{ marginTop: 14 }}>

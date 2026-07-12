@@ -8,7 +8,10 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import { GAME_BY_ID } from '../gameRegistry'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
+
+const G = GAME_BY_ID['Mines']
 
 // 单M2: Dribble gameplay — adjustable defenders, hypergeometric multipliers,
 // RANDOM/Auto, settlement (Spribe Mines model).
@@ -381,8 +384,8 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
         {pitchGlow}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} gameName="DRIBBLE" band={MINES.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
-        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="DRIBBLE" playerToken={playerToken} game="mines" />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={MINES.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
 
         {/* ---- middle zone: flexes to fill the card, keeps the grid group as
              the vertical visual center; leftover space is absorbed here ---- */}
@@ -622,7 +625,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Dribble" color={MINES.progress}>
+    <GameLayout color={MINES.progress}>
       {gameCard}
     </GameLayout>
   )

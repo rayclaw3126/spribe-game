@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
+import { GAME_BY_ID } from '../gameRegistry'
 
 // Domino Duel — 骨牌版主客对决（闲庄→主蓝客红），第 21 卡。
 // X2：真引擎 + 真赔率 + 真算钱（抄 Derby Day 结构）。翻牌动画留 X3。
@@ -98,7 +99,7 @@ const FLIP_DUR = [0.55, 0.55, 0.55, 1.4]
 const FLIP_END = 1.75 + 1.4   // 末张翻完 ≈ 3.15s
 const ROAD_CAP = 120
 
-const VENUE = '玛瑙竞技场'
+const G = GAME_BY_ID['DominoDuel']
 
 // 玩法说明文案（中文；盘口/比分数字照实）
 const RULES = [
@@ -560,10 +561,10 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   )
   const topBar = (
     <>
-      <GameTopBar balance={serverBalance ?? 0} gameName="骨牌对决" venue={VENUE}
+      <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode} onHowTo={() => setRulesOpen(true)} onBack={onBack} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={VENUE} playerToken={playerToken} game="dominoduel" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -806,7 +807,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
 
       {/* 玩法说明抽屉（position:fixed 覆盖，桌面/移动两分支共用同一 gameCard）*/}
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="骨牌对决 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -827,7 +828,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   }
 
   return (
-    <GameLayout title="骨牌对决" color={DERBY.sel}>
+    <GameLayout color={DERBY.sel}>
       {gameCard}
     </GameLayout>
   )

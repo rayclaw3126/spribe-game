@@ -8,6 +8,9 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import { GAME_BY_ID } from '../gameRegistry'
+
+const G = GAME_BY_ID['Dice']
 
 // 单D2: Total Goals gameplay — 0–100 roll, UNDER/OVER settle, RTP-calibrated
 // payouts. Slider sets the target line (4.00–96.00); the roll is uniform on
@@ -391,8 +394,8 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
         {pitchScene}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} gameName="TOTAL GOALS" band={DICE.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
-        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="TOTAL GOALS" playerToken={playerToken} game="dice" />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={DICE.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
 
         {/* ---- roll history strip (mobile only — desktop row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 1 }}>{historyStrip}</div>}
@@ -618,7 +621,7 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Total Goals" color={DICE.teal}>
+    <GameLayout color={DICE.teal}>
       {gameCard}
     </GameLayout>
   )

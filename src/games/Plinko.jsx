@@ -8,6 +8,9 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import { GAME_BY_ID } from '../gameRegistry'
+
+const G = GAME_BY_ID['Plinko']
 
 // 单P2: Free Kick gameplay — three risk tiers, binomial physics drop,
 // adjustable pins, RTP-calibrated paytables.
@@ -491,8 +494,8 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
         {pitchScene}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} gameName="FREE KICK" band={PLINKO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
-        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="FREE KICK" playerToken={playerToken} game="plinko" />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={PLINKO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
 
         {/* ---- second row (mobile only — desktop 34px row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 2 }}>{historyStrip}</div>}
@@ -678,7 +681,7 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Free Kick" color={PLINKO.btnGreen}>
+    <GameLayout color={PLINKO.btnGreen}>
       {gameCard}
     </GameLayout>
   )

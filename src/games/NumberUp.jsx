@@ -10,6 +10,7 @@ import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import BetButton from '../components/shell/BetButton'
+import { GAME_BY_ID } from '../gameRegistry'
 
 // Number Up — 两位数球衣号码彩（00–49）。
 // 引擎：0–49 均匀抽一个；头位/尾位/大小单双全部由 num 派生。
@@ -67,7 +68,7 @@ const SETTLED_T = 6     // 3s
 const BOARD_RISE = 800
 const TENS_LOCK = 2500
 const ONES_LOCK = 4300
-const VENUE = '蛋白石球场'          // 架空场馆名（禁真实球场名）
+const G = GAME_BY_ID['NumberUp']
 const ROUND_DATE = '20260705'
 
 // 玩法说明文案（中文；盘口数字照实）
@@ -636,10 +637,10 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   )
   const topBar = (
     <>
-      <GameTopBar balance={serverBalance ?? 0} gameName="号码王" band={NUMBERUP.band} venue={VENUE}
+      <GameTopBar balance={serverBalance ?? 0} band={NUMBERUP.band} venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="号码王" playerToken={playerToken} game="numberup" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -868,7 +869,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
         </div>
       </div>
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="号码王 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -898,7 +899,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="号码王" color={NUMBERUP.sel}>
+    <GameLayout color={NUMBERUP.sel}>
       <div ref={cardShakeRef}>
         {gameCard}
       </div>

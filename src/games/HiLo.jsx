@@ -7,7 +7,10 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import { GAME_BY_ID } from '../gameRegistry'
 import ballUrl from '../assets/covers/ball-3d.png'
+
+const G = GAME_BY_ID['HiLo']
 
 // 单HL2: Rating Hi-Lo gameplay — 1–13 probability multipliers, skip, streak
 // cashout (Spribe Hi Lo model).
@@ -499,8 +502,8 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
         {floatField}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} gameName="RATING HI-LO" band={HILO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
-        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="RATING HI-LO" playerToken={playerToken} game="hilo" />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={HILO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
 
         {/* ---- upper region (mobile only — desktop 34px row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 1 }}>{historyStrip}</div>}
@@ -711,7 +714,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Rating Hi-Lo" color={HILO.green}>
+    <GameLayout color={HILO.green}>
       {gameCard}
     </GameLayout>
   )

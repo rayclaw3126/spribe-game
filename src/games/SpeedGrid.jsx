@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
+import { GAME_BY_ID } from '../gameRegistry'
 import carSpritesImg from '../assets/speedgrid/car_sprites.png'
 
 // Speed Grid — DD24 结构 F1 皮（1-24 均匀抽 1 开冠军车号），第 18 卡。
@@ -75,7 +76,7 @@ const SETTLED_T = 8     // 4s
 const RACE_T = 3300     // 冲线时刻（车群段 0-2300 摆动，2300 起冠军脱出）
 const BREAK_T = 2300    // 冠军脱出起点
 const FREEZE_T = 3400   // 定格 + 冠军大牌弹出
-const VENUE = '黄玉赛道'                // 架空赛道名（禁真实赛道名）
+const G = GAME_BY_ID['SpeedGrid']
 const ROUND_DATE = 'TC20260705'
 
 // 玩法说明文案（中文；盘口数字/车号照实）
@@ -705,10 +706,10 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   )
   const topBar = (
     <>
-      <GameTopBar balance={serverBalance ?? 0} gameName="极速方格" venue={VENUE}
+      <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="极速方格" playerToken={playerToken} game="speedgrid" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -997,7 +998,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
         </div>
       </div>
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="极速方格 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -1025,7 +1026,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="极速方格" color={DERBY.sel}>
+    <GameLayout color={DERBY.sel}>
       {gameCard}
     </GameLayout>
   )

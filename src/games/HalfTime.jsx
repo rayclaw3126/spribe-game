@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
+import { GAME_BY_ID } from '../gameRegistry'
 import { COLORS, RADIUS, LAYOUT, HALFTIME } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
@@ -97,7 +98,7 @@ const SETTLED_T = 6     // 3s
 const BALL_CADENCE = 400
 const BALL_FLIGHT = 530
 const FINALE_HOLD = 1000
-const VENUE = '翡翠球场'               // 架空场馆名（禁真实球场名）
+const G = GAME_BY_ID['HalfTime']
 const ROUND_DATE = '20260705'
 
 // 玩法说明文案（中文；盘口数字照实）
@@ -720,10 +721,10 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   )
   const topBar = (
     <>
-      <GameTopBar balance={serverBalance ?? 0} gameName="中场" band={HALFTIME.band} venue={VENUE}
+      <GameTopBar balance={serverBalance ?? 0} band={HALFTIME.band} venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="中场" playerToken={playerToken} game="halftime" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -901,7 +902,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         </div>
       </div>
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="中场 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -931,7 +932,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="中场" color={HALFTIME.sel}>
+    <GameLayout color={HALFTIME.sel}>
       <div ref={cardShakeRef}>
         {gameCard}
       </div>

@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
+import { GAME_BY_ID } from '../gameRegistry'
 import cardRedImg from '../assets/shared/card_red.png'
 import cardYellowImg from '../assets/shared/card_yellow.png'
 
@@ -112,7 +113,7 @@ const ANIM_GAP = 125      // 落格间隔（24×125+250 ≈ 3.25s 落完）
 const ANIM_FLASH = 320    // 落定前 0-9 快闪滚数窗口（80ms/帧 ≈ 4 帧）
 const ANIM_POP = 120      // 落格轻弹时长
 const ANIM_SLAM = 3600    // TOTAL 放大砸出时刻
-const VENUE = '蓝宝石球场'              // 架空场馆名（禁真实球场名）
+const G = GAME_BY_ID['LineUp']
 const ROUND_DATE = 'SP20260705'
 
 // 玩法说明文案（中文；盘口数字照实）
@@ -562,15 +563,14 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0}
-        gameName="首发阵容"
-        venue={VENUE}
+        venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode}
         onBack={onBack}
         onHowTo={() => setRulesOpen(true)}
         onFairness={() => setFairOpen(true)}
       />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={VENUE} playerToken={playerToken} game="lineup" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -998,7 +998,7 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
         </div>
       </div>
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="首发阵容 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -1027,7 +1027,7 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="首发阵容" color={DERBY.sel}>
+    <GameLayout color={DERBY.sel}>
       {gameCard}
     </GameLayout>
   )

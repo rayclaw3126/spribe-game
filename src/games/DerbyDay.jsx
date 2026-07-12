@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
+import { GAME_BY_ID } from '../gameRegistry'
 import trophyImg from '../assets/shared/trophy.png'
 
 // Derby Day — 主客对抗 Keno（主队 10 珠 vs 客队 10 珠比和值），第 16 卡。
@@ -126,7 +127,7 @@ const BALL_LAUNCHES = (() => {
   for (let k = 1; k < 20; k++) ls.push(ls[k - 1] + (k > 19 - SLOW_N ? slow : fast))
   return ls
 })()
-const VENUE = '翡翠竞技场'       // 架空场馆名（禁真实球场名）
+const G = GAME_BY_ID['DerbyDay']
 const ROUND_DATE = 'EA20260705'
 
 // 玩法说明文案（中文；盘口数字照实）
@@ -847,15 +848,14 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0}
-        gameName="德比大战"
-        venue={VENUE}
+        venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode}
         onBack={onBack}
         onHowTo={() => setRulesOpen(true)}
         onFairness={() => setFairOpen(true)}
       />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={VENUE} playerToken={playerToken} game="derbyday" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -1224,7 +1224,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         </div>
       </div>
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="德比大战 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -1253,7 +1253,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="德比大战" color={DERBY.sel}>
+    <GameLayout color={DERBY.sel}>
       {gameCard}
     </GameLayout>
   )

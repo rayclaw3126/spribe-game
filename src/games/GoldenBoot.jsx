@@ -10,6 +10,7 @@ import BetButton from '../components/shell/BetButton'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
+import { GAME_BY_ID } from '../gameRegistry'
 import car01 from '../assets/goldenboot/car_01.png'
 import car02 from '../assets/goldenboot/car_02.png'
 import car03 from '../assets/goldenboot/car_03.png'
@@ -97,7 +98,7 @@ const SETTLED_T = 6     // 3s
 const RACE_START = 500
 const SPRINT_BASE = 4800
 const RANK_GAP = 160
-const VENUE = '红宝石赛道'           // 架空赛道名（禁真实场地名）
+const G = GAME_BY_ID['GoldenBoot']
 const ROUND_DATE = '20260705'
 
 // 玩法说明文案（中文；盘口数字照实）
@@ -779,10 +780,10 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   )
   const topBar = (
     <>
-      <GameTopBar balance={serverBalance ?? 0} gameName="PK10" band={GOLDENBOOT.band} venue={VENUE}
+      <GameTopBar balance={serverBalance ?? 0} band={GOLDENBOOT.band} venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="PK10" playerToken={playerToken} game="goldenboot" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -1021,7 +1022,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
         </div>
       </div>
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="PK10 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -1051,7 +1052,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="PK10" color={GOLDENBOOT.gold}>
+    <GameLayout color={GOLDENBOOT.gold}>
       <div ref={cardShakeRef}>
         {gameCard}
       </div>

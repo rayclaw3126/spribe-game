@@ -11,6 +11,9 @@ import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import HowToPlay from '../components/shell/HowToPlay'
+import { GAME_BY_ID } from '../gameRegistry'
+
+const G = GAME_BY_ID['Momentum']
 
 // Momentum —— 实时 crash 随机游走（逐柱 700ms），第 21 卡（收官）。
 // 全服务器权威：连 /ws/momentum，走势线逐柱用后端广播的 x（不本地 Math.random 走），
@@ -348,12 +351,12 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
             ⚖ 不接：Momentum 公平为共享局 inline commit-reveal 角标（见下方），无抽屉可开 */}
         <GameTopBar
           balance={balance}
-          venue="Momentum"
+          venue={G.venue ?? G.displayName}
           onBack={onBack}
           onHowTo={() => setRulesOpen(true)}
         />
         <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-          venue="Momentum" title="Momentum 玩法说明" sections={RULES} />
+          venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         {/* 游戏区：卡内边距内移到这层，让上方 GameTopBar 贴满卡边 */}
         <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: isMobile ? 12 : 18 }}>
@@ -520,7 +523,7 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="Momentum" color={MOMENTUM.green}>
+    <GameLayout color={MOMENTUM.green}>
       {gameCard}
       <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bayPanel}</div>
     </GameLayout>

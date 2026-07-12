@@ -9,6 +9,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import { GAME_BY_ID } from '../gameRegistry'
 import flameUrl from '../assets/shared/flame_tier_sm.png'
 import ballUrl from '../assets/covers/ball-3d.png'
 import silKeeperUrl from '../assets/shared/silhouette_keeper.png'
@@ -58,6 +59,8 @@ const SPRING_W = 1.55       // rad/s — ≈4.2s of glide + settle
 const SPRING_KICK = 1.15
 
 const genIdemKey = () => (crypto.randomUUID ? crypto.randomUUID() : `streak-${Date.now()}-${Math.random()}`)
+
+const G = GAME_BY_ID['StreakRoll']
 
 export default function StreakRoll({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const [bet, setBet] = useState(10)
@@ -438,8 +441,8 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
         {speedLines}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} gameName="STREAK ROLL" band={HOTLINE.bar} onBack={onBack} onFairness={() => setFairOpen(true)} />
-        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="STREAK ROLL" playerToken={playerToken} game="streak" />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={HOTLINE.bar} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
 
         <style>{`
           @keyframes srParticle { from { transform: translate(0,0); opacity:1 } to { transform: translate(var(--tx), var(--ty)); opacity:0 } }
@@ -704,7 +707,7 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Streak Roll" color={HOTLINE.blue}>
+    <GameLayout color={HOTLINE.blue}>
       {gameCard}
     </GameLayout>
   )

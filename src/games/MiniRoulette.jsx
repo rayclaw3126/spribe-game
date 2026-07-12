@@ -9,6 +9,9 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import { GAME_BY_ID } from '../gameRegistry'
+
+const G = GAME_BY_ID['MiniRoulette']
 
 // Team Roulette — full bet/spin/settle round on the Spribe-replica board.
 // Standard 12-number mini-roulette paytable:
@@ -343,8 +346,8 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} gameName="TEAM ROULETTE" band={ROULETTE.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
-        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="TEAM ROULETTE" playerToken={playerToken} game="roulette" />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={ROULETTE.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
 
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 16 : 26, alignItems: isMobile ? 'center' : 'flex-start', position: 'relative' }}>
           {/* cash-out style toast for wins */}
@@ -534,7 +537,7 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="Team Roulette" color={COLORS.green}>
+    <GameLayout color={COLORS.green}>
       {gameCard}
     </GameLayout>
   )

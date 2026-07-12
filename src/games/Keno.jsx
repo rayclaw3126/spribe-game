@@ -10,6 +10,9 @@ import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import ballUrl from '../assets/covers/ball-3d.png'
 import badgeWinUrl from '../assets/shared/badge_win.png'
+import { GAME_BY_ID } from '../gameRegistry'
+
+const G = GAME_BY_ID['Keno']
 
 // Team Keno — Spribe-aligned rules: 36-ball pool, pick up to 10, 10 balls
 // drawn per round. Visual layer is the 1:1 Spribe replica from K1.
@@ -296,8 +299,8 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
         }} />
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} gameName="TEAM KENO" band={KENO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
-        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="TEAM KENO" playerToken={playerToken} game="keno" />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={KENO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
 
         {/* ---- middle zone: flexes to fill the card, board vertically centered ---- */}
         <div style={{
@@ -464,7 +467,7 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Team Keno" color={KENO.pill}>
+    <GameLayout color={KENO.pill}>
       {gameCard}
     </GameLayout>
   )

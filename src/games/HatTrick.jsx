@@ -10,6 +10,7 @@ import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import BetButton from '../components/shell/BetButton'
+import { GAME_BY_ID } from '../gameRegistry'
 
 // Hat Trick — 快3三骰彩（三骰和值 + 豹子 + 对子），第 15 卡。
 // 引擎：三骰各 1–6 独立均匀；和值/豹子/对子/大小单双全部由骰面派生。
@@ -108,7 +109,7 @@ const DIE_START = [0, 250, 500]       // 各骰抛入时刻
 const DIE_LOCK = [2600, 3500, 4500]   // 各骰定格时刻（第1骰 2.6s / 第2骰 3.5s / 第3骰 4.5s）
 const FALL_DUR = 500                  // 抛物线下坠段
 const TOTAL_LOCK = 5100               // TOTAL 大字滚动累加后定格金闪
-const VENUE = '琥珀穹顶'             // 架空场馆名（禁真实球场名）
+const G = GAME_BY_ID['HatTrick']
 const ROUND_DATE = '20260705'
 
 // 玩法说明文案（中文；盘口数字照实）
@@ -986,10 +987,10 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   )
   const topBar = (
     <>
-      <GameTopBar balance={serverBalance ?? 0} gameName="帽子戏法" band={HATTRICK.band} venue={VENUE}
+      <GameTopBar balance={serverBalance ?? 0} band={HATTRICK.band} venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="帽子戏法" playerToken={playerToken} game="hattrick" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -1302,7 +1303,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         </div>
       </div>
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="帽子戏法 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -1332,7 +1333,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="帽子戏法" color={HATTRICK.sel}>
+    <GameLayout color={HATTRICK.sel}>
       <div ref={cardShakeRef}>
         {gameCard}
       </div>

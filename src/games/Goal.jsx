@@ -10,6 +10,9 @@ import SeedFairness from '../components/shell/SeedFairness'
 import ballUrl from '../assets/covers/ball-3d.png'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 import { useSfxMuted } from '../components/shell/bgmManager'
+import { GAME_BY_ID } from '../gameRegistry'
+
+const G = GAME_BY_ID['Goal']
 
 // 单G2: Goal gameplay — Field tiers, column-by-column advance, bomb bust,
 // Auto Game.
@@ -332,7 +335,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
         </svg>
 
         {/* ---- top bar（共享件；特有件：即时兑现指示 pill 经 rightExtra 原样传）---- */}
-        <GameTopBar balance={serverBalance ?? 0} gameName="GOAL" band={GOAL.band} onBack={onBack} onFairness={() => setFairOpen(true)} rightExtra={
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={GOAL.band} onBack={onBack} onFairness={() => setFairOpen(true)} rightExtra={
           <span style={{
             padding: '3px 12px', borderRadius: RADIUS.pill,
             background: GOAL.win, color: '#083a1b',
@@ -340,7 +343,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
             flex: '0 0 auto',
           }}>+{(playing ? cashable : 0).toFixed(2)} USD</span>
         } />
-        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="GOAL" playerToken={playerToken} game="goal" />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
 
         {/* ---- middle zone: flexes to fill the card, keeps the grid group as
              the vertical visual center; leftover space is absorbed here ---- */}
@@ -576,7 +579,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Goal" color={GOAL.win}>
+    <GameLayout color={GOAL.win}>
       {gameCard}
     </GameLayout>
   )

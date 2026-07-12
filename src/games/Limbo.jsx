@@ -15,7 +15,9 @@ import badgeWinUrl from '../assets/shared/badge_win.png'
 import badgeLoseUrl from '../assets/shared/badge_lose.png'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 import SeedFairness from '../components/shell/SeedFairness'
+import { GAME_BY_ID } from '../gameRegistry'
 
+const G = GAME_BY_ID['Limbo']
 const COLOR = '#16C784'
 const FILL_TOP = '#5DCAA5'
 const AMBER = '#F59E0B'
@@ -567,13 +569,13 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
         {/* 共享顶栏（PC 单行 / 手机两行自适应；← 大厅 + 名 + 余额 + ⚖/?/音乐/静音）*/}
         <GameTopBar
           balance={serverBalance ?? 0}
-          venue="Odds Climb"
+          venue={G.venue ?? G.displayName}
           onBack={onBack}
           onFairness={() => setFairOpen(true)}
           onHowTo={() => setRulesOpen(true)}
         />
         <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-          venue="Odds Climb" title="Odds Climb 玩法说明" sections={RULES} />
+          venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         {/* DEMO 条 — arena 系打法（同 Breakaway 顶部金条，无顶栏胶囊碰撞问题） */}
         {isDesk && (
@@ -604,7 +606,7 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
           }
         `}</style>
         {/* 可验证公平抽屉（触发钮已并入 GameTopBar 的 ⚖，音乐/静音同理走顶栏内建）*/}
-        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="ODDS CLIMB" playerToken={playerToken} game="limbo" />
+        <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
 
         <div style={{ position: 'relative', ...(isDesk ? { width: '100%', maxWidth: 720, margin: '0 auto' } : {}) }}>
           <canvas ref={canvasRef} style={{ width: '100%', height: isMobile ? 300 : 420, display: 'block', borderRadius: 12 }} />
@@ -695,7 +697,7 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
 
   // ---- stacked layout (<1024): unchanged ----
   return (
-    <GameLayout title="Odds Climb" color={COLOR} sidebar={side}>
+    <GameLayout color={COLOR} sidebar={side}>
       {mainPanel}
       <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bayPanel}</div>
     </GameLayout>

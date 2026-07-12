@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
+import { GAME_BY_ID } from '../gameRegistry'
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
 // X2：连开 3 球引擎 + 剩余池动态赔率 + 逐球结算状态机（前 19 卡无此结构）。
@@ -107,7 +108,7 @@ const SETTLE_T = 6     // 3s 结算展示
 const ROAD_CAP = 120
 
 // ---------- 静态种子数据 ----------
-const VENUE = '尖晶石球场'              // 架空球场名（禁真实球场名）
+const G = GAME_BY_ID['RollingBall']
 
 // 玩法说明文案（中文；盘口数字/号码范围照实）
 const RULES = [
@@ -679,10 +680,10 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   )
   const topBar = (
     <>
-      <GameTopBar balance={serverBalance ?? 0} gameName="滚球" venue={VENUE}
+      <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={VENUE} playerToken={playerToken} game="rollingball" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -1010,7 +1011,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
         </div>
       </div>
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="滚球 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -1031,7 +1032,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   }
 
   return (
-    <GameLayout title="滚球" color={DERBY.sel}>
+    <GameLayout color={DERBY.sel}>
       {gameCard}
     </GameLayout>
   )

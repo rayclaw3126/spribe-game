@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
+import { GAME_BY_ID } from '../gameRegistry'
 
 // 五行 WuXing — KENO 20 球快开五项皮（80 池无放回抽 20 比总和），第 19 卡。
 // X2：结算引擎 + 轮次状态机 + 赔率定稿（官方原生赔率 14 键出带 → 单据逐档调价，
@@ -112,7 +113,7 @@ const ANIM_WX = 3600       // 五行段亮灯 + 短哨
 const WX_BOUNDS = [695, 763, 855, 923]   // 五行段分界（±30 慢放判定）
 
 // ---------- 静态种子数据（纯展示，零随机数）----------
-const VENUE = '石榴石殿'                // 架空馆名（对齐 AMBER DOME 系，禁真实场馆名）
+const G = GAME_BY_ID['WuXing']
 const ROUND_DATE = 'GP20260706'
 
 // 玩法说明文案（中文；盘口数字照实）
@@ -566,10 +567,10 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   )
   const topBar = (
     <>
-      <GameTopBar balance={serverBalance ?? 0} gameName="五行" venue={VENUE}
+      <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
         roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
         phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue="五行" playerToken={playerToken} game="wuxing" />
+      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -874,7 +875,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         </div>
       </div>
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
-        venue={VENUE} title="五行 玩法说明" sections={RULES} />
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
   )
 
@@ -902,7 +903,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
 
   // ---- stacked layout (<1024) ----
   return (
-    <GameLayout title="五行" color={DERBY.sel}>
+    <GameLayout color={DERBY.sel}>
       {gameCard}
     </GameLayout>
   )
