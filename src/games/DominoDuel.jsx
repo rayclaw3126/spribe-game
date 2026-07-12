@@ -8,10 +8,10 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
-import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
+import { useRoundRoom } from '../hooks/useRoundRoom'
 
 // Domino Duel — 骨牌版主客对决（闲庄→主蓝客红），第 21 卡。
 // X2：真引擎 + 真赔率 + 真算钱（抄 Derby Day 结构）。翻牌动画留 X3。
@@ -89,11 +89,9 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   window.__DOM = { rollTiles, deriveRound, hitsOf, pushesOf, MARKETS, ODDS, DOMINOES }
 }
 
-// ---------- 轮次常量（心跳 500ms/tick）----------
-const TICK_MS = 500
-const BETTING_T = 24   // 12s 押注
-const DRAW_T = 14      // 7s 开牌（四张骨牌错峰翻开 + 决胜张慢镜）
-const SETTLED_T = 8    // 4s 结算展示
+// ---------- 开奖动画时长（#43 单3：收到 drawn → 翻牌演出 → 结算显示 + 回写余额）----------
+// 须 < 服务器 idle(13s)。翻牌 ~3.5s（FLIP_END+揭比分）+ 悬念保留 → 6s 后翻 settled（揭胜负+彩带+余额落定才跳）。
+const DRAW_ANIM_MS = 6000
 // 翻牌错峰时间轴（秒）：主1→客1→主2→客2，第4张（决胜）慢镜
 const FLIP_DELAY = [0, 0.55, 1.1, 1.75]
 const FLIP_DUR = [0.55, 0.55, 0.55, 1.4]
@@ -125,7 +123,6 @@ const RULES = [
     body: '· 想稳押大小单双，中奖率约一半；想搏大赔押波胆比分。\n· 主胜/客胜的平局退本机制降低了风险，适合保守玩家。\n· 本游戏理论返还率约 95.5%，属娱乐性质，理性游戏。',
   },
 ]
-const ROUND_DATE = 'OA20260706'
 const SEED_LAST = deriveRound([[3, 2], [1, 1], [2, 1], [0, 1]])   // 上局回顾种子（真开奖逐期顶掉）
 const SEED_ROAD = [
   '主', '客', '主', '平', '客', '主', '客', '主', '主', '客',
@@ -219,42 +216,43 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
+  const room = useRoundRoom(playerToken, G.backendId)
+
   const [bet, setBet] = useState(10)
-  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
-  const [gamePhase, setGamePhase] = useState('betting')   // betting | drawing | settled
-  const [countdown, setCountdown] = useState(BETTING_T)
-  const [roundNo, setRoundNo] = useState(42)
+  // ---- 本地「表演」状态机（仅动画层；相位真相在 room）：betting | locked | drawing | settled ----
+  const [uiPhase, setUiPhase] = useState('betting')
+  const [animRound, setAnimRound] = useState(null)        // 当前开奖动画的派生局（deriveRound 形状）
   const [lastRound, setLastRound] = useState(SEED_LAST)
   const [road, setRoad] = useState(SEED_ROAD)
   const [result, setResult] = useState(null)              // { hits:Set, pushes:Set, winTotal, refundTotal }
   const [toasts, setToasts] = useState([])
   const [hasLast, setHasLast] = useState(false)
 
-  const phaseRef = useRef('betting')
-  const cdRef = useRef(BETTING_T)
   const picksRef = useRef(picks)
-  const betsRef = useRef(new Map())
+  const betsRef = useRef(new Map())        // 本期已下注并落库的 {key: 累计注额}
   const lastBetsRef = useRef(new Map())
   const betRef = useRef(bet)
-  const balanceRef = useRef(serverBalance)
-  const pendingRef = useRef(null)
-  const pendingDataRef = useRef(null)   // 后端 /dominoduel/play 返回（settleRound 消费）
-  const transitioningRef = useRef(false)  // 开奖 POST 进行中，防 tick 重入
+  const pendingRef = useRef(null)          // 只读表演：当前动画派生局（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
+  const shownRoundRef = useRef(null)       // 已进入 betting 的当前期号（换期 reset 判定）
+  const animatedRoundRef = useRef(null)    // 已启动开奖动画的期号（每期只演一次）
+  const settledRoundRef = useRef(null)     // 已回写余额的期号（每期只回写一次）
+  const settleInfoRef = useRef(null)       // 镜像 room.settleInfo，供动画结束时读取
 
   const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const audioRef = useRef({ ctx: null, muted: false })
 
-  useEffect(() => { balanceRef.current = serverBalance }, [serverBalance])
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
+  useEffect(() => { settleInfoRef.current = room.settleInfo }, [room.settleInfo])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
 
   // ---------- 声景（WebAudio 合成，抄 Hat Trick 足球语义；muted 门控）----------
@@ -330,19 +328,19 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
 
   // 翻牌声景：进入 drawing 按错峰排「翻牌 whoosh + 落定 snap」
   useEffect(() => {
-    if (gamePhase !== 'drawing' || reduced) return
+    if (uiPhase !== 'drawing' || reduced) return
     FLIP_DELAY.forEach((d, i) => {
       timersRef.current.push(setTimeout(sfxWhoosh, d * 1000))
       timersRef.current.push(setTimeout(sfxSnap, (d + FLIP_DUR[i]) * 1000))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gamePhase])
+  }, [uiPhase])
   // 结算欢呼：进入 settled，有中注则强化欢呼+哨
   useEffect(() => {
-    if (gamePhase !== 'settled') return
+    if (uiPhase !== 'settled') return
     if (!reduced) sfxCheer(result?.winTotal > 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gamePhase])
+  }, [uiPhase])
 
   function pushToast(label, win) {
     const id = ++toastIdRef.current
@@ -351,23 +349,28 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     timersRef.current.push(tm)
   }
 
-  const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b), 0)
-
-  // 唯一赔付点：读后端 /dominoduel/play 结算结果（hit/push/lose 三态；余额只认 balanceAfter）
-  function settleRound() {
+  // 开奖动画演完：结算显示（hit/push/lose 三态）+（有注则）回写余额。余额落定才跳（settleInfo 只在此消费）。
+  function finishRound(rnd) {
     const r = pendingRef.current
-    const data = pendingDataRef.current
+    const si = settleInfoRef.current
+    const hadBet = si && si.roundNo === rnd
+    // 余额回写（每期一次）：有注用后端 settleInfo.balanceAfter；无注不动钱。
+    if (hadBet && si.balanceAfter != null && settledRoundRef.current !== rnd) {
+      setServerBalance(Number(si.balanceAfter))
+    }
+    settledRoundRef.current = rnd
+    // 视觉结算仅当本期仍是当前展示期（若下一期 betting 已抢先，跳过不覆盖新期 UI）
+    if (shownRoundRef.current !== rnd) return
     let hits, pushes, winTotal = 0, refundTotal = 0
-    if (data) {
-      // 后端三态：outcome hit → 命中高亮（波胆高赔）+ winTotal；outcome push → 退注高亮 + refundTotal（退本金）
+    if (hadBet) {
+      // 后端三态：hit → 命中高亮（波胆高赔）+ winTotal；push → 退注高亮 + refundTotal（退本金）；lose → 无
       hits = new Set(); pushes = new Set()
-      for (const [k, v] of Object.entries(data.perKeyOutcome || {})) {
-        if (v.outcome === 'hit') { hits.add(k); winTotal = round2(winTotal + Number(v.payout)) }
-        else if (v.outcome === 'push') { pushes.add(k); refundTotal = round2(refundTotal + Number(v.payout)) }
+      for (const it of (si.yourResult || [])) {
+        if (it.outcome === 'hit') { hits.add(it.key); winTotal = round2(winTotal + Number(it.payout)) }
+        else if (it.outcome === 'push') { pushes.add(it.key); refundTotal = round2(refundTotal + Number(it.payout)) }
       }
-      if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))
     } else {
-      // 无注/开奖失败：仅显示，不动钱
+      // 无注：仅显示，不动钱
       hits = hitsOf(r); pushes = pushesOf(r)
     }
     if (winTotal > 0) pushToast('本期命中', winTotal)
@@ -379,58 +382,52 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
       : { ...b, status: 'crashed' }))
+    setUiPhase('settled')
   }
 
-  // 单 interval 驱动整台状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
+  // ---- 相位驱动 effects（全部只读 room，本地不产相位）----
+  // A. 新一期 betting：换期 reset（快照上期注单供「重复」→ 清盘 → 回 betting）
   useEffect(() => {
-    const id = setInterval(async () => {
-      if (transitioningRef.current) return   // 开奖 POST 进行中，别再 tick
-      cdRef.current -= 1
-      if (cdRef.current > 0) { setCountdown(cdRef.current); return }
-      const ph = phaseRef.current
-      const go = (next, ticks) => { phaseRef.current = next; setGamePhase(next); cdRef.current = ticks; setCountdown(ticks) }
-      if (ph === 'betting') {
-        // 结果此刻锁定 —— 有注则走后端开奖+结算，无注则本地开奖仅显示（不动钱）
-        if (betsRef.current.size > 0) {
-          transitioningRef.current = true
-          try {
-            const data = await api.apiPlay(G.backendId, { bets: Object.fromEntries(betsRef.current) }, { autoBalance: false })
-            pendingDataRef.current = data
-            pendingRef.current = deriveRound(data.drawResult.tiles)   // ← 后端 4 骨牌（hs/as 按后端算，不本地 rollTiles）
-          } catch (e) {
-            setNetErr(e.message)
-            pendingDataRef.current = null
-            pendingRef.current = deriveRound(rollTiles())   // 失败：本地开奖仅显示，注单未扣（暂存不扣钱）
-          }
-          transitioningRef.current = false
-        } else {
-          pendingDataRef.current = null
-          let forced = null
-          if (import.meta.env.DEV && window.__DOM_FORCE) { forced = window.__DOM_FORCE; window.__DOM_FORCE = null }
-          pendingRef.current = deriveRound(forced || rollTiles())
-        }
-        if (import.meta.env.DEV) window.__DOM_ANIM_LAST = pendingRef.current.tiles.map(t => t.join('|')).join(',')
-        go('drawing', DRAW_T)
-      } else if (ph === 'drawing') {
-        settleRound()
-        go('settled', SETTLED_T)
-      } else {
-        if (betsRef.current.size) { lastBetsRef.current = new Map(betsRef.current); setHasLast(true) }
-        betsRef.current = new Map(); setBetsPlaced(new Map())
-        picksRef.current = new Set(); setPicks(new Set())
-        setResult(null)
-        setFeedBets(makeFeedBots())
-        setRoundNo(n => n + 1)
-        go('betting', BETTING_T)
-      }
-    }, TICK_MS)
-    return () => clearInterval(id)
-    // 引擎全程走 refs，空依赖单心跳
+    if (room.phase === 'betting' && room.roundNo && room.roundNo !== shownRoundRef.current) {
+      shownRoundRef.current = room.roundNo
+      if (betsRef.current.size) { lastBetsRef.current = new Map(betsRef.current); setHasLast(true) }
+      betsRef.current = new Map(); setBetsPlaced(new Map())
+      picksRef.current = new Set(); setPicks(new Set())
+      setResult(null)
+      setFeedBets(makeFeedBots())
+      setNetErr(null)
+      setUiPhase('betting')
+    }
+  }, [room.phase, room.roundNo])
+
+  // B. locked：封盘（尚在 betting UI 时切 locked；已进入 drawing 的动画不打断）
+  useEffect(() => {
+    if (room.phase === 'locked') setUiPhase(p => (p === 'betting' ? 'locked' : p))
+  }, [room.phase])
+
+  // C. drawn：收到本期开奖 → 启动翻牌演出（只读表演），到点 finishRound
+  useEffect(() => {
+    if (room.drawResult && room.roundNo && animatedRoundRef.current !== room.roundNo) {
+      animatedRoundRef.current = room.roundNo
+      const rnd = room.roundNo
+      const derived = deriveRound(room.drawResult.tiles)   // 后端 4 骨牌，本地重派生 hs/as/homeTiles/awayTiles
+      pendingRef.current = derived
+      setAnimRound(derived)
+      if (import.meta.env.DEV) window.__DOM_ANIM_LAST = derived.tiles.map(t => t.join('|')).join(',')
+      setUiPhase('drawing')
+      const tm = setTimeout(() => finishRound(rnd), DRAW_ANIM_MS)
+      timersRef.current.push(tm)
+    }
+    // finishRound 走 refs，无需入依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [room.drawResult, room.roundNo])
+
+  const betting = room.phase === 'betting'
+  const drawing = uiPhase === 'drawing'
+  const settled = uiPhase === 'settled'
 
   const toggleSel = key => {
-    if (phaseRef.current !== 'betting') return
+    if (!betting) return
     setPicks(s => {
       const n = new Set(s)
       if (n.has(key)) n.delete(key); else n.add(key)
@@ -439,38 +436,48 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     })
   }
 
-  // 唯一暂存点：确认/重复共用（暂存不扣钱，钱只在开奖 POST 那一刻走）
-  function placeBets(entries) {
-    if (phaseRef.current !== 'betting') return false
+  // 唯一下注入口：betting 相位内即时 POST（后端挂当期共享局）；apiPlay 默认回写扣款后余额。
+  async function placeAndPost(entries) {
+    if (room.phase !== 'betting') { pushToast('本期已封盘', 0); return false }
     let total = 0
     entries.forEach(s => { total = round2(total + s) })
-    // 暂存不扣钱：已暂存总额 + 本次不能超过后端余额
-    if (!entries.size || total <= 0 || (serverBalance != null && total > round2(serverBalance - stagedTotal()))) return false
+    if (!entries.size || total <= 0) return false
+    // 即时扣款模型：不能超过当前余额（服务端另有权威风控/余额校验兜底）
+    if (serverBalance != null && total > serverBalance) { setNetErr('余额不足'); return false }
     setNetErr(null)
-    entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
-    setBetsPlaced(new Map(betsRef.current))
-    return true
+    try {
+      await api.apiPlay(G.backendId, { bets: Object.fromEntries(entries) })   // 返 balanceAfter → 自动回写扣款
+      entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
+      setBetsPlaced(new Map(betsRef.current))
+      return true
+    } catch (e) {
+      if (e?.data?.error === 'round_locked') {
+        pushToast('本期已封盘', 0)
+        setUiPhase(p => (p === 'betting' ? 'locked' : p))
+      } else {
+        setNetErr(e.message)
+      }
+      return false
+    }
   }
-  function confirmBets() {
+  async function confirmBets() {
     const amount = betRef.current
     if (amount < 1) return
     const priced = [...picksRef.current].filter(k => MARKETS[k])
-    if (placeBets(new Map(priced.map(k => [k, amount])))) {
-      picksRef.current = new Set()
-      setPicks(new Set())
-    }
+    if (!priced.length) return
+    const ok = await placeAndPost(new Map(priced.map(k => [k, amount])))
+    if (ok) { picksRef.current = new Set(); setPicks(new Set()) }
   }
-  function repeatBets() { placeBets(new Map(lastBetsRef.current)) }
+  function repeatBets() { placeAndPost(new Map(lastBetsRef.current)) }
 
-  const betting = gamePhase === 'betting'
   const confirmTotal = round2(bet * picks.size)
-  const confirmOk = betting && picks.size > 0 && bet >= 1 && (serverBalance == null || confirmTotal <= round2(serverBalance - stagedTotal()))
+  const confirmOk = betting && picks.size > 0 && bet >= 1 && (serverBalance == null || confirmTotal <= serverBalance)
   let lastTotal = 0
   lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
-  const repeatOk = betting && hasLast && lastTotal > 0 && (serverBalance == null || lastTotal <= round2(serverBalance - stagedTotal()))
+  const repeatOk = betting && hasLast && lastTotal > 0 && (serverBalance == null || lastTotal <= serverBalance)
   const oddsStr = slot => MARKETS[slot].odds.toFixed(2)
-  // 对决区当前展示局：betting 显上局回顾；drawing/settled 显本局开牌
-  const shown = gamePhase !== 'betting' && pendingRef.current ? pendingRef.current : lastRound
+  // 对决区当前展示局：betting/locked 显上局回顾；drawing/settled 显本局开牌
+  const shown = (drawing || settled) && animRound ? animRound : lastRound
 
   // ---- 样式件（选中=金框；命中=绿框；push 退注=橙框）----
   const secBox = {
@@ -535,12 +542,17 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   )
 
   // ---- 顶栏 ----
-  const secs = String(Math.ceil(countdown / 2)).padStart(2, '0')
-  const phaseInfo = betting
-    ? { text: '⏱ 押注 00:', c: DERBY.sel, cd: true }
-    : gamePhase === 'drawing'
-      ? { text: '开牌中…', c: DERBY.orange }
-      : { text: result && result.winTotal > 0 ? `已开 +$${result.winTotal.toFixed(2)}` : '已开牌', c: DERBY.gold }
+  const connecting = !room.connected && !room.roundNo
+  const secs = String(Math.max(0, Math.ceil(room.countdownMs / 1000))).padStart(2, '0')
+  const phaseInfo = connecting
+    ? { text: '连接中…', c: DERBY.dim }
+    : betting
+      ? { text: `⏱ 00:${secs}`, c: DERBY.sel }
+      : uiPhase === 'locked'
+        ? { text: '封盘中…', c: DERBY.orange }
+        : drawing
+          ? { text: '开牌中…', c: DERBY.orange }
+          : { text: result && result.winTotal > 0 ? `已开 +$${result.winTotal.toFixed(2)}` : '已开牌', c: DERBY.gold }
   const phaseChipNode = (
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
@@ -551,9 +563,16 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
-        roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-        phaseChip={phaseChipNode} onHowTo={() => setRulesOpen(true)} onBack={onBack} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        roundId={room.roundNo || '连接中…'}
+        phaseChip={phaseChipNode} onHowTo={() => setRulesOpen(true)} onBack={onBack} />
+      {/* 断线重连提示（hook 自动指数退避重连；恢复后 sync 补相位） */}
+      {!room.connected && room.roundNo && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
+          background: 'rgba(20,16,10,0.95)', border: `1px solid ${DERBY.orange}`, borderRadius: 10,
+          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800,
+        }}>连接断开，正在重连…</div>
+      )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -566,7 +585,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
 
   // ---- ① 对决区：主(蓝) VS 客(红)，各两张骨牌 + 比分（drawing 翻牌演出）----
   const tileSz = isMobile ? 28 : 32
-  const flipping = gamePhase === 'drawing' && !reduced   // 翻牌相位（动画只读 pendingRef）
+  const flipping = drawing && !reduced   // 翻牌相位（动画只读 pendingRef）
   const teamBlock = (name, tiles, score, color, side) => (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
       <span style={{
@@ -588,7 +607,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     </div>
   )
   // 结果只在 settled 揭示（drawing 不剧透胜负）
-  const outcomeTag = gamePhase === 'settled' && shown
+  const outcomeTag = settled && shown
     ? (shown.hs > shown.as ? { t: '主队胜', c: DERBY.home } : shown.as > shown.hs ? { t: '客队胜', c: DERBY.away } : { t: '平局', c: DERBY.gold })
     : null
   // 赢队半场彩带（主胜落左半 / 客胜落右半 / 平局全场）
@@ -597,9 +616,9 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     left: Math.random() * 100, delay: Math.random() * 0.5, dur: 1.1 + Math.random() * 1.3,
     rot: (Math.random() * 2 - 1) * 540,
     color: [DERBY.gold, '#35d07f', '#ffffff', DERBY.home, DERBY.away][i % 5], size: 4 + Math.random() * 4,
-    // roundNo 作重生成键：每局换一批彩带位置（body 不直接引用，禁 lint 误报）
+    // room.roundNo 作重生成键：每局换一批彩带位置（body 不直接引用，禁 lint 误报）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  })), [roundNo])
+  })), [room.roundNo])
   const duelZone = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
@@ -609,7 +628,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       gap: isMobile ? 14 : 30, boxSizing: 'border-box', flexWrap: 'wrap', overflow: 'hidden',
     }}>
-      {gamePhase === 'settled' && !reduced && (
+      {settled && !reduced && (
         <div style={{
           position: 'absolute', top: 0, bottom: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 3,
           left: winSide === 'away' ? '50%' : 0, right: winSide === 'home' ? '50%' : 0,
@@ -784,7 +803,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
-              label={betting ? `下注 ${picks.size} 格` : gamePhase === 'drawing' ? '开牌中…' : '本局已结'}
+              label={betting ? `下注 ${picks.size} 格` : drawing ? '开牌中…' : '本局已结'}
               sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
               onClick={confirmBets}
               disabled={!confirmOk}

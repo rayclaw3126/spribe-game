@@ -8,17 +8,18 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
-import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
+import { useRoundRoom } from '../hooks/useRoundRoom'
 
 // 五行 WuXing — KENO 20 球快开五项皮（80 池无放回抽 20 比总和），第 19 卡。
 // X2：结算引擎 + 轮次状态机 + 赔率定稿（官方原生赔率 14 键出带 → 单据逐档调价，
 //     1e6 复验 19 键全数入 94-97.5% 带，见 ODDS 注释）。
 // X3：drawing 相位开奖舞台（20 球乱序快闪依次亮 + 总和/上下累加 + 分界慢放 +
 //     总和砸出 + 五行段预亮）+ SFX（落球 tick/亮灯短哨/终场哨）；引擎/结算零改动。
-// 算钱路径：placeBets() 唯一扣注入口（确认/重复共用），settleRound() 唯一赔付点。
+// 算钱路径（#43 接排期器）：placeAndPost() 唯一扣注入口（betting 内即时 POST 挂当期），
+//   finishRound() 唯一赔付点（读服务器 settleInfo；余额落定才跳）。相位/期号/倒计时全走 useRoundRoom。
 // push 项：无——大小按官方 ≥811/≤810 对 210-1410 无重叠无空隙；龙虎/上下为三向盘
 // （和 = 独立定价键，龙/虎/上/下遇和判输，官方无退注条款）；和局概率单列：
 // 龙虎和 p≈0.1001、上下和 p≈0.2033（1e7）。
@@ -98,11 +99,9 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   window.__WX = { drawKeno, deriveRound, hitsOf, MARKETS, ODDS }
 }
 
-// ---------- 轮次常量（心跳 500ms/tick）----------
-const TICK_MS = 500
-const BETTING_T = 48    // 24s
-const DRAW_T = 9        // 4.5s 开奖舞台（时间轴 ~3.9s 收尾留余量）
-const SETTLED_T = 8     // 4s
+// ---------- 轮次常量 ----------
+// 相位/期号/倒计时全走服务器排期器（useRoundRoom）；本地只保留开奖舞台动画时长。
+const DRAW_ANIM_MS = 4500   // 收到 drawn → 开奖舞台演完 → 结算回写；须 < 服务器 wuxing idle(5500ms)
 const ROAD_CAP = 120
 // 舞台时间轴（rAF 内使用，毫秒）：乱序亮球 → 总和砸出 → 五行段预亮
 const ANIM_T0 = 250        // 首球亮起
@@ -115,7 +114,6 @@ const WX_BOUNDS = [695, 763, 855, 923]   // 五行段分界（±30 慢放判定�
 
 // ---------- 静态种子数据（纯展示，零随机数）----------
 const G = GAME_BY_ID['WuXing']
-const ROUND_DATE = 'GP20260706'
 
 // 玩法说明文案（中文；盘口数字照实）
 const RULES = [
@@ -272,8 +270,10 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
+  const room = useRoundRoom(playerToken, G.backendId)
+
   const [bet, setBet] = useState(10)
-  const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
@@ -281,36 +281,34 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const [hasLast, setHasLast] = useState(false)
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
 
-  // ---- 轮次状态机 ----
-  // betting | drawing | settled
-  const [gamePhase, setGamePhase] = useState('betting')
-  const [countdown, setCountdown] = useState(BETTING_T)
-  const [roundNo, setRoundNo] = useState(88)
+  // ---- 本地「表演」状态机（仅动画层；相位真相在 room）----
+  // uiPhase: betting | locked | drawing | settled —— 由 room 相位 + 开奖动画时序派生
+  const [uiPhase, setUiPhase] = useState('betting')
+  const [animRound, setAnimRound] = useState(null)       // 当前开奖动画的派生局（deriveRound 结果）
   const [lastRound, setLastRound] = useState(SEED_LAST)
   const [road, setRoad] = useState(SEED_ROAD)
   const [result, setResult] = useState(null)             // { hits:Set, winTotal }
   const [preHits, setPreHits] = useState(null)           // 舞台尾五行段预亮
   const [toasts, setToasts] = useState([])
 
-  const phaseRef = useRef('betting')
-  const cdRef = useRef(BETTING_T)
   const picksRef = useRef(picks)
-  const betsRef = useRef(new Map())
+  const betsRef = useRef(new Map())        // 本期已下注并落库的 {key: 累计注额}
   const lastBetsRef = useRef(new Map())
   const betRef = useRef(bet)
-  const balanceRef = useRef(serverBalance)
-  const pendingRef = useRef(null)
-  const pendingDataRef = useRef(null)   // 后端 /wuxing/play 返回（settleRound 消费）
-  const transitioningRef = useRef(false)  // 开奖 POST 进行中，防 tick 重入
+  const pendingRef = useRef(null)          // 只读表演：当前动画派生局（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
+  const shownRoundRef = useRef(null)       // 已进入 betting 的当前期号（换期 reset 判定）
+  const animatedRoundRef = useRef(null)    // 已启动开奖动画的期号（每期只演一次）
+  const settledRoundRef = useRef(null)     // 已回写余额的期号（每期只回写一次）
+  const settleInfoRef = useRef(null)       // 镜像 room.settleInfo，供动画结束时读取
 
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const audioRef = useRef({ ctx: null, muted: false })
 
-  useEffect(() => { balanceRef.current = serverBalance }, [serverBalance])
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
+  useEffect(() => { settleInfoRef.current = room.settleInfo }, [room.settleInfo])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
 
   // ---------- SFX（WebAudio 已验配方，对齐 Line Up/Derby 有声版；muted 门控，
@@ -364,21 +362,22 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     timersRef.current.push(tm)
   }
 
-  const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b), 0)
-
-  // 唯一赔付点：读后端 /wuxing/play 结算结果（命中/赔付/余额全认后端；无 push 项）
-  function settleRound() {
-    const r = pendingRef.current
-    const data = pendingDataRef.current
+  // 开奖动画演完：结算显示 +（有注则）回写余额。无 push 项——龙/虎/上/下遇和局判【输】不退本金，
+  // 命中高亮 = outcome 非 lose（和局 dt-tie/ud-tie 命中即 hit；dragon/tiger 遇和为 lose）。余额落定才跳。
+  function finishRound(r, rnd) {
+    const si = settleInfoRef.current
+    const hadBet = si && si.roundNo === rnd
+    if (hadBet && si.balanceAfter != null && settledRoundRef.current !== rnd) {
+      setServerBalance(Number(si.balanceAfter))
+    }
+    settledRoundRef.current = rnd
+    if (shownRoundRef.current !== rnd) return   // 下一期已抢先，跳过不覆盖新期 UI
     let hits, winTotal
-    if (data) {
-      // 后端结算：命中高亮 = outcome 非 lose（龙虎和局 dragon/tiger 为 lose，dt-tie hit）；余额只认 balanceAfter
-      hits = new Set(Object.entries(data.perKeyOutcome || {}).filter(([, v]) => v.outcome !== 'lose').map(([k]) => k))
-      winTotal = Number(data.totalPayout || 0)
+    if (hadBet) {
+      hits = new Set((si.yourResult || []).filter(v => v.outcome !== 'lose').map(v => v.key))
+      winTotal = Number(si.totalPayout || 0)
       if (winTotal > 0) pushToast('本期命中', winTotal)
-      if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))
     } else {
-      // 无注/开奖失败：仅显示，不动钱
       hits = hitsOf(r); winTotal = 0
     }
     setLastRound(r)
@@ -387,67 +386,52 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
       : { ...b, status: 'crashed' }))
+    setUiPhase('settled')
   }
 
-  // 单 interval 驱动整台状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
+  // ---- 相位驱动 effects（全部只读 room，本地不产相位）----
+  // A. 新一期 betting：换期 reset（快照上期注单供「重复」→ 清盘 → 回 betting）
   useEffect(() => {
-    const id = setInterval(async () => {
-      if (transitioningRef.current) return   // 开奖 POST 进行中，别再 tick
-      cdRef.current -= 1
-      if (cdRef.current > 0) { setCountdown(cdRef.current); return }
-      const ph = phaseRef.current
-      const go = (next, ticks) => {
-        phaseRef.current = next; setGamePhase(next)
-        cdRef.current = ticks; setCountdown(ticks)
-      }
-      if (ph === 'betting') {
-        // 结果此刻锁定 —— 有注则走后端开奖+结算，无注则本地开奖仅显示（不动钱）
-        if (betsRef.current.size > 0) {
-          transitioningRef.current = true
-          try {
-            const data = await api.apiPlay(G.backendId, { bets: Object.fromEntries(betsRef.current) }, { autoBalance: false })
-            pendingDataRef.current = data
-            pendingRef.current = deriveRound(data.drawResult.balls)   // ← 后端 20 球（龙虎/和值按后端球算，不本地 drawKeno）
-          } catch (e) {
-            setNetErr(e.message)
-            pendingDataRef.current = null
-            pendingRef.current = deriveRound(drawKeno())   // 失败：本地开奖仅显示，注单未扣（暂存不扣钱）
-          }
-          transitioningRef.current = false
-        } else {
-          pendingDataRef.current = null
-          let balls = null
-          if (import.meta.env.DEV && window.__WX_FORCE) {   // 对账注入口（一次性消费）
-            balls = window.__WX_FORCE; window.__WX_FORCE = null
-          }
-          pendingRef.current = deriveRound(balls || drawKeno())
-        }
-        go('drawing', DRAW_T)
-      } else if (ph === 'drawing') {
-        settleRound()
-        go('settled', SETTLED_T)
-      } else {
-        // 清盘前快照本局注单（空局不覆盖，重复钮指向最近一张有效注单）
-        if (betsRef.current.size) {
-          lastBetsRef.current = new Map(betsRef.current)
-          setHasLast(true)
-        }
-        betsRef.current = new Map(); setBetsPlaced(new Map())
-        picksRef.current = new Set(); setPicks(new Set())
-        setResult(null)
-        setPreHits(null)
-        setFeedBets(makeFeedBots())
-        setRoundNo(n => n + 1)
-        go('betting', BETTING_T)
-      }
-    }, TICK_MS)
-    return () => clearInterval(id)
-    // 引擎全程走 refs，空依赖单心跳
+    if (room.phase === 'betting' && room.roundNo && room.roundNo !== shownRoundRef.current) {
+      shownRoundRef.current = room.roundNo
+      if (betsRef.current.size) { lastBetsRef.current = new Map(betsRef.current); setHasLast(true) }
+      betsRef.current = new Map(); setBetsPlaced(new Map())
+      picksRef.current = new Set(); setPicks(new Set())
+      setResult(null)
+      setPreHits(null)
+      setFeedBets(makeFeedBots())
+      setNetErr(null)
+      setUiPhase('betting')
+    }
+  }, [room.phase, room.roundNo])
+
+  // B. locked：封盘（尚在 betting UI 时切 locked；已进入 drawing 的动画不打断）
+  useEffect(() => {
+    if (room.phase === 'locked') setUiPhase(p => (p === 'betting' ? 'locked' : p))
+  }, [room.phase])
+
+  // C. drawn：收到本期开奖 → 派生局 → 启动开奖舞台动画（只读表演），到点 finishRound
+  useEffect(() => {
+    if (room.drawResult && room.roundNo && animatedRoundRef.current !== room.roundNo) {
+      animatedRoundRef.current = room.roundNo
+      const r = deriveRound(room.drawResult.balls)   // ← 后端 20 球（不本地 drawKeno）
+      const rnd = room.roundNo
+      pendingRef.current = r
+      setAnimRound(r)
+      setUiPhase('drawing')
+      const tm = setTimeout(() => finishRound(r, rnd), DRAW_ANIM_MS)
+      timersRef.current.push(tm)
+    }
+    // finishRound 走 refs，无需入依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [room.drawResult, room.roundNo])
+
+  const betting = room.phase === 'betting'
+  const drawing = uiPhase === 'drawing'
+  const settled = uiPhase === 'settled'
 
   const toggleSel = key => {
-    if (phaseRef.current !== 'betting') return
+    if (!betting) return
     setPicks(s => {
       const n = new Set(s)
       if (n.has(key)) n.delete(key); else n.add(key)
@@ -456,39 +440,47 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     })
   }
 
-  // 唯一暂存点：确认/重复两个入口都走这一条（暂存不扣钱，钱只在开奖 POST 那一刻走）
-  function placeBets(entries) {
-    if (phaseRef.current !== 'betting') return false
+  // 唯一下注入口：betting 相位内即时 POST（后端挂当期共享局）；apiPlay 默认回写扣款后余额。
+  async function placeAndPost(entries) {
+    if (room.phase !== 'betting') { pushToast('本期已封盘', 0); return false }
     let total = 0
     entries.forEach(x => { total = round2(total + x) })
-    // 暂存不扣钱：已暂存总额 + 本次不能超过后端余额
-    if (!entries.size || total <= 0 || (serverBalance != null && total > round2(serverBalance - stagedTotal()))) return false
+    if (!entries.size || total <= 0) return false
+    if (serverBalance != null && total > serverBalance) { setNetErr('余额不足'); return false }
     setNetErr(null)
-    entries.forEach((x, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + x)))
-    setBetsPlaced(new Map(betsRef.current))
-    return true
-  }
-  function confirmBets() {
-    const amount = betRef.current
-    if (amount < 1) return
-    if (placeBets(new Map([...picksRef.current].map(k => [k, amount])))) {
-      picksRef.current = new Set()
-      setPicks(new Set())
+    try {
+      await api.apiPlay(G.backendId, { bets: Object.fromEntries(entries) })   // 返 balanceAfter → 自动回写扣款
+      entries.forEach((x, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + x)))
+      setBetsPlaced(new Map(betsRef.current))
+      return true
+    } catch (e) {
+      if (e?.data?.error === 'round_locked') {
+        pushToast('本期已封盘', 0)
+        setUiPhase(p => (p === 'betting' ? 'locked' : p))
+      } else {
+        setNetErr(e.message)
+      }
+      return false
     }
   }
+  async function confirmBets() {
+    const amount = betRef.current
+    if (amount < 1 || !picksRef.current.size) return
+    const entries = new Map([...picksRef.current].map(k => [k, amount]))
+    const ok = await placeAndPost(entries)
+    if (ok) { picksRef.current = new Set(); setPicks(new Set()) }
+  }
   function repeatBets() {
-    placeBets(new Map(lastBetsRef.current))
+    placeAndPost(new Map(lastBetsRef.current))
   }
 
-  const betting = gamePhase === 'betting'
-  const drawing = gamePhase === 'drawing'
   const confirmTotal = round2(bet * picks.size)
-  const confirmOk = betting && picks.size > 0 && bet >= 1 && (serverBalance == null || confirmTotal <= round2(serverBalance - stagedTotal()))
+  const confirmOk = betting && picks.size > 0 && bet >= 1 && (serverBalance == null || confirmTotal <= serverBalance)
   let lastTotal = 0
   lastBetsRef.current.forEach(x => { lastTotal = round2(lastTotal + x) })
-  const repeatOk = betting && hasLast && lastTotal > 0 && (serverBalance == null || lastTotal <= round2(serverBalance - stagedTotal()))
-  const cur = pendingRef.current
-  const shown = gamePhase === 'settled' && cur ? cur : lastRound
+  const repeatOk = betting && hasLast && lastTotal > 0 && (serverBalance == null || lastTotal <= serverBalance)
+  const cur = animRound
+  const shown = settled && cur ? cur : lastRound
 
   // ---- 样式件（选中=金框，同 Line Up 惯例）----
   const cellBase = (key, bg) => {
@@ -542,11 +534,17 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   )
 
   // ---- 顶栏（共享件）----
-  const phaseChip = betting
-    ? { text: `⏱ 00:${String(Math.ceil(countdown / 2)).padStart(2, '0')}`, c: DERBY.sel }
-    : drawing
-      ? { text: '开奖中…', c: DERBY.orange }
-      : { text: result && result.winTotal > 0 ? `+$${result.winTotal.toFixed(2)}` : '已开奖', c: DERBY.gold }
+  const connecting = !room.connected && !room.roundNo
+  const cdSec = Math.max(0, Math.ceil(room.countdownMs / 1000))
+  const phaseChip = connecting
+    ? { text: '连接中…', c: DERBY.dim }
+    : betting
+      ? { text: `⏱ 00:${String(cdSec).padStart(2, '0')}`, c: DERBY.sel }
+      : uiPhase === 'locked'
+        ? { text: '封盘中…', c: DERBY.orange }
+        : drawing
+          ? { text: '开奖中…', c: DERBY.orange }
+          : { text: result && result.winTotal > 0 ? `+$${result.winTotal.toFixed(2)}` : '已开奖', c: DERBY.gold }
   const phaseChipNode = (
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
@@ -557,9 +555,15 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
-        roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
-        phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        roundId={room.roundNo || '连接中…'}
+        phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
+      {!room.connected && room.roundNo && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
+          background: 'rgba(20,16,10,0.95)', border: `1px solid ${DERBY.orange}`, borderRadius: 10,
+          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800,
+        }}>连接断开，正在重连…</div>
+      )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -579,7 +583,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ color: drawing ? DERBY.orange : DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>
-          {drawing ? '开奖中…' : gamePhase === 'settled' ? '开奖 · 本局' : '开奖 · 上局'}
+          {drawing ? '开奖中…' : settled ? '开奖 · 本局' : '开奖 · 上局'}
         </span>
         <span style={{ color: DERBY.dim, fontSize: 10, fontWeight: 800 }}>80 池 · 20 球</span>
       </div>
@@ -641,7 +645,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       boxSizing: 'border-box',
     }}>
       {drawing && cur
-        ? <DrawStage key={`${roundNo}-draw`} round={cur} sfx={stageSfx}
+        ? <DrawStage key={`${room.roundNo}-draw`} round={cur} sfx={stageSfx}
             onFinale={() => setPreHits(new Set([...hitsOf(pendingRef.current)].filter(k => k.startsWith('wx-'))))}>
             {zoneBody}
           </DrawStage>
@@ -854,7 +858,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
-              label={betting ? `下注 ${picks.size} 格` : gamePhase === 'settled' ? '已结算' : '已锁盘'}
+              label={betting ? `下注 ${picks.size} 格` : settled ? '已结算' : '已锁盘'}
               sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
               onClick={confirmBets}
               disabled={!confirmOk}
