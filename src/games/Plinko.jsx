@@ -8,6 +8,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 
@@ -40,6 +41,25 @@ const DROP_MS_TOTAL = 2500          // ~2.5s of row-by-row bouncing
 const PINS_MIN = 8
 const PINS_MAX = 16
 const roundMult = x => (x >= 10 ? Math.round(x) : Math.round(x * 10) / 10)
+
+const RULES = [
+  {
+    icon: '⚽', title: '怎么玩',
+    body: '选好风险档与钉排数后发球，小球从顶部落下，每碰一排钉子就随机向左或向右弹一格，最终落进底部某个格子。每个格子标着一个倍数，用你的本金乘以命中格的倍数就是这一球的派彩。落点由二项分布决定：越靠中间的格子越容易命中（倍数低），越靠两边越难命中（倍数高）。',
+  },
+  {
+    icon: '📈', title: '三档风险与倍数分布',
+    body: '同一排钉数下，三档的中奖机率完全一样，区别只在倍数怎么分布：\n· 绿 GREEN（最平缓）：边格顶赔最小、中格倍数最高，波动小、最稳。\n· 黄 YELLOW（居中）：介于绿红之间，风险与回报折中。\n· 红 RED（最陡）：边格顶赔最大、中格倍数被压到最低，搏两边大奖但中间格常常亏。\n档位越陡，边格越高、中格越低——高风险高回报，但期望返还率三档一致。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '· 选档发球：直接点 GREEN / YELLOW / RED 三个大按钮之一，即按该档下注并发出一球。\n· 调钉数：点「Pins」下拉，可选 8–16 排，钉数越多底格越多、两边最高倍数越大、命中越分散。\n· 设金额：先用筹码设好每球本金，再发球，确认后一次扣款，落点结算直接入余额。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳一点选绿档、想搏大奖选红档，黄档折中。\n· 钉数越多两边顶赔越高但越难命中，追求极限大奖可拉满 16 排。\n· 落点由服务器按二项分布计算、前端不可控，理论返还率约 95%，属娱乐性质，理性游戏。',
+  },
+]
 
 function binomProbs(n) {
   const c = [1]
@@ -195,6 +215,7 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
   const [flash, setFlash] = useState(null)         // { tier, k } landing cell glow
   const [proof, setProof] = useState(null)         // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
   const [fairOpen, setFairOpen] = useState(false)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const ballsRef = useRef([])
   const rafRef = useRef(null)
@@ -487,8 +508,9 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
         {pitchScene}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={PLINKO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={PLINKO.band} onBack={onBack} onFairness={() => setFairOpen(true)} onHowTo={() => setRulesOpen(true)} />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)} venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         {/* ---- second row (mobile only — desktop 34px row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 2 }}>{historyStrip}</div>}

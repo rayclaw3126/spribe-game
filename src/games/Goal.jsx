@@ -7,6 +7,7 @@ import BetFeed from '../components/shell/BetFeed'
 import { makeFeedBots, createArenaFx, drawArenaFx } from '../components/shell/arenaFx'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import HowToPlay from '../components/shell/HowToPlay'
 import ballUrl from '../assets/covers/ball-3d.png'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 import { useSfxMuted } from '../components/shell/bgmManager'
@@ -30,6 +31,25 @@ const TIERS = { sm: { label: '▪', bombs: 1 }, md: { label: '▪▪', bombs: 2 
 const stepMult = tier => RTP / ((ROWS - TIERS[tier].bombs) / ROWS)   // 仅用于「下一列倍数」展示；真 cum 以后端为准
 const round2 = x => Math.round(x * 100) / 100
 
+const RULES = [
+  {
+    icon: '⚽', title: '怎么玩',
+    body: '球场是 7 列 × 4 行的网格，你带球从左向右逐列推进。每列 4 格里藏着炸弹（被抢断），其余是安全格。轮到某一列时，从该列 4 格中挑 1 格：踩到安全格就前进一列、倍数累乘；踩到炸弹本局立即输光。',
+  },
+  {
+    icon: '📈', title: '档位与倍数',
+    body: '开局用 Field 选每列炸弹数，档位越高越险、单列跳倍越猛（理论返还率 97%）：\n· ▪ 简单：每列 1 颗炸弹（安全率 3/4），每推进一列 ×1.29。\n· ▪▪ 中等（默认）：每列 2 颗炸弹（安全率 2/4），每列 ×1.94。\n· ▪▪▪ 困难：每列 3 颗炸弹（安全率 1/4），每列 ×3.88。\n倍数逐列累乘，「Next」pill 实时显示推进下一列后的总倍数。档位仅开局可选，局中锁定。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '设好 Bet 金额与 Field 档位，点 BET 开局。之后每列点一格前进，顶栏与 CASHOUT 按钮实时显示当前可兑现金额（本金 × 累计倍数）。随时点 CASHOUT 兑现锁定收益、结束本局；若一路安全推满第 7 列则触顶，自动按满额派彩。RANDOM 可替你在当前列随机点一格，Auto Game 自动逐列推进。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 倍数呈指数增长——推得越深收益越猛，但每多推一列都在赌下一格不是炸弹。\n· 保守可选 ▪ 档小步慢跑、见好就收；搏大可上 ▪▪▪ 档，但单列失手概率高达 3/4。\n· 想清楚目标倍数，到点就 CASHOUT，别贪最后一列。理论返还率约 97%，属娱乐性质，理性游戏。',
+  },
+]
+
 // 本地随机挑一行（仅 AUTO / RANDOM 用来"替玩家点哪一格"，雷位仍由后端判定）
 const randomRow = () => Math.floor(Math.random() * ROWS)
 
@@ -51,6 +71,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [, setRoundId] = useState(null)   // 后端本局 id（走 ref 用）
   const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
 
   const phaseRef = useRef('idle')
@@ -326,7 +347,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
         </svg>
 
         {/* ---- top bar（共享件；特有件：即时兑现指示 pill 经 rightExtra 原样传）---- */}
-        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={GOAL.band} onBack={onBack} onFairness={() => setFairOpen(true)} rightExtra={
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={GOAL.band} onBack={onBack} onFairness={() => setFairOpen(true)} onHowTo={() => setRulesOpen(true)} rightExtra={
           <span style={{
             padding: '3px 12px', borderRadius: RADIUS.pill,
             background: GOAL.win, color: '#083a1b',
@@ -335,6 +356,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
           }}>+{(playing ? cashable : 0).toFixed(2)} USD</span>
         } />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)} venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         {/* ---- middle zone: flexes to fill the card, keeps the grid group as
              the vertical visual center; leftover space is absorbed here ---- */}

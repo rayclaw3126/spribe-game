@@ -8,6 +8,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 
@@ -26,6 +27,26 @@ const TARGET_MAX = 96
 const ROLL_MS = 1200
 const round2 = x => Math.round(x * 100) / 100
 const payoutFor = chance => round2(RTP * 100 / chance)
+
+// 玩法说明抽屉文案（照 DominoDuel 模板；数字取自本文件引擎实值，勿改）
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '每局开出一个 0–100 的点数（保留 2 位小数，均匀分布）。你先拖动滑块把「目标线」设在 4–96 之间，再选押 UNDER 还是 OVER：\n· UNDER：开点严格小于目标线才赢（正好等于目标线不算赢）。\n· OVER：开点严格大于目标线才赢（正好等于目标线不算赢）。',
+  },
+  {
+    icon: '📊', title: '赔率与中奖率',
+    body: '赔率 = 97% × 100 ÷ 中奖率，目标线越靠近能赢的一侧、中奖率越高、赔率越低；反之赔率越高。\n· UNDER 中奖率 = 目标线数值%，赔率 = 97 ÷ 目标线。\n· OVER 中奖率 =（100 − 目标线）%，赔率 = 97 ÷（100 − 目标线）。\n面板会实时显示当前 Payout（赔率）、Chance（中奖率）与 Potential win（可赢金额）。本游戏理论返还率（RTP）约 97%。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '用 − / + 或输入框设定每注金额（USD），拖滑块选好目标线后，点 UNDER 或 OVER 按钮即下注。开点由服务器算出，落定后按结果结算，赢的赔付直接入余额。每局独立，上一局不影响下一局。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳一点：把目标线拖向能赢的一侧，中奖率高但赔率低。\n· 想搏大赔：把目标线拖向另一侧，中奖率低但赔率高。\n· 注意两侧都是「严格不等」，开点正好落在目标线上，UNDER 和 OVER 都不算赢。\n· 娱乐为主，理性游戏。',
+  },
+]
 
 // slider handle: block-face football (white ball, black patches — no star)
 function BallHandle({ size = 24 }) {
@@ -53,6 +74,7 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
   const [numColor, setNumColor] = useState(null) // null | 'win' | 'lose'
   const [proof, setProof] = useState(null)       // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
   const [fairOpen, setFairOpen] = useState(false) // 可验证公平抽屉（批B纯UI）
+  const [rulesOpen, setRulesOpen] = useState(false) // 玩法说明抽屉
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const audioRef = useRef({ ctx: null, bus: null, muted: false })
@@ -385,8 +407,9 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
         {pitchScene}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={DICE.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={DICE.band} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)} venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         {/* ---- roll history strip (mobile only — desktop row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 1 }}>{historyStrip}</div>}

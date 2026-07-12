@@ -8,6 +8,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import HowToPlay from '../components/shell/HowToPlay'
 import ballUrl from '../assets/covers/ball-3d.png'
 import badgeWinUrl from '../assets/shared/badge_win.png'
 import { GAME_BY_ID } from '../gameRegistry'
@@ -23,7 +24,7 @@ const DRAW = 10    // balls drawn per round
 
 // Standard keno paytable for draw-10-of-36, [picks][hits] = multiplier.
 // Multipliers calibrated against the hypergeometric hit distribution
-// (RTP ≈ 85–93% per pick size, matching typical Spribe-style keno).
+// (RTP ≈ 84.3–94.4% per pick size — 超几何精确值, matching typical Spribe-style keno).
 const PAYOUTS = {
   1:  { 1: 3.4 },
   2:  { 2: 13 },
@@ -37,6 +38,25 @@ const PAYOUTS = {
   10: { 5: 3, 6: 25, 7: 150, 8: 2500, 9: 10000, 10: 10000 },
 }
 // 幂等键：优先 crypto.randomUUID，不支持则退化拼接
+
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '球场从 36 个号码（1–36）里，每期无放回开出 10 个中奖球。下注前你先在 6×6 号码盘上选 1 到 10 个号码，开奖后看你选中的号码里命中了几个，命中越多赔得越高。',
+  },
+  {
+    icon: '📊', title: '赔付表',
+    body: '按「你选了几个号 × 命中几个号」查表结算，举几个档位：\n· 选 1 个：命中 1 = 3.4×。\n· 选 2 个：全中 = 13×。\n· 选 5 个：全中 = 450×。\n· 选 10 个：中 5=3× / 中 6=25× / 中 7=150× / 中 8=2500× / 中 9 或 10=10000×。\n顶赔封顶约 10000 倍。选的号越多，冲击高倍的空间越大，但要命中的门槛也越高。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '在号码盘上点选号码（最多 10 个），或点 RANDOM 机选、CLEAR 清空。用 − / + 或输入框设每注金额，选好号后点 BET 开奖，10 个球逐个落下，命中的号码高亮，赔付直接入余额。点「再来一轮」清盘重下。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 选号越少越稳、选号越多越搏大：想赚高倍就多选，想中奖率高就少选。\n· 每期开奖独立，上期号码不影响下期，别追号。\n· 本游戏理论返还率约 84–94%（随选号数不同：选 1 约 94%、选 10 约 84%），属娱乐性质，理性游戏。',
+  },
+]
 
 export default function Keno({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
@@ -53,6 +73,7 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明弹窗
   const audioRef = useRef({ ctx: null, muted: false })
 
   useEffect(() => { audioRef.current.muted = muted }, [muted])
@@ -292,8 +313,9 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
         }} />
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={KENO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={KENO.band} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)} venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         {/* ---- middle zone: flexes to fill the card, board vertically centered ---- */}
         <div style={{

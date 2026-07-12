@@ -7,6 +7,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import ballUrl from '../assets/covers/ball-3d.png'
@@ -27,6 +28,26 @@ const SKIPS_PER_ROUND = 3   // 每局 skip 限次（后端 game/hilo.js SKIPS_PE
 const round2 = x => Math.round(x * 100) / 100
 const pHigh = n => (14 - n) / 13
 const pLow = n => n / 13
+
+// 玩法说明四段（照 DominoDuel 模板）—— 强调 SAME 两向都赢、12.61× 边界
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '桌面翻开一张评分牌，点数 1–13。你押下一张牌比它「更高 HIGH」还是「更低 LOW」，猜中即赢。\n关键：当下一张和当前牌「相同（SAME）」时，HIGH 和 LOW 两个方向都算赢——所以按钮写作「HIGH OR SAME」「LOW OR SAME」，等号两边通吃，永远不会因为出到同号而白输。',
+  },
+  {
+    icon: '📈', title: '倍数与累乘',
+    body: '每一押的倍数 = 0.97 ÷ 猜中概率（理论返还率 RTP = 97%）。当前牌越极端，某个方向越好猜、倍数越低；越难猜、倍数越高。\n例：当前是 13 押 HIGH，只有再出一张 13 才算「相同（SAME）」赢，概率 1/13，倍数约 12.61×；反过来押 LOW 几乎必中，倍数约 0.97×。\n连续猜中时倍数会「逐张累乘」，越滚越高，累乘数以后端结算为准。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '先设好本金，点 BET 开局并翻出第一张牌。之后每一张都可以：\n· 押 HIGH OR SAME / LOW OR SAME —— 猜中累乘、继续；猜错本局结束。\n· ⟲ 跳过（skip）—— 觉得当前牌不好押，可换一张，累乘不清零，但每局跳过次数有限。\n· CASHOUT 兑现 —— 随时锁定当前累乘，把「本金 × 累乘」收进余额，落袋为安。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 当前牌越靠近两端（接近 1 或 13），越有一个方向几乎稳赢，适合稳步累乘。\n· 别忘了「相同（SAME）」两向都赢，中间点数也没有想象中难押。\n· 累乘越高越诱人，但猜错就归零，见好就收、及时 CASHOUT。\n· 本游戏理论返还率约 97%，属娱乐性质，理性游戏。',
+  },
+]
 
 // flat block-style football jersey: body + sleeves + collar, deep green,
 // big squad number (1–13) on the chest
@@ -156,6 +177,7 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // fake feed rows (display only)
   const [proof, setProof] = useState(null)     // 最近一局：{ commitHash, serverSeed, clientSeed } 供玩家自行验证
   const [fairOpen, setFairOpen] = useState(false)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明弹窗
   const [toastMsg, setToastMsg] = useState('')
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
@@ -488,8 +510,9 @@ export default function HiLo({ serverBalance, setServerBalance, playerToken, onL
         {floatField}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={HILO.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={HILO.band} onBack={onBack} onFairness={() => setFairOpen(true)} onHowTo={() => setRulesOpen(true)} />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)} venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         {/* ---- upper region (mobile only — desktop 34px row has it) ---- */}
         {!isDesk && <div style={{ padding: '12px 12px 0', position: 'relative', zIndex: 1 }}>{historyStrip}</div>}

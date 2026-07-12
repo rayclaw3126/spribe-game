@@ -9,6 +9,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 
@@ -46,6 +47,25 @@ const CHIPS = [
 const SPIN_MS = 3500
 const SINGLE_MULT = 11.4
 const OUTSIDE_MULT = 1.9
+
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '迷你球队轮盘只有 1–12 共 12 个号，每个号对应一位王牌球星。下注截止后转盘旋转，最终开出唯一 1 个中奖号，命中你所押盘口即赢。每盘独立开奖，上盘不影响下盘。',
+  },
+  {
+    icon: '📊', title: '盘口与赔率',
+    body: '· 单号：直接押 1–12 中的某个号，命中赔 11.4 倍。\n· 红 / 黑：红队与黑队是固定分组，不等于奇偶——红号 = {1,3,5,8,10,12}，黑号 = 其余 {2,4,6,7,9,11}，命中赔 1.9 倍。\n· 单 / 双（奇偶）：按号码本身奇偶判定，命中赔 1.9 倍。\n· 半区 1-6 / 7-12：开出号落在所押半区即中，赔 1.9 倍。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '点筹码设每注金额，再点号码或盘口格下注，可同时押多个号、多个盘口。下注即扣本金。开出号后逐个盘口结算，命中派彩 = 本金 × 该盘口倍数，直接入余额。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想搏大赔押单号（11.4×，命中率 1/12）；想中奖率高押红黑 / 单双 / 半区（约一半，1.9×）。\n· 记牢红黑是固定集合而非奇偶：红={1,3,5,8,10,12}，别把红当奇数。\n· 可多号多盘口组合下注分散风险，理性游戏、量力而行。',
+  },
+]
 
 const rad = d => (d * Math.PI) / 180
 function sectorPath(i, r = R) {
@@ -97,6 +117,7 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
 
   const balanceRef = useRef(serverBalance)
   const betsRef = useRef(bets)
@@ -336,8 +357,9 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
       }}>
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={ROULETTE.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={ROULETTE.band} onBack={onBack} onFairness={() => setFairOpen(true)} onHowTo={() => setRulesOpen(true)} />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)} venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 16 : 26, alignItems: isMobile ? 'center' : 'flex-start', position: 'relative' }}>
           {/* cash-out style toast for wins */}

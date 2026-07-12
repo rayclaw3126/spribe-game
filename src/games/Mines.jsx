@@ -8,6 +8,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
@@ -39,6 +40,25 @@ function calcMultiplier(gems, mines) {
 }
 
 const MINE_COUNTS = Array.from({ length: 24 }, (_, i) => i + 1)   // Defenders 1–24
+
+const RULES = [
+  {
+    icon: '⚽', title: '怎么玩',
+    body: '球场是 5×5 共 25 个格子，开局前先选「防守球员」数量（1–24，默认 3），其余格子都是安全的推进点。开始后逐个点开格子：点到安全格就带球突破成功、倍数上涨；点到防守球员（相当于扫雷里的雷）就被抢断，本局输光。',
+  },
+  {
+    icon: '📈', title: '倍数与风险',
+    body: '每揭开一个安全格，倍数按超几何概率逐步累乘，越往后每一步涨得越多。防守球员越多，每步倍数越高，但踩到抢断的概率也越大——高风险高回报。返还率 (RTP) 约 97%，倍数为全精度计算，界面只显示两位小数。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '在底部输入下注金额（USD），用 − / + 调整，点「▷ BET」开始本局。开局后随时可点「CASH OUT 兑现」锁定当前累乘倍数、把奖金入袋落地；也可用 RANDOM 随机点一格，或打开 Auto Game 自动逐格推进。若把全部安全格揭满，则自动满盘结算获胜。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 想稳一点就少选防守球员、见好就收早点兑现；想搏大倍数再加防守球员、多揭几格。\n· 每局的防守球员位置由服务器种子决定，可在「可验证公平」里用 serverSeed/nonce 自行复算校验，未开局前谁也不知道抢断在哪。\n· 本游戏属娱乐性质，理性游戏，量力而为。',
+  },
+]
 
 // white block-face football (opened-safe cell icon)
 function Football({ size = 22, tone = '#ffffff', ink = '#3a2c00' }) {
@@ -88,6 +108,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
   const [cashedOut, setCashedOut] = useState(false)
   const [proof, setProof] = useState(null)      // 最近一局：{ serverSeed, commitHash } 供玩家自行验证
   const [fairOpen, setFairOpen] = useState(false)
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明弹窗
   const [toastMsg, setToastMsg] = useState('')
   const [, setShaking] = useState(false)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
@@ -370,8 +391,9 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
         {pitchGlow}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={MINES.band} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={MINES.band} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)} venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         {/* ---- middle zone: flexes to fill the card, keeps the grid group as
              the vertical visual center; leftover space is absorbed here ---- */}

@@ -9,6 +9,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import SeedFairness from '../components/shell/SeedFairness'
+import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import flameUrl from '../assets/shared/flame_tier_sm.png'
@@ -61,6 +62,25 @@ const SPRING_KICK = 1.15
 
 const G = GAME_BY_ID['StreakRoll']
 
+const RULES = [
+  {
+    icon: '🎯', title: '怎么玩',
+    body: '转盘由一长条彩色号码带组成，每格是三种颜色之一：红(RED) / 黑(BLACK) / 王牌(FIRE 火焰)。你先押其中一种颜色，然后开转，转盘绕行后停在某一格，就按该格的颜色结算——押中该色即获胜，按对应倍数赔付。',
+  },
+  {
+    icon: '📊', title: '两档赔率',
+    body: '游戏有两档模式，切换「High risk mode」即换一套号码分布与赔率：\n· 普通档(normal)：红 2.03× / 黑 1.9× / 王牌 30.4×。红黑格数接近，王牌极稀有，故王牌赔率最高。\n· 高倍档(high)：红 2.53× / 黑 1.9× / 王牌 7.6×。王牌格变多、更易命中，赔率随之降低，红则相应升高。\n倍数 = RTP × 号码带长度 ÷ 该色格数，两档理论返还率均约 95%。',
+  },
+  {
+    icon: '🎰', title: '如何下注',
+    body: '① 选档：点「High risk mode」在普通/高倍之间切换，赔率按钮会即时更新。\n② 选色并下注：用 −/+ 或输入框设好每注金额，点 RED / FIRE / BLACK 三个按钮之一即以该金额押注该色并开转。\n③ 转：转盘绕行 2–4 圈后落格，命中金框高亮结算，赔付直接入余额。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 求稳押红/黑，中奖率高、赔率低；求大赔押王牌(FIRE)，稀有但一击回报可观。\n· 普通档王牌高达 30.4×但极难中；高倍档王牌只 7.6×却好中得多——按你偏好的风险选档。\n· 每局独立开奖，上一局结果不影响下一局。本游戏属娱乐性质，理性游戏。',
+  },
+]
+
 export default function StreakRoll({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const [bet, setBet] = useState(10)
@@ -79,6 +99,7 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
   const [lossFlash, setLossFlash] = useState(false)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明弹窗
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
   const busyRef = useRef(false)
   const toastIdRef = useRef(0)
@@ -430,8 +451,9 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
         {speedLines}
 
         {/* ---- top bar（共享件：名 pill 下拉 + ?/音频钮；砍 DEMO/余额/HowTo pill）---- */}
-        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={HOTLINE.bar} onBack={onBack} onFairness={() => setFairOpen(true)} />
+        <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName} band={HOTLINE.bar} onBack={onBack} onFairness={() => setFairOpen(true)} onHowTo={() => setRulesOpen(true)} />
         <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)} venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
         <style>{`
           @keyframes srParticle { from { transform: translate(0,0); opacity:1 } to { transform: translate(var(--tx), var(--ty)); opacity:0 } }
