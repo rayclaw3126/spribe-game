@@ -1,19 +1,39 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
-import { COLORS, LAYOUT } from '../components/shell/tokens'
+import { COLORS, RADIUS, LAYOUT } from '../components/shell/tokens'
 import RoundHistoryBar from '../components/shell/RoundHistoryBar'
 import BetPanel from '../components/shell/BetPanel'
 import { createArenaFx, drawArenaFx, drawWaiting, makeFeedBots } from '../components/shell/arenaFx'
 import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
 import ballUrl from '../assets/covers/ball-3d.png'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 
 const GREEN = '#16C784'
 const HISTORY_SEED = [1.42, 2.81, 1.06, 5.24, 1.88, 3.37, 9.12, 1.19, 2.05, 4.63]
+
+const RULES = [
+  {
+    icon: '🚀', title: '怎么玩',
+    body: '每局倍率从 1.00× 起飞，一路向上攀升，并在某个随机点「崩盘」。开球前下注，飞行途中随时点「兑现」锁定当前倍率×本金的收益——只要在崩盘前兑现就赢，被崩盘追上还没兑现就输掉本金。',
+  },
+  {
+    icon: '📈', title: '倍率与崩盘',
+    body: '崩盘点由服务器在开局前就用可验证公平算法定好（下注阶段只给承诺哈希，崩盘后揭晓种子，可自行 sha256 校验）。倍率越高越晚兑现，赢得越多，但被崩盘截断的风险也越大。崩盘可能低至 1.00×。',
+  },
+  {
+    icon: '💰', title: '随时兑现',
+    body: '飞行中点「兑现」即按当前倍率结算，收益 = 本金 × 兑现倍率，立即入余额。也可设自动兑现倍率，到点自动收手。每局一注，结算只认服务器返回的余额。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 稳一点：低倍（1.3–2×）早兑现，命中率高。\n· 搏大赔：让它多飞，但崩盘随机、不可预测，量力而行。\n· 崩盘点开局即定、前端无法预知，属娱乐性质，理性游戏。',
+  },
+]
 // Betting window — matches the server's aviatorHub.js BETTING_MS. The server
 // is the source of truth (waitMs on every `betting` message); this constant
 // is only the fallback/default used before the first message arrives.
@@ -45,7 +65,7 @@ function makePanel() {
   }
 }
 
-export default function Aviator({ serverBalance, setServerBalance, playerToken, onLogout }) {
+export default function Aviator({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const canvasRef = useRef(null)
@@ -93,8 +113,8 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
   const [toasts, setToasts] = useState([])   // cash-out toasts (display only)
   const toastIdRef = useRef(0)
   const [online, setOnline] = useState(() => Math.floor(rand(820, 980)))
-  const [muted, setMuted] = useState(false)
-  const [bgmOn, toggleBgm] = useBgm()
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [message, setMessage] = useState('')
   // 公平校验字段：commitHash/clientSeed 下注阶段就有，serverSeed 崩盘 reveal 后才有。
   const [roundMeta, setRoundMeta] = useState({ roundId: null, nonce: null, clientSeed: '', commitHash: '' })
@@ -819,6 +839,18 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
             100% { transform: scale(1); }
           }
         `}</style>
+
+        {/* 共享顶栏（PC 单行 / 手机两行自适应；← 大厅 + 名 + 余额 + ?/音乐/静音）
+            ⚖ 不接：Aviator 公平为共享局 inline commit-reveal 角标（见下方），无抽屉可开 */}
+        <GameTopBar
+          balance={serverBalance ?? 0}
+          venue="Breakaway"
+          onBack={onBack}
+          onHowTo={() => setRulesOpen(true)}
+        />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+          venue="Breakaway" title="Breakaway 玩法说明" sections={RULES} />
+
         {isDesk && (
           <div style={{
             height: LAYOUT.demoBarH, flex: '0 0 auto',
@@ -829,7 +861,7 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
             DEMO MODE
           </div>
         )}
-        {!isDesk && <RoundHistoryBar rounds={history} />}
+        <RoundHistoryBar rounds={history} />
         <div style={{
           position: 'relative',
           animation: phase === 'crashed' ? 'bkShake 0.4s ease' : 'none',
@@ -874,43 +906,7 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
             </div>
           )}
 
-          {/* BGM toggle — canvas top-right (left of mute) */}
-          <button
-            type="button"
-            onClick={toggleBgm}
-            style={{
-              position: 'absolute', top: 10, right: 58,
-              width: 40,
-              height: 40,
-              borderRadius: '50%',
-              background: bgmOn ? 'rgba(22,199,132,0.18)' : 'rgba(26,34,48,0.85)',
-              color: bgmOn ? GREEN : '#7d8a99',
-              border: `1px solid ${bgmOn ? 'rgba(22,199,132,0.5)' : '#232c39'}`,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}
-            title={bgmOn ? '关闭背景音乐' : '开启背景音乐'}
-          >
-            <MusicNoteIcon on={bgmOn} size={18} />
-          </button>
-
-          {/* Mute — canvas top-right */}
-          <button
-            type="button"
-            onClick={() => setMuted(v => !v)}
-            style={{
-              position: 'absolute', top: 10, right: 10,
-              width: 40,
-              height: 40,
-              borderRadius: '50%',
-              background: 'rgba(26,34,48,0.85)',
-              color: muted ? '#7d8a99' : GREEN,
-              border: '1px solid #232c39',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}
-            title={muted ? '取消静音' : '静音'}
-          >
-            <SpeakerIcon on={!muted} size={18} />
-          </button>
+          {/* 音乐/静音已并入 GameTopBar 内建钮（顶栏右侧），此处不再浮动挂钮 */}
 
           {/* Big multiplier + status — centered overlay. Hidden while betting:
               the canvas waiting bay (ball + 等待下一局 + progress) owns that phase. */}
@@ -974,38 +970,14 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
         background: COLORS.bg,
       }}>
-        {/* a. full-width in-game header: name left, balance + 退出登录 right */}
-        <div style={{
-          height: LAYOUT.headerH, flex: '0 0 auto',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 16px', background: COLORS.panel,
-          borderBottom: `1px solid ${COLORS.border}`,
-        }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Breakaway</strong>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-              {money(serverBalance ?? 0)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
-            </span>
-            {onLogout && (
-              <button type="button" onClick={onLogout} style={{
-                background: 'none', color: COLORS.textMuted, fontSize: 12, fontWeight: 700,
-                border: `1px solid ${COLORS.border}`, borderRadius: 999, padding: '5px 12px',
-              }}>退出登录</button>
-            )}
-          </div>
-        </div>
-
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           {/* b. bet feed — 400px, full height, edge-flush, internal scroll */}
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={displayPlayers} myBets={myBets} online={online} fill />
           </div>
 
-          {/* c. right column: history row → arena card → bottom bay */}
+          {/* c. right column: arena card（含 GameTopBar+历史条）→ bottom bay */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
-            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
-              <RoundHistoryBar rounds={history} />
-            </div>
             <div style={{ flex: 1, minHeight: 0 }}>
               {arena}
             </div>
@@ -1030,17 +1002,6 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
   // ---- stacked layout (<1024): unchanged mobile arrangement ----
   return (
     <GameLayout title="Breakaway" color={GREEN}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <span style={{ color: '#8a97a6', fontSize: 13, fontWeight: 700 }}>
-          余额 ${money(serverBalance ?? 0)}
-        </span>
-        {onLogout && (
-          <button type="button" onClick={onLogout} style={{
-            background: 'none', color: '#8a97a6', fontSize: 12, fontWeight: 700,
-            border: '1px solid #232c39', borderRadius: 999, padding: '5px 12px',
-          }}>退出登录</button>
-        )}
-      </div>
       {arena}
       <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bay}</div>
       <div style={{ marginTop: 14 }}>

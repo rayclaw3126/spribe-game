@@ -8,8 +8,9 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
-import { useBgm } from '../components/shell/bgmManager'
-import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
+import { useSfxMuted } from '../components/shell/bgmManager'
+import GameTopBar from '../components/shell/GameTopBar'
+import HowToPlay from '../components/shell/HowToPlay'
 
 // Momentum —— 实时 crash 随机游走（逐柱 700ms），第 21 卡（收官）。
 // 全服务器权威：连 /ws/momentum，走势线逐柱用后端广播的 x（不本地 Math.random 走），
@@ -18,6 +19,25 @@ import { MusicNoteIcon, SpeakerIcon } from '../components/shell/AudioIcons'
 // 本地可用 game/momentum.js 的 walkPath 重算整条 31 柱路径校验。
 const BETTING_MS = 5000        // 对齐后端 betting 窗口
 const MAX_BARS = 31            // 封顶 31 柱
+
+const RULES = [
+  {
+    icon: '📊', title: '怎么玩',
+    body: '每局一条随机走势线，逐柱（每 700ms 一根）实时展开，走势值 X 随之上下波动。开球前下注，走势途中随时点「兑现」，按当前柱的 X 结算收益（本金 × X）。走势收官或跌破前没兑现，即按最终结果结算。',
+  },
+  {
+    icon: '📈', title: '走势与崩盘',
+    body: 'X 会涨也会跌，可能跌破 1.00× 甚至崩到接近 0。逐柱由服务器权威广播（前端不本地随机、也拿不到未来柱），可验证公平：betting 给承诺哈希，收官揭晓 serverSeed，本地可用 walkPath 重算 31 柱路径校验。',
+  },
+  {
+    icon: '💰', title: '随时兑现',
+    body: '飞行中点「兑现」即按服务端当前柱的 X 锁定收益，立刻入余额；也可设自动兑现倍率到点自动收。每局一注，X 与结算全部以后端为准（前端不上报 X）。',
+  },
+  {
+    icon: '💡', title: '小技巧',
+    body: '· 长期期望 E[F] ≈ 0.97（理论返还率约 97%），属娱乐性质。\n· 早兑现稳、命中率高；贪高柱风险大，可能被跌破/崩盘吃掉本金。\n· 走势由服务器随机、可验证，理性游戏。',
+  },
+]
 const round2 = x => Math.round(x * 100) / 100
 // log height mapping: 0.05 → 4%, 1 → ~50%, 20 → ~94% (防爆表)
 const barH = x => Math.min(94, Math.max(4, 6 + 88 * Math.log(Math.max(x, 0.055) / 0.05) / Math.log(400)))
@@ -39,8 +59,8 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
   const [roundHistory, setRoundHistory] = useState([])
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
   const [toasts, setToasts] = useState([])
-  const [muted, setMuted] = useState(false)
-  const [bgmOn, toggleBgm] = useBgm()
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
+  const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [roundId, setRoundId] = useState(0)
   const [commitHash, setCommitHash] = useState(null)   // betting 承诺（可验证公平）
   const [revealedSeed, setRevealedSeed] = useState(null) // done reveal
@@ -311,7 +331,7 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
   const gameCard = (
       <Panel style={{
         background: `linear-gradient(180deg, ${MOMENTUM.bgTop}, ${MOMENTUM.bgBot})`,
-        borderColor: COLORS.border, padding: isMobile ? 12 : 18, overflow: 'hidden',
+        borderColor: COLORS.border, padding: 0, overflow: 'hidden',
         position: 'relative', minHeight: isMobile ? 360 : 420,
         display: 'flex', flexDirection: 'column',
         ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
@@ -324,9 +344,23 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
         }} />
         <WinToast toasts={toasts} />
 
+        {/* 共享顶栏（PC 单行 / 手机两行自适应；← 大厅 + 名 + 余额 + ?/音乐/静音）
+            ⚖ 不接：Momentum 公平为共享局 inline commit-reveal 角标（见下方），无抽屉可开 */}
+        <GameTopBar
+          balance={balance}
+          venue="Momentum"
+          onBack={onBack}
+          onHowTo={() => setRulesOpen(true)}
+        />
+        <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+          venue="Momentum" title="Momentum 玩法说明" sections={RULES} />
+
+        {/* 游戏区：卡内边距内移到这层，让上方 GameTopBar 贴满卡边 */}
+        <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: isMobile ? 12 : 18 }}>
+
         {/* ⚖ 可验证公平（共享 crash commit-reveal）：betting 显 commitHash 承诺；done reveal serverSeed */}
         <div style={{
-          position: 'absolute', top: isDesk ? 14 : 52, right: 12, zIndex: 2,
+          position: 'absolute', top: isDesk ? 44 : 52, right: 12, zIndex: 2,
           padding: '3px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.35)',
           border: '1px solid rgba(255,255,255,0.14)', maxWidth: isMobile ? 130 : 190,
         }} title={revealedSeed ? `serverSeed(reveal): ${revealedSeed}` : `commitHash: ${commitHash || ''}`}>
@@ -343,26 +377,13 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
           }} onClick={() => setNetErr(null)}>{netErr}</div>
         )}
 
-        {/* audio toggles — card top-right */}
-        <button type="button" onClick={toggleBgm} title={bgmOn ? '关闭背景音乐' : '开启背景音乐'} style={{
-          position: 'absolute', top: 10, right: 52, zIndex: 3, width: 32, height: 32, borderRadius: '50%',
-          background: bgmOn ? 'rgba(53,208,127,0.2)' : 'rgba(0,0,0,0.35)',
-          color: bgmOn ? COLORS.white : COLORS.textMuted,
-          border: `1px solid rgba(255,255,255,${bgmOn ? 0.5 : 0.25})`, cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><MusicNoteIcon on={bgmOn} size={16} /></button>
-        <button type="button" onClick={() => setMuted(v => !v)} title={muted ? '取消静音' : '静音'} style={{
-          position: 'absolute', top: 10, right: 12, zIndex: 3, width: 32, height: 32, borderRadius: '50%',
-          background: 'rgba(0,0,0,0.35)', color: muted ? COLORS.textMuted : COLORS.white,
-          border: '1px solid rgba(255,255,255,0.25)', cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}><SpeakerIcon on={!muted} size={16} /></button>
+        {/* 音乐/静音已并入 GameTopBar 内建钮（顶栏右侧），此处不再浮动挂钮 */}
 
-        {!isDesk && <div style={{ position: 'relative', zIndex: 1, marginBottom: 10 }}>{historyStrip}</div>}
+        <div style={{ position: 'relative', zIndex: 1, marginBottom: 10 }}>{historyStrip}</div>
 
         {/* last-round range badge */}
         <div style={{
-          position: 'absolute', top: isDesk ? 14 : 52, left: 14, zIndex: 1,
+          position: 'absolute', top: isDesk ? 44 : 52, left: 14, zIndex: 1,
           padding: '3px 10px', borderRadius: 6, background: MOMENTUM.badgeBg,
           display: 'inline-flex', gap: 8, alignItems: 'center',
         }}>
@@ -443,6 +464,7 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
             }}>{m}</span>
           ))}
         </div>
+        </div>{/* /游戏区 contentWrapper */}
       </Panel>
   )
 
@@ -473,26 +495,11 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
         background: COLORS.bg,
       }}>
-        <div style={{
-          height: LAYOUT.headerH, flex: '0 0 auto',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 16px', background: COLORS.panel,
-          borderBottom: `1px solid ${COLORS.border}`,
-        }}>
-          <strong style={{ color: COLORS.text, fontSize: 15, fontFamily: "'Space Grotesk', sans-serif" }}>Momentum</strong>
-          <span style={{ color: COLORS.green, fontSize: 15, fontWeight: 900 }}>
-            {Number(balance ?? 0).toFixed(2)} <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
-          </span>
-        </div>
-
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
-            <div style={{ height: LAYOUT.historyH, flex: '0 0 auto', overflow: 'hidden' }}>
-              {historyStrip}
-            </div>
             <div style={{ flex: 1, minHeight: 0 }}>
               {gameCard}
             </div>
