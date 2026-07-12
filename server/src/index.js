@@ -187,8 +187,9 @@ server.on('upgrade', (req, socket, head) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`spribe-server 已启动，监听端口 ${PORT}`);
+// 默认 0.0.0.0（dev/现 prod 行为不变）；prod 可用 HOST=127.0.0.1 收口到本机（配反代）。
+server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
+  console.log(`spribe-server 已启动，监听 ${process.env.HOST || '0.0.0.0'}:${PORT}`);
   console.log(`WebSocket 实时通道已就绪：ws://localhost:${PORT}/ws/aviator`);
   console.log(`Momentum 实时通道已就绪：ws://localhost:${PORT}/ws/momentum`);
 });
