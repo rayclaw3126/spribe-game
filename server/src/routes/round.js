@@ -2991,8 +2991,9 @@ function safeResultForView(game, status, result) {
 // GET /round/history/:game —— 9 款轮次彩「开奖历史」（公开开奖结果，供顶栏历史抽屉）
 // requireAuth（登录即可，不限 type）；game 白名单防注入/枚举其它款。
 // 只出 settled 且 round_no 非空的局；keyset cursor（id < cursor）+ limit(1–50，默认 20)。
-// 只返 {id, roundNo, drawResult, createdAt} —— 严禁带任何注单/资金/种子字段
-// （bet_amount / payout / player_id / server_seed 一律不出）。
+// 返 {id, roundNo, drawResult, serverSeedHash, clientSeed, serverSeed, nonce, createdAt}
+// —— settled 即已揭晓，serverSeed 明文可出（供行内 commit-reveal 验证）；nonce 未落库返 null。
+// 严禁带任何注单/资金字段（bet_amount / payout / player_id 一律不出）。
 // 两段路径，不与下方单段 /:id 冲突；置于其前更稳。
 // ------------------------------------------------------------------
 const HISTORY_GAMES = new Set([
@@ -3009,17 +3010,24 @@ router.get('/history/:game', requireAuth, async (req, res, next) => {
     const limit = Number.isFinite(rawLimit) ? Math.min(50, Math.max(1, rawLimit)) : 20;
     const cursor = /^\d+$/.test(String(req.query.cursor ?? '')) ? String(req.query.cursor) : null;
     const result = await query(
-      `SELECT id, round_no, result, created_at
+      `SELECT id, round_no, result, result_hash, client_seed, server_seed, created_at
          FROM rounds
         WHERE game = $1 AND status = 'settled' AND round_no IS NOT NULL
           AND ($2::bigint IS NULL OR id < $2)
         ORDER BY id DESC LIMIT $3`,
       [game, cursor, limit],
     );
+    // settled 局 = 已揭晓，可出 server_seed 明文（照 GET /:id 的 settled 白名单口径）+ 承诺/公开种子，
+    // 供前端行内 commit-reveal 验证（sha256(serverSeed)==serverSeedHash）。禁出任何注单/资金字段。
+    // nonce：roundHub 不落库（rounds 无 nonce 列、result 只存 drawResult），历史无法回取 → null。
     const items = result.rows.map((r) => ({
       id: r.id,
       roundNo: r.round_no,
       drawResult: r.result?.drawResult ?? null,
+      serverSeedHash: r.result_hash,
+      clientSeed: r.client_seed,
+      serverSeed: r.server_seed,
+      nonce: null,
       createdAt: r.created_at,
     }));
     const nextCursor = items.length === limit ? items[items.length - 1].id : null;

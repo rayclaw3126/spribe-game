@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import HowToPlay from '../components/shell/HowToPlay'
 import HistoryDrawer from '../components/HistoryDrawer'
+import CommitRevealFairness from '../components/CommitRevealFairness'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
@@ -510,6 +511,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
 
   const [bet, setBet] = useState(10)
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
+  const [fairOpen, setFairOpen] = useState(false)   // 本期可验证公平抽屉（共享局 commit-reveal）
   const [historyOpen, setHistoryOpen] = useState(false)   // 开奖历史抽屉
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
@@ -836,7 +838,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         roundId={room.roundNo || '连接中…'}
         phaseChip={phaseChipNode}
         onBack={onBack}
-        onHowTo={() => setRulesOpen(true)} onHistory={() => setHistoryOpen(true)}
+        onHowTo={() => setRulesOpen(true)} onHistory={() => setHistoryOpen(true)} onFairness={() => setFairOpen(true)}
       />
       {/* 断线重连提示（hook 自动指数退避重连；恢复后 sync 补相位） */}
       {!room.connected && room.roundNo && (
@@ -1213,7 +1215,8 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
           </div>
         </div>
       </div>
-      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} />
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setHistoryOpen(true)} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>

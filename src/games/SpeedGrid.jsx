@@ -10,6 +10,7 @@ import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import HowToPlay from '../components/shell/HowToPlay'
 import HistoryDrawer from '../components/HistoryDrawer'
+import CommitRevealFairness from '../components/CommitRevealFairness'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
@@ -19,8 +20,8 @@ import carSpritesImg from '../assets/speedgrid/car_sprites.png'
 // #43 单2：轮次节奏改「服务器排期器统一开奖」——相位/期号/倒计时/开奖/结算全读 useRoundRoom（/ws/rounds）。
 //   本地不再有相位 setInterval / 本地 roundNo / 伪期号；下注 betting 相位内即时 POST 挂当期共享局，
 //   收 drawn 消息 → drawResult 进冲线舞台动画（pendingRef 只读表演铁律不变）→ 演完若有注用
-//   settleInfo.balanceAfter 回写余额，无注只翻新期。⚖ 公平旧组件是 per-player 抽屉形态，与本期
-//   共享 commit-reveal 不兼容，暂隐藏（见提交说明）。
+//   settleInfo.balanceAfter 回写余额，无注只翻新期。⚖ 公平走 CommitRevealFairness 抽屉（共享局
+//   commit-reveal 形态，读 useRoundRoom.commit：betting 显承诺 hash，drawn reveal serverSeed 自动比对）。
 // X3：drawing 相位冲线舞台（6 赛道车群摆动互有领先 → 冠军末段脱出 → 冲线定格
 //     → 冠军车号大牌弹出）+ SFX（引擎轰鸣渐强/冲线哨/胜队短号角）；引擎/结算零改动。
 //     sprite 四车 = 蓝/红/金/绿涂装（资产无黑车，黑队用绿车 canvas 压暗滤镜代）。
@@ -383,6 +384,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
 
   const [bet, setBet] = useState(10)
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
+  const [fairOpen, setFairOpen] = useState(false)   // 本期可验证公平抽屉（共享局 commit-reveal）
   const [historyOpen, setHistoryOpen] = useState(false)   // 开奖历史抽屉
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
@@ -707,7 +709,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     <>
       <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
         roundId={room.roundNo || '连接中…'}
-        phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onHistory={() => setHistoryOpen(true)} />
+        phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onHistory={() => setHistoryOpen(true)} onFairness={() => setFairOpen(true)} />
       {/* 断线重连提示（hook 自动指数退避重连；恢复后 sync 补相位） */}
       {!room.connected && room.roundNo && (
         <div style={{
@@ -1003,7 +1005,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
           </div>
         </div>
       </div>
-      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} />
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setHistoryOpen(true)} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
