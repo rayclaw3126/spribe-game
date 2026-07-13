@@ -10,6 +10,7 @@ import WinToast from '../components/shell/WinToast'
 import ballUrl from '../assets/covers/ball-3d.png'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import CommitRevealFairness from '../components/CommitRevealFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import bayBgUrl from '../assets/shared/bay_bg.png'
 import { GAME_BY_ID } from '../gameRegistry'
@@ -123,6 +124,7 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
   // 公平校验字段：commitHash/clientSeed 下注阶段就有，serverSeed 崩盘 reveal 后才有。
   const [roundMeta, setRoundMeta] = useState({ roundId: null, nonce: null, clientSeed: '', commitHash: '' })
   const [serverSeedReveal, setServerSeedReveal] = useState(null)
+  const [fairOpen, setFairOpen] = useState(false)   // 点角标 → 展开本期可验证公平抽屉
   // 连接状态：connecting | open | reconnecting | closed —— 纯 UI 提示，不驱动相位。
   const [connStatus, setConnStatus] = useState('connecting')
 
@@ -877,27 +879,30 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
 
           {/* 公平校验角标 —— betting/flying 显 commitHash，crashed 后显 reveal 的种子 */}
           {(phase === 'betting' || phase === 'flying') && roundMeta.commitHash && (
-            <div style={{
-              position: 'absolute', left: 10, top: 10,
+            <div onClick={() => setFairOpen(true)} title="点击查看本期可验证公平" style={{
+              position: 'absolute', left: 10, top: 10, cursor: 'pointer',
               fontSize: 10, color: '#7d8a99', background: 'rgba(10,17,25,0.72)',
               padding: '4px 8px', borderRadius: 8, maxWidth: 210,
               fontFamily: 'monospace', letterSpacing: 0.3, lineHeight: 1.5,
             }}>
-              <span style={{ color: '#5DCAA5', fontWeight: 700 }}>可验证公平</span>{' '}
+              <span style={{ color: '#5DCAA5', fontWeight: 700 }}>⚖ 可验证公平</span>{' '}
               哈希 {roundMeta.commitHash.slice(0, 10)}…
             </div>
           )}
           {phase === 'crashed' && serverSeedReveal && (
-            <div style={{
-              position: 'absolute', left: 10, top: 10,
+            <div onClick={() => setFairOpen(true)} title="点击查看本期可验证公平" style={{
+              position: 'absolute', left: 10, top: 10, cursor: 'pointer',
               fontSize: 10, color: '#7d8a99', background: 'rgba(10,17,25,0.72)',
               padding: '4px 8px', borderRadius: 8, maxWidth: 240,
               fontFamily: 'monospace', letterSpacing: 0.3, lineHeight: 1.5,
             }}>
-              <span style={{ color: '#5DCAA5', fontWeight: 700 }}>已开奖种子</span>{' '}
-              {serverSeedReveal.slice(0, 10)}…（可自行 sha256 校验哈希）
+              <span style={{ color: '#5DCAA5', fontWeight: 700 }}>⚖ 已开奖种子</span>{' '}
+              {serverSeedReveal.slice(0, 10)}…（点开自动校验）
             </div>
           )}
+          <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)}
+            venue={G.venue ?? G.displayName}
+            round={{ roundNo: roundMeta.roundId, commitHash: roundMeta.commitHash, clientSeed: roundMeta.clientSeed, nonce: roundMeta.nonce, serverSeed: serverSeedReveal }} />
 
           {/* 音乐/静音已并入 GameTopBar 内建钮（顶栏右侧），此处不再浮动挂钮 */}
 

@@ -10,6 +10,7 @@ import bayBgUrl from '../assets/shared/bay_bg.png'
 import tackleBurstUrl from '../assets/shared/tackle_burst_sm.png'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
+import CommitRevealFairness from '../components/CommitRevealFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
@@ -69,6 +70,9 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
   const [roundId, setRoundId] = useState(0)
   const [commitHash, setCommitHash] = useState(null)   // betting 承诺（可验证公平）
   const [revealedSeed, setRevealedSeed] = useState(null) // done reveal
+  const [fairClientSeed, setFairClientSeed] = useState('')  // 本期 clientSeed（betting/done 广播带）
+  const [fairNonce, setFairNonce] = useState(null)          // 本期 nonce
+  const [fairOpen, setFairOpen] = useState(false)           // 点角标 → 展开本期可验证公平抽屉
   const [netErr, setNetErr] = useState(null)
 
   const phaseRef = useRef('betting')
@@ -155,7 +159,7 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
     barsRef.current = []; setBars([]); setBusted(false)
     playerBetRef.current = null; setPlayerBet(null)
     roundIdRef.current = msg.roundId; setRoundId(msg.roundId)
-    setCommitHash(msg.commitHash); setRevealedSeed(null)
+    setCommitHash(msg.commitHash); setRevealedSeed(null); setFairClientSeed(msg.clientSeed || ''); setFairNonce(msg.nonce ?? null)
     setFeedBets(makeFeedBots())
     startCountdown(msg.remainingMs != null ? msg.remainingMs : (msg.waitMs || BETTING_MS))
     // 自动下注：本局 betting 开窗就发（若上一局勾了自动）
@@ -175,7 +179,7 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
     const finalX = Number(msg.finalX)
     const bust = finalX <= 0
     setBusted(bust)
-    setRevealedSeed(msg.serverSeed)   // reveal（可用 walkPath 本地重算校验）
+    setRevealedSeed(msg.serverSeed); setFairClientSeed(msg.clientSeed || ''); setFairNonce(msg.nonce ?? null)   // reveal（可用 walkPath 本地重算校验）
     if (bust) playCrash()
     const xs = [1, ...barsRef.current.map(b => b.x)]
     setLastRange({ min: Math.min(...xs), max: Math.max(...xs) })
@@ -210,12 +214,12 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
     else if (msg.phase === 'running') {
       phaseRef.current = 'running'; setPhase('running')
       roundIdRef.current = msg.roundId; setRoundId(msg.roundId)
-      setCommitHash(msg.commitHash); setRevealedSeed(null)
+      setCommitHash(msg.commitHash); setRevealedSeed(null); setFairClientSeed(msg.clientSeed || ''); setFairNonce(msg.nonce ?? null)
       barsRef.current = (msg.bars || []).map((b, i, arr) => ({ x: b.x, up: b.x >= (i ? arr[i - 1].x : 1) && b.x > 0, barIdx: b.barIdx }))
       setBars(barsRef.current); setBusted(false)
     } else {
       phaseRef.current = 'done'; setPhase('done')
-      setCommitHash(msg.commitHash); setRevealedSeed(msg.serverSeed)
+      setCommitHash(msg.commitHash); setRevealedSeed(msg.serverSeed); setFairClientSeed(msg.clientSeed || ''); setFairNonce(msg.nonce ?? null)
     }
   }
 
@@ -362,17 +366,20 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
         {/* 游戏区：卡内边距内移到这层，让上方 GameTopBar 贴满卡边 */}
         <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: isMobile ? 12 : 18 }}>
 
-        {/* ⚖ 可验证公平（共享 crash commit-reveal）：betting 显 commitHash 承诺；done reveal serverSeed */}
-        <div style={{
-          position: 'absolute', top: isDesk ? 44 : 52, right: 12, zIndex: 2,
+        {/* ⚖ 可验证公平（共享 crash commit-reveal）：betting 显 commitHash 承诺；done reveal serverSeed。点开抽屉 */}
+        <div onClick={() => setFairOpen(true)} title="点击查看本期可验证公平" style={{
+          position: 'absolute', top: isDesk ? 44 : 52, right: 12, zIndex: 2, cursor: 'pointer',
           padding: '3px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.35)',
           border: '1px solid rgba(255,255,255,0.14)', maxWidth: isMobile ? 130 : 190,
-        }} title={revealedSeed ? `serverSeed(reveal): ${revealedSeed}` : `commitHash: ${commitHash || ''}`}>
+        }}>
           <span style={{ color: MOMENTUM.dim, fontSize: 9, fontWeight: 800 }}>⚖ {revealedSeed ? 'seed揭晓' : '承诺'} </span>
           <span style={{ color: revealedSeed ? MOMENTUM.green : MOMENTUM.dim, fontSize: 9, fontWeight: 700, fontFamily: 'monospace' }}>
             {(revealedSeed || commitHash || '……').slice(0, 10)}…
           </span>
         </div>
+        <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)}
+          venue={G.venue ?? G.displayName}
+          round={{ roundNo: roundId, commitHash, clientSeed: fairClientSeed, nonce: fairNonce, serverSeed: revealedSeed }} />
         {netErr && (
           <div style={{
             position: 'absolute', top: isDesk ? 44 : 84, left: '50%', transform: 'translateX(-50%)', zIndex: 4,
