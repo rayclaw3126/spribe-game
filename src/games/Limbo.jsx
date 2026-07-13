@@ -463,7 +463,7 @@ export default function Limbo({ serverBalance, setServerBalance, caps, playerTok
 
   const side = (
         <SideControls
-          bet={bet} target={target} setTarget={applyTarget} maxTarget={maxTarget}
+          bet={bet} target={target} setTarget={applyTarget} maxTarget={maxTarget} cap={cap}
           rolling={rolling} result={result}
           t={t} winChance={winChance} payout={payout}
         />
@@ -484,6 +484,11 @@ export default function Limbo({ serverBalance, setServerBalance, caps, playerTok
             style={{ ...darkChip, flex: '0 0 auto', padding: '6px 10px', borderColor: t === v ? 'rgba(22,199,132,0.5)' : '#243142', color: t === v ? COLOR : '#8a97a6' }}>{v}×</button>
         ))}
       </div>
+      {t >= maxTarget && (
+        <div style={{ fontSize: 12, color: COLORS.textMuted }}>
+          最高 {maxTarget.toLocaleString('en-US', { maximumFractionDigits: 2 })}×·单局封顶 ${Number(cap).toLocaleString('en-US')}
+        </div>
+      )}
       <div style={{
         background: 'rgba(26,34,48,0.9)', border: '1px solid #232c39', borderRadius: 10,
         padding: '8px 10px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8,
@@ -718,7 +723,7 @@ const darkChip = {
   background: '#1a2230', color: '#8a97a6', border: '1.5px solid #243142',
 }
 
-function SideControls({ bet, target, setTarget, maxTarget, rolling, result, t, winChance, payout, fill }) {
+function SideControls({ bet, target, setTarget, maxTarget, cap, rolling, result, t, winChance, payout, fill }) {
   return (
     <Panel style={{
       background: '#101923', borderColor: '#243142', padding: 18,
@@ -738,6 +743,11 @@ function SideControls({ bet, target, setTarget, maxTarget, rolling, result, t, w
               style={{ ...darkChip, borderColor: t === v ? 'rgba(22,199,132,0.5)' : '#243142', color: t === v ? COLOR : '#8a97a6' }}>{v}×</button>
           ))}
         </div>
+        {t >= maxTarget && (
+          <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 8 }}>
+            最高 {maxTarget.toLocaleString('en-US', { maximumFractionDigits: 2 })}×·单局封顶 ${Number(cap).toLocaleString('en-US')}
+          </div>
+        )}
       </div>
       <div style={{ background: '#1a2230', border: '1px solid #232c39', borderRadius: 12, padding: '12px 14px',
         display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>

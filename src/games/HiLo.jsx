@@ -716,6 +716,11 @@ export default function HiLo({ serverBalance, setServerBalance, caps, playerToke
               opacity: busy || bet > (serverBalance ?? 0) || bet < 1 ? 0.55 : 1,
             }}>▷ BET</button>
           )}
+          {phase === 'playing' && bet * cum > cap && (
+            <div style={{ flex: '1 1 100%', textAlign: 'center', fontSize: 12, color: COLORS.textMuted }}>
+              已达最大赔付 ${Number(cap).toLocaleString('en-US')}
+            </div>
+          )}
         </div>
       </Panel>
   )
