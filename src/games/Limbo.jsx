@@ -636,9 +636,9 @@ export default function Limbo({ serverBalance, setServerBalance, caps, playerTok
               {multiplier.toFixed(2)}×
             </div>
             <p style={{ color: '#7d8a99', fontSize: 13, lineHeight: 1.5 }}>
-              {rolling ? 'Odds climbing...' : result
-                ? (isWin ? `Reached ${result.mult.toFixed(2)}× — above your ${t.toFixed(2)}× target!` : `Stopped at ${result.mult.toFixed(2)}× — needed ${t.toFixed(2)}×`)
-                : 'Set target odds, kick off — win if final ≥ your target'}
+              {rolling ? '倍数攀升中…' : result
+                ? (isWin ? `冲到 ${result.mult.toFixed(2)}×，超过目标 ${t.toFixed(2)}×！` : `止步 ${result.mult.toFixed(2)}×，未达目标 ${t.toFixed(2)}×`)
+                : '设定目标倍数开球，终值 ≥ 目标即赢'}
             </p>
           </div>
         </div>

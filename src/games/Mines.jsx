@@ -52,7 +52,7 @@ const RULES = [
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '在底部输入下注金额（USD），用 − / + 调整，点「▷ BET」开始本局。开局后随时可点「CASH OUT 兑现」锁定当前累乘倍数、把奖金入袋落地；也可用 RANDOM 随机点一格，或打开 Auto Game 自动逐格推进。若把全部安全格揭满，则自动满盘结算获胜。',
+    body: '在底部输入下注金额（USD），用 − / + 调整，点「▷ 下注」开始本局。开局后随时可点「兑现」锁定当前累乘倍数、把奖金入袋落地；也可用随机点一格，或打开自动游戏逐格推进。若把全部安全格揭满，则自动满盘结算获胜。',
   },
   {
     icon: '💡', title: '小技巧',
@@ -136,7 +136,7 @@ export default function Mines({ serverBalance, setServerBalance, caps, playerTok
 
   // 赢额提示：一律用后端 data.payout（已钳到 cap），不再本地 bet×mult 估算
   function pushWin(payout) {
-    setWinMsg(`WIN +${round2(Number(payout)).toFixed(2)} USD`)
+    setWinMsg(`赢 +${round2(Number(payout)).toFixed(2)} USD`)
     if (winTimer.current) clearTimeout(winTimer.current)
     winTimer.current = setTimeout(() => setWinMsg(''), 3500)
   }
@@ -525,7 +525,7 @@ export default function Mines({ serverBalance, setServerBalance, caps, playerTok
             color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 1,
             cursor: phase === 'playing' && !busy ? 'pointer' : 'not-allowed',
             opacity: phase === 'playing' && !busy ? 1 : 0.6,
-          }}>RANDOM</button>
+          }}>随机</button>
           <button type="button" disabled={phase !== 'playing' || busy} onClick={randomPick} style={{
             width: 32, height: 32, borderRadius: RADIUS.pill,
             background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.4)',
@@ -548,7 +548,7 @@ export default function Mines({ serverBalance, setServerBalance, caps, playerTok
                 borderRadius: '50%', background: autoOn ? '#083a1b' : '#9aa7b0', transition: 'left 0.15s',
               }} />
             </span>
-            <span style={{ color: autoOn ? COLORS.white : 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 800 }}>Auto Game</span>
+            <span style={{ color: autoOn ? COLORS.white : 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 800 }}>自动游戏</span>
           </button>
         </div>
 
@@ -579,7 +579,7 @@ export default function Mines({ serverBalance, setServerBalance, caps, playerTok
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             textAlign: 'center', lineHeight: 1.2,
           }}>
-            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>投注额</div>
             <input
               value={bet}
               disabled={phase === 'playing'}
@@ -615,7 +615,7 @@ export default function Mines({ serverBalance, setServerBalance, caps, playerTok
               cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1,
               display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
             }}>
-              <span>CASH OUT</span>
+              <span>兑现</span>
               <span style={{ fontSize: 12, opacity: 0.9 }}>{round2(Math.min(bet * currentMult, cap)).toFixed(2)} USD</span>
             </button>
           ) : (
@@ -626,7 +626,7 @@ export default function Mines({ serverBalance, setServerBalance, caps, playerTok
               fontSize: 14, fontWeight: 900, letterSpacing: 1,
               cursor: busy || bet > (serverBalance ?? 0) || bet < 1 ? 'not-allowed' : 'pointer',
               opacity: busy || bet > (serverBalance ?? 0) || bet < 1 ? 0.55 : 1,
-            }}>▷ BET</button>
+            }}>▷ 下注</button>
           )}
           {phase === 'playing' && bet * currentMult > cap && (
             <div style={{ flex: '1 1 100%', textAlign: 'center', fontSize: 12, color: COLORS.textMuted }}>

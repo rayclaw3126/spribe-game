@@ -50,7 +50,7 @@ const RULES = [
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '在号码盘上点选号码（最多 10 个），或点 RANDOM 机选、CLEAR 清空。用 − / + 或输入框设每注金额，选好号后点 BET 开奖，10 个球逐个落下，命中的号码高亮，赔付直接入余额。点「再来一轮」清盘重下。',
+    body: '在号码盘上点选号码（最多 10 个），或点随机机选、CLEAR 清空。用 − / + 或输入框设每注金额，选好号后点下注开奖，10 个球逐个落下，命中的号码高亮，赔付直接入余额。点「再来一轮」清盘重下。',
   },
   {
     icon: '💡', title: '小技巧',
@@ -393,7 +393,7 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
 
           {/* RANDOM / CLEAR */}
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button type="button" onClick={() => quickPick(10)} style={wideBtn(true)}>RANDOM</button>
+            <button type="button" onClick={() => quickPick(10)} style={wideBtn(true)}>随机</button>
             <button type="button" onClick={clearSelection} style={wideBtn(selected.length > 0)}>CLEAR</button>
           </div>
         </div>
@@ -414,7 +414,7 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
             background: KENO.ctrl, border: '1px solid rgba(255,255,255,0.3)',
             textAlign: 'center',
           }}>
-            <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: 700 }}>投注额</div>
             <input
               type="number" min="1" value={bet}
               onChange={e => setBet(Math.max(1, Number(e.target.value)))}
@@ -447,7 +447,7 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
                 opacity: enabled ? 1 : 0.55,
                 transition: 'opacity 0.15s',
               }}>
-                {isDone ? '再来一轮' : '▷ BET'}
+                {isDone ? '再来一轮' : '▷ 下注'}
               </button>
             )
           })()}

@@ -638,7 +638,7 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
             background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
             textAlign: 'center',
           }}>
-            <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: 700 }}>投注额</div>
             <input
               type="number" min="1" value={bet} disabled={rolling}
               onChange={e => setBet(Math.max(1, Number(e.target.value)))}

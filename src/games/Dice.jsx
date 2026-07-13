@@ -569,7 +569,7 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
             textAlign: 'center', lineHeight: 1.2,
             opacity: rolling ? 0.6 : 1,
           }}>
-            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>投注额</div>
             <input
               value={bet}
               disabled={rolling}

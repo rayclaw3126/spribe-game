@@ -42,11 +42,11 @@ const RULES = [
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '设好 Bet 金额与 Field 档位，点 BET 开局。之后每列点一格前进，顶栏与 CASHOUT 按钮实时显示当前可兑现金额（本金 × 累计倍数）。随时点 CASHOUT 兑现锁定收益、结束本局；若一路安全推满第 7 列则触顶，自动按满额派彩。RANDOM 可替你在当前列随机点一格，Auto Game 自动逐列推进。',
+    body: '设好投注额与 Field 档位，点下注开局。之后每列点一格前进，顶栏与兑现按钮实时显示当前可兑现金额（本金 × 累计倍数）。随时点兑现锁定收益、结束本局；若一路安全推满第 7 列则触顶，自动按满额派彩。随机可替你在当前列点一格，自动游戏逐列推进。',
   },
   {
     icon: '💡', title: '小技巧',
-    body: '· 倍数呈指数增长——推得越深收益越猛，但每多推一列都在赌下一格不是炸弹。\n· 保守可选 ▪ 档小步慢跑、见好就收；搏大可上 ▪▪▪ 档，但单列失手概率高达 3/4。\n· 想清楚目标倍数，到点就 CASHOUT，别贪最后一列。理论返还率约 97%，属娱乐性质，理性游戏。',
+    body: '· 倍数呈指数增长——推得越深收益越猛，但每多推一列都在赌下一格不是炸弹。\n· 保守可选 ▪ 档小步慢跑、见好就收；搏大可上 ▪▪▪ 档，但单列失手概率高达 3/4。\n· 想清楚目标倍数，到点就兑现，别贪最后一列。理论返还率约 97%，属娱乐性质，理性游戏。',
   },
 ]
 
@@ -463,7 +463,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
             color: COLORS.white, fontSize: 12, fontWeight: 900, letterSpacing: 1,
             cursor: playing && !revealing ? 'pointer' : 'not-allowed',
             opacity: playing ? 1 : 0.6,
-          }}>RANDOM</button>
+          }}>随机</button>
           <button type="button" disabled={!playing || revealing} onClick={randomPick} style={{
             width: 32, height: 32, borderRadius: RADIUS.pill,
             background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.4)',
@@ -486,7 +486,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
                 borderRadius: '50%', background: autoOn ? '#083a1b' : '#9aa7b0', transition: 'left 0.15s',
               }} />
             </span>
-            <span style={{ color: autoOn ? COLORS.white : 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 800 }}>Auto Game</span>
+            <span style={{ color: autoOn ? COLORS.white : 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 800 }}>自动游戏</span>
           </button>
         </div>
 
@@ -507,7 +507,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
             textAlign: 'center', lineHeight: 1.2,
             opacity: playing ? 0.6 : 1,
           }}>
-            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>投注额</div>
             <input
               value={bet}
               disabled={playing}
@@ -543,7 +543,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
               cursor: revealing ? 'not-allowed' : 'pointer', opacity: revealing ? 0.6 : 1,
               display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
             }}>
-              <span>CASHOUT</span>
+              <span>兑现</span>
               <span style={{ fontSize: 12, opacity: 0.92 }}>{cashable.toFixed(2)} USD</span>
             </button>
           ) : (
@@ -554,7 +554,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
               fontSize: 14, fontWeight: 900, letterSpacing: 1,
               cursor: (bet < 1 || (serverBalance != null && bet > serverBalance)) ? "not-allowed" : "pointer",
               opacity: (bet < 1 || (serverBalance != null && bet > serverBalance)) ? 0.55 : 1,
-            }}>▷ BET</button>
+            }}>▷ 下注</button>
           )}
           {netErr && (
             <div style={{

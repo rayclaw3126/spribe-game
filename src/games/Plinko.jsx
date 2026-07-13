@@ -635,7 +635,7 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             textAlign: 'center', lineHeight: 1.2,
           }}>
-            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>投注额</div>
             <input
               value={bet}
               onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}

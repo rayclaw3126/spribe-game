@@ -41,11 +41,11 @@ const RULES = [
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '先设好本金，点 BET 开局并翻出第一张牌。之后每一张都可以：\n· 押 HIGH OR SAME / LOW OR SAME —— 猜中累乘、继续；猜错本局结束。\n· ⟲ 跳过（skip）—— 觉得当前牌不好押，可换一张，累乘不清零，但每局跳过次数有限。\n· CASHOUT 兑现 —— 随时锁定当前累乘，把「本金 × 累乘」收进余额，落袋为安。',
+    body: '先设好本金，点下注开局并翻出第一张牌。之后每一张都可以：\n· 押 HIGH OR SAME / LOW OR SAME —— 猜中累乘、继续；猜错本局结束。\n· ⟲ 跳过（skip）—— 觉得当前牌不好押，可换一张，累乘不清零，但每局跳过次数有限。\n· 兑现 —— 随时锁定当前累乘，把「本金 × 累乘」收进余额，落袋为安。',
   },
   {
     icon: '💡', title: '小技巧',
-    body: '· 当前牌越靠近两端（接近 1 或 13），越有一个方向几乎稳赢，适合稳步累乘。\n· 别忘了「相同（SAME）」两向都赢，中间点数也没有想象中难押。\n· 累乘越高越诱人，但猜错就归零，见好就收、及时 CASHOUT。\n· 本游戏理论返还率约 97%，属娱乐性质，理性游戏。',
+    body: '· 当前牌越靠近两端（接近 1 或 13），越有一个方向几乎稳赢，适合稳步累乘。\n· 别忘了「相同（SAME）」两向都赢，中间点数也没有想象中难押。\n· 累乘越高越诱人，但猜错就归零，见好就收、及时兑现。\n· 本游戏理论返还率约 97%，属娱乐性质，理性游戏。',
   },
 ]
 
@@ -203,7 +203,7 @@ export default function HiLo({ serverBalance, setServerBalance, caps, playerToke
 
   // 赢额提示：一律用后端 data.payout（已钳到 cap），不再本地 bet×cum 估算
   function pushWin(payout) {
-    setWinMsg(`WIN +${round2(Number(payout)).toFixed(2)} USD`)
+    setWinMsg(`赢 +${round2(Number(payout)).toFixed(2)} USD`)
     if (winTimer.current) clearTimeout(winTimer.current)
     winTimer.current = setTimeout(() => setWinMsg(''), 3500)
   }
@@ -673,7 +673,7 @@ export default function HiLo({ serverBalance, setServerBalance, caps, playerToke
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
             textAlign: 'center', lineHeight: 1.2,
           }}>
-            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>Bet, USD</div>
+            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700 }}>投注额</div>
             <input
               value={bet}
               disabled={phase === 'playing'}
@@ -703,7 +703,7 @@ export default function HiLo({ serverBalance, setServerBalance, caps, playerToke
               cursor: flipping || busy ? 'not-allowed' : 'pointer', opacity: flipping || busy ? 0.6 : 1,
               display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
             }}>
-              <span>CASHOUT</span>
+              <span>兑现</span>
               <span style={{ fontSize: 12, opacity: 0.92 }}>{round2(Math.min(bet * cum, cap)).toFixed(2)} USD</span>
             </button>
           ) : (
@@ -714,7 +714,7 @@ export default function HiLo({ serverBalance, setServerBalance, caps, playerToke
               fontSize: 14, fontWeight: 900, letterSpacing: 1,
               cursor: busy || bet > (serverBalance ?? 0) || bet < 1 ? 'not-allowed' : 'pointer',
               opacity: busy || bet > (serverBalance ?? 0) || bet < 1 ? 0.55 : 1,
-            }}>▷ BET</button>
+            }}>▷ 下注</button>
           )}
           {phase === 'playing' && bet * cum > cap && (
             <div style={{ flex: '1 1 100%', textAlign: 'center', fontSize: 12, color: COLORS.textMuted }}>
