@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { COLORS, RADIUS, DERBY, LAYOUT } from './shell/tokens'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlayerApi } from '../lib/playerApi'
-import { formatDraw, formatDrawDetail } from './drawFormatters'
+import { formatDraw, formatDrawDetail, shortRoundNo } from './drawFormatters'
 
 // 开奖历史抽屉（右侧滑入，照 BillDrawer 骨架）：拉 /round/history/:game 的公开开奖结果。
 // 行 = 期号 + 摘要 + 时间，可点开手风琴展开卡（同时只开一行）：
@@ -140,7 +140,7 @@ function HistoryRow({ it, game, isMobile, expanded, onToggle }) {
       {/* 行头（点击展开） */}
       <div onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 6px', cursor: 'pointer' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>#{it.roundNo}</div>
+          <div title={it.roundNo} style={{ fontSize: 13, fontWeight: 700, color: COLORS.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>#{shortRoundNo(it.roundNo)}</div>
           <div style={{ fontSize: 11, color: COLORS.textFaint, marginTop: 3 }}>
             {pending ? '开奖中 · 种子待揭晓' : fmtTime(it.createdAt)}
           </div>

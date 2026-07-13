@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { COLORS, DERBY, RADIUS, LAYOUT } from './shell/tokens'
 import { useMediaQuery } from '../hooks/useMediaQuery'
+import { shortRoundNo } from './drawFormatters'
 
 // 共享局「本期可验证公平」抽屉 —— 覆盖 crash 2 款（aviator/momentum inline commit-reveal）
 // + 轮次彩 9 款（useRoundRoom.commit）。与 SeedFairness（模型A·逐玩家轮换种子）并列，专供
@@ -116,7 +117,7 @@ export default function CommitRevealFairness({ open, onClose, venue, round, onVi
             <div style={sectionTitle}>🔒 本期承诺（开奖前已固定）</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span style={fieldLabel}>期号 · roundNo</span>
-              <span style={{ fontFamily: MONO, fontSize: 13, fontWeight: 900, color: '#0d2016', background: DERBY.sel, borderRadius: RADIUS.pill, padding: '2px 12px' }}>{roundNo ?? '—'}</span>
+              <span title={roundNo ?? ''} style={{ fontFamily: MONO, fontSize: 13, fontWeight: 900, color: '#0d2016', background: DERBY.sel, borderRadius: RADIUS.pill, padding: '2px 12px' }}>{roundNo == null ? '—' : `#${shortRoundNo(roundNo)}`}</span>
               {nonce != null && (
                 <><span style={{ ...fieldLabel, marginLeft: 8 }}>nonce</span>
                 <span style={{ fontFamily: MONO, fontSize: 13, fontWeight: 800, color: DERBY.text }}>{nonce}</span></>

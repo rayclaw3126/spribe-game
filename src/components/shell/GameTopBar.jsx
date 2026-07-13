@@ -2,6 +2,7 @@ import { COLORS, RADIUS, DERBY, LAYOUT } from './tokens'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { useBgm, useSfxMuted } from './bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from './AudioIcons'
+import { shortRoundNo } from '../drawFormatters'
 
 // 游戏顶栏共享件：
 //   移动（<1024）两行 —— 上行 = ← 大厅 钮 + 右侧 ?/音乐/音效；
@@ -47,8 +48,8 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
         fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap', flex: '0 0 auto',
       }}>{venue}</span>
       {roundId && (
-        <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: isDesk ? 10 : 9.5, fontWeight: 800, whiteSpace: 'nowrap', flex: '0 0 auto' }}>
-          #{roundId}
+        <span title={String(roundId)} style={{ color: 'rgba(255,255,255,0.55)', fontSize: isDesk ? 10 : 9.5, fontWeight: 800, whiteSpace: 'nowrap', flex: '0 0 auto' }}>
+          #{shortRoundNo(roundId)}
         </span>
       )}
     </>
@@ -107,13 +108,17 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
       position: 'relative', zIndex: 5,
     }}>
       {/* 上行（桌面 = 唯一行）：← 大厅 + [桌面并入场馆件+chip] + [桌面 subRow] + 右侧钮组 */}
+      {/* 溢出兜底：subRow 可截断（minWidth:0 overflow hidden），rightBits 不缩（flexShrink:0）——
+          行再挤也是 subRow 特件被截，绝不叠到音乐钮/静音钮上。 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {backBtn}
         {isDesk && venueBits}
         {isDesk && phaseChip}
         <span style={{ marginLeft: 'auto' }} />
-        {isDesk && subRow}
-        {rightBits}
+        {isDesk && subRow && (
+          <div style={{ minWidth: 0, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>{subRow}</div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>{rightBits}</div>
       </div>
       {/* 移动场馆行（venue/subRow 有值才渲染）：场馆名优先左 + chip + subRow 同行拼排 */}
       {!isDesk && (venue || subRow) && (

@@ -1,3 +1,11 @@
+// 期号裁短：SG-YYYYMMDD-NNN → 末段 NNN（供顶栏/抽屉显示 #NNN，完整值留 title）。
+// 三处（GameTopBar / HistoryDrawer / CommitRevealFairness）共用，禁各写各的 split。
+// 无短横（数字 roundId / '连接中…' 占位 / null）时原样返回，不误伤。
+export function shortRoundNo(roundNo) {
+  if (roundNo == null || roundNo === '') return ''
+  return String(roundNo).split('-').pop()
+}
+
 // 开奖历史·摘要 formatter —— key=backendId，输入 /round/history 的 drawResult，输出一行中文摘要串。
 // 字段名严格以 rounds.result.drawResult 真实样本为准（禁猜）。缺字段/空对象兜底空串，防历史抽屉崩。
 //
