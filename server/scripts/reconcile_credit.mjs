@@ -84,20 +84,29 @@ const baselineValues = Object.keys(BASELINE).length
   : '(NULL::bigint, NULL::numeric)';
 
 // —— 检1：逐 agent 快照 == 基线 + 净流水（算术全在 SQL numeric 里做，只把布尔判定带回 JS）——
+// 扫 agents LEFT JOIN credit_lines（不是只扫 credit_lines）：无行 agent credit 视 0（COALESCE），
+// 这样「手工塞 credit_ledger 流水却不建 credit_lines 行」的越权也会被抓（credit=0 但 Σ流水≠0 → FAIL）。
+// 静默过滤：只对「有 credit_lines 行 OR 有 credit_ledger 流水」的 agent 打印/核算——纯零活动 agent
+// （无行且无流水，恒 0==0）跳过，不刷屏。
 const check1Sql = `
   WITH baseline(agent_id, init) AS (VALUES ${baselineValues}),
   flow AS (
-    SELECT cl.agent_id, cl.credit,
+    SELECT a.id AS agent_id,
+           COALESCE(cl.credit, 0) AS credit,
+           (cl.agent_id IS NOT NULL) AS has_row,
            COALESCE(b.init, 0) AS init,
-           COALESCE((SELECT sum(amount) FROM credit_ledger WHERE to_agent   = cl.agent_id), 0) AS sum_in,
-           COALESCE((SELECT sum(amount) FROM credit_ledger WHERE from_agent = cl.agent_id), 0) AS sum_out
-    FROM credit_lines cl
-    LEFT JOIN baseline b ON b.agent_id = cl.agent_id
+           COALESCE((SELECT sum(amount) FROM credit_ledger WHERE to_agent   = a.id), 0) AS sum_in,
+           COALESCE((SELECT sum(amount) FROM credit_ledger WHERE from_agent = a.id), 0) AS sum_out
+    FROM agents a
+    LEFT JOIN credit_lines cl ON cl.agent_id = a.id
+    LEFT JOIN baseline b ON b.agent_id = a.id
   )
   SELECT agent_id, credit, init, sum_in, sum_out,
          (init + sum_in - sum_out) AS expected,
          (credit IS DISTINCT FROM (init + sum_in - sum_out)) AS bad
-  FROM flow ORDER BY agent_id`;
+  FROM flow
+  WHERE has_row OR sum_in <> 0 OR sum_out <> 0        -- 静默过滤：纯零活动 agent 不打印
+  ORDER BY agent_id`;
 
 // —— 检2：上下分双边镜像 count + sum ——
 const check2Sql = `
