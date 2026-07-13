@@ -1,4 +1,4 @@
-// 皮肤配置（唯一来源）。DB 是 LATIN1 存不了中文 → skin 字段存英文代号(code)，前端查表显示中文(label)。
+// skin code 是功能 key（skinColor 查表+选中判定），恒用英文代号；中文显示走 LABEL 映射。禁改中文直存。
 // 主色尽量用现有 token：navy→primary、green→success、gold→warning；purple token 无紫，用仓库已有的紫 #7c3aed。
 import { COLORS } from '../theme/tokens.js'
 
