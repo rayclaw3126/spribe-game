@@ -15,7 +15,7 @@ import { MusicNoteIcon, SpeakerIcon } from './AudioIcons'
 // 色值全部取 tokens 现组；band 缺省 DERBY.band（绿系轮次彩通用档）。
 // 注：gameName 已不再显示（18 个调用方均传 venue，场馆行足以标识当前游戏）。
 
-export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo, onFairness, onBack, balance, rightExtra, band }) {
+export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo, onFairness, onHistory, onBack, balance, rightExtra, band }) {
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bgmOn, toggleBgm] = useBgm()
   const [muted, toggleMuted] = useSfxMuted()
@@ -66,6 +66,15 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
     <>
       {balanceBits}
       {rightExtra}
+      {/* 📜 开奖历史圆钮：仅当传入 onHistory 才渲染（照 ⚖/? 条件钮同款，轮次彩专用） */}
+      {onHistory && (
+        <button type="button" onClick={() => onHistory()} title="开奖历史" style={{
+          width: 28, height: 28, borderRadius: RADIUS.pill, flex: '0 0 auto',
+          background: 'rgba(0,0,0,0.3)', color: COLORS.textMuted, border: '1px solid rgba(255,255,255,0.25)',
+          fontSize: 13, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}>📜</button>
+      )}
       {/* ⚖ 可验证公平圆钮：仅当传入 onFairness 才渲染（照 ? 钮同款，绿系区分玩法） */}
       {onFairness && (
         <button type="button" onClick={() => onFairness()} title="可验证公平" style={{

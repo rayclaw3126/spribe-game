@@ -9,6 +9,7 @@ import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
 import HowToPlay from '../components/shell/HowToPlay'
+import HistoryDrawer from '../components/HistoryDrawer'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
@@ -275,6 +276,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
 
   const [bet, setBet] = useState(10)
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
+  const [historyOpen, setHistoryOpen] = useState(false)   // 开奖历史抽屉
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
@@ -556,7 +558,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     <>
       <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
         roundId={room.roundNo || '连接中…'}
-        phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} />
+        phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onHistory={() => setHistoryOpen(true)} />
       {!room.connected && room.roundNo && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -867,6 +869,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
           </div>
         </div>
       </div>
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
