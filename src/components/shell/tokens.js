@@ -394,3 +394,16 @@ export const LAYOUT = {
   bottomH: 185,      // bottom bet-bay section (min height)
   bayW: 500,         // single centered bet bay width
 }
+
+// 游戏内切换抽屉 GameSwitcher 配色 —— 绿场馆 chrome 单一出处，禁散 hex。
+export const SWITCHER = {
+  scrim: 'rgba(0,0,0,0.6)',        // 遮罩
+  sheet: DERBY.band,               // 抽屉底（= 绿场馆 band #0b3d1c）
+  card: DERBY.ctrl,                // 卡片底（绿 chrome 控件档 #11582a）
+  cardLine: 'rgba(255,255,255,0.12)',
+  cardScrim: 'linear-gradient(transparent 40%, rgba(6,20,12,0.9))',  // 卡底压暗保白字
+  current: '#2ecc71',              // 当前款 1.5px 边 + 「当前」角标底
+  currentInk: '#06251a',           // 「当前」角标字（墨绿）
+  handle: 'rgba(255,255,255,0.3)', // 抓手条
+  btnBg: 'rgba(0,0,0,0.28)',       // 「返回大厅」按钮底
+}

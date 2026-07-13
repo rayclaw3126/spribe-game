@@ -1,15 +1,21 @@
+import { createContext, useContext, useState } from 'react'
 import { COLORS, RADIUS, DERBY, LAYOUT } from './tokens'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { useBgm, useSfxMuted } from './bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from './AudioIcons'
 import { shortRoundNo } from '../drawFormatters'
 import { GAME_REGISTRY } from '../../gameRegistry'
+import GameSwitcher from './GameSwitcher'
 
 // venue（架空场馆名）→ 游戏本名 反查：仅带 venue 的款入表。venue 串全站唯一且与游戏名零重叠，
 // 故可由 venue 值反推出对应 displayName——无需改 21 款调用方，改动面收敛到本文件一处。
 const VENUE_TO_NAME = Object.fromEntries(
   GAME_REGISTRY.filter(g => g.venue).map(g => [g.venue, g.displayName])
 )
+
+// App 通过此 Context 下发 setActiveGame(id|null)——GameSwitcher 切换游戏走它，
+// 无需改 21 款游戏文件（它们只透传 GameTopBar，Context 隐形穿透）。
+export const GameNavContext = createContext(null)
 
 // 游戏顶栏共享件：
 //   移动（<1024）两行 —— 上行 = ← 大厅 钮 + 右侧 ?/音乐/音效；
@@ -28,6 +34,10 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [bgmOn, toggleBgm] = useBgm()
   const [muted, toggleMuted] = useSfxMuted()
+  // 游戏内切换（仅移动端）：从 Context 拿 setActiveGame；当前款由 venue 反查（venue??displayName 全站唯一）。
+  const switchGame = useContext(GameNavContext)
+  const [switcherOpen, setSwitcherOpen] = useState(false)
+  const curGame = venue ? GAME_REGISTRY.find(g => (g.venue ?? g.displayName) === venue) : null
 
   const roundBtn = (onClick, title, active, children) => (
     <button key={title} type="button" onClick={onClick} title={title} style={{
@@ -120,6 +130,7 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
   )
 
   return (
+    <>
     <div style={{
       flex: '0 0 auto',
       padding: '6px 12px',
@@ -144,11 +155,25 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
       {!isDesk && (venue || subRow) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: subRow ? 'wrap' : undefined }}>
           {venueBits}
+          {curGame && (
+            <button type="button" onClick={() => setSwitcherOpen(true)} title="切换游戏" style={{
+              flex: '0 0 auto', width: 20, height: 20, borderRadius: RADIUS.pill, padding: 0,
+              background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.3)',
+              color: COLORS.white, fontSize: 10, lineHeight: 1, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}>▾</button>
+          )}
           {subRow
             ? <>{phaseChip}{subRow}</>
             : <><span style={{ marginLeft: 'auto' }} />{phaseChip}</>}
         </div>
       )}
     </div>
+    {!isDesk && (
+      <GameSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)}
+        currentId={curGame?.id}
+        onSwitch={(id) => { setSwitcherOpen(false); switchGame?.(id) }} />
+    )}
+    </>
   )
 }

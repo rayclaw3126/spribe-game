@@ -3,6 +3,7 @@ import Lobby from './components/Lobby'
 import Header from './components/Header'
 import GameLogin from './pages/GameLogin'
 import { COLORS } from './components/shell/tokens'
+import { GameNavContext } from './components/shell/GameTopBar'
 // 单2改：前台反馈钮暂隐藏（挪去代理后台）。组件文件保留，需要时取消注释即可恢复。
 // import FeedbackWidget from './components/feedback/FeedbackWidget'
 // 每款游戏按需加载（lazy）：进哪款才拉该款 chunk，大厅首屏不含任何游戏 JS/资产。
@@ -111,16 +112,20 @@ export default function App() {
   if (GameComponent) {
     return (
       <div style={{ minHeight: '100vh', background: '#0e1520' }}>
-        <Suspense fallback={<GameLoading />}>
-          <GameComponent
-            serverBalance={serverBalance}
-            setServerBalance={setServerBalance}
-            caps={caps}
-            playerToken={playerToken}
-            onLogout={handlePlayerLogout}
-            onBack={() => setActiveGame(null)}
-          />
-        </Suspense>
+        {/* Context 下发 setActiveGame(id|null)：GameTopBar 内的 GameSwitcher 切换游戏走它，
+            切款=直接换 activeGame 不过大厅；游戏文件零改（Context 隐形穿透）。 */}
+        <GameNavContext.Provider value={setActiveGame}>
+          <Suspense fallback={<GameLoading />}>
+            <GameComponent
+              serverBalance={serverBalance}
+              setServerBalance={setServerBalance}
+              caps={caps}
+              playerToken={playerToken}
+              onLogout={handlePlayerLogout}
+              onBack={() => setActiveGame(null)}
+            />
+          </Suspense>
+        </GameNavContext.Provider>
         {/* {feedback} */}
       </div>
     )
