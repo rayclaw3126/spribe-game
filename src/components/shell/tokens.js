@@ -1,6 +1,22 @@
 // Shared shell design tokens — all shell components pull colors/radii/spacing
 // from here. No hex literals inside shell component files.
 
+// #39 大厅分类导航专用暗黑色组（风格B·暗黑专业）——Lobby / Header 只从这里取，禁再散落 hex。
+export const LOBBY_DARK = {
+  bg: '#101216',
+  panel: '#15181d',
+  card: '#1a1e24',
+  line: '#262a31',
+  txt: '#f2f4f6',
+  txtDim: '#aab1bb',
+  txtMute: '#6b727d',
+  accent: '#4ade80',
+  accentInk: '#0b2415',
+  accentBg: '#1a2e22',
+  cardHi: '#1f242b',   // 侧栏激活底 / 卡片 hover 的中性提亮面（步骤3 指定 #1f242b；并入本组保持单一出处）
+  scrim: 'rgba(10,12,16,0.92)',   // 覆盖式卡片底部遮罩色（#0a0c10·92%），压住封面下半保白字可读
+}
+
 export const COLORS = {
   bg: '#0a1119',
   panel: '#101923',

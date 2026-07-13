@@ -64,6 +64,27 @@ export const GAME_REGISTRY = [
   { id: 'DominoDuel',   backendId: 'dominoduel',  name: '骨牌对决',    displayName: '骨牌对决',    venue: '玛瑙竞技场', desc: '主客对决，骨牌定胜负！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverDominoDuel,   cat: 'lotto',  rooms: [] },
 ]
 
+// #39 大厅分类导航：每款的 navCat（与现有 cat 并存，勿动 cat）。单一映射源 attach 回每条 registry，
+// 保证「每款都有 navCat 字段」，又不在 21 行里手抄重复。id 未列则 navCat=undefined（只进「全部」）。
+const NAV_CAT_BY_ID = {
+  Aviator: 'crash', Limbo: 'crash', Momentum: 'crash',
+  GoldenBoot: 'pk', SpeedGrid: 'pk',
+  HalfTime: 'lotto', NumberUp: 'lotto', HatTrick: 'lotto', WuXing: 'lotto', LineUp: 'lotto', RollingBall: 'lotto',
+  DerbyDay: 'duel', DominoDuel: 'duel',
+  Dice: 'arcade', Plinko: 'arcade', Goal: 'arcade', HiLo: 'arcade', Mines: 'arcade', Keno: 'arcade', StreakRoll: 'arcade', MiniRoulette: 'arcade',
+}
+GAME_REGISTRY.forEach(g => { g.navCat = NAV_CAT_BY_ID[g.id] })
+
+// 大厅分类导航 tab（款数一律由 GAMES.filter(navCat).length 派生，禁手写数字）：
+export const NAV_CATS = [
+  { key: 'all', label: '全部' },
+  { key: 'crash', label: '冲天' },
+  { key: 'pk', label: '竞速PK' },
+  { key: 'lotto', label: '轮次彩' },
+  { key: 'duel', label: '对决' },
+  { key: 'arcade', label: '即时街机' },
+]
+
 // id → 配置 快查
 export const GAME_BY_ID = Object.fromEntries(GAME_REGISTRY.map(g => [g.id, g]))
 // backendId → 配置 反查（账单 ledger.type 前缀=backendId，用来映射中文 displayName）
@@ -71,8 +92,8 @@ export const GAME_BY_BACKEND_ID = GAME_REGISTRY.reduce((m, g) => (m[g.backendId]
 
 // —— 大厅精选/curation（从 Lobby.jsx 原样挪来，按 id）——
 export const TOP_IDS = ['RollingBall', 'WuXing', 'SpeedGrid', 'LineUp', 'DerbyDay']
-export const HOT_IDS = ['DerbyDay', 'LineUp', 'SpeedGrid', 'WuXing', 'RollingBall', 'GoldenBoot']
-export const NEW_IDS = ['LineUp', 'SpeedGrid', 'WuXing', 'RollingBall', 'GoldenBoot', 'DerbyDay']
+export const HOT_IDS = ['Aviator', 'DerbyDay', 'HatTrick', 'GoldenBoot', 'Mines', 'Dice']
+export const NEW_IDS = ['DominoDuel', 'RollingBall', 'SpeedGrid', 'WuXing']
 
 // 大厅分类 tab → 归入哪些 cat（保持原「即时街机/轮次开奖」两 tab 的收录集合逐款不变）：
 //   即时街机(instant) = crash + arcade（= 原 cat:'instant' 的 11 款）

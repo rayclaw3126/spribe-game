@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMediaQuery } from '../hooks/useMediaQuery'
-import { COLORS } from './shell/tokens'
+import { COLORS, LOBBY_DARK } from './shell/tokens'
 import { useBgm } from './shell/bgmManager'
 import BillDrawer from './BillDrawer'
 
@@ -15,8 +15,8 @@ export default function Header({ balance, onHome, onLogout, playerToken }) {
     <header style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
       height: '52px',
-      background: '#141b26',
-      borderBottom: '1px solid #232c39',
+      background: LOBBY_DARK.panel,
+      borderBottom: `1px solid ${LOBBY_DARK.line}`,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 24px',
       boxSizing: 'border-box',
