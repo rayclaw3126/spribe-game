@@ -374,7 +374,7 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
       ctx.fillText(title, W / 2, center.y - 10 * dpr)
       ctx.fillStyle = frozen ? DERBY.gold : 'rgba(255,255,255,0.9)'
       ctx.font = `900 ${13 * dpr}px 'Space Grotesk', sans-serif`
-      ctx.fillText(`TOTAL ${curHome + curAway}`, W / 2, center.y + 7 * dpr)
+      ctx.fillText(`合计 ${curHome + curAway}`, W / 2, center.y + 7 * dpr)
 
       // —— 底部比分行：领先方亮色；定格放大一拍 + trophy 闪现 ——
       const by = gridH + 13 * dpr
@@ -486,7 +486,7 @@ function DrawStage({ stage, roll, beadSize, isMobile, sfx, onFinale }) {
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(5, ${beadSize}px)`, gap: isMobile ? 3 : 4 }}>
             {homeBalls.map((n, i) => <NumBead key={i} n={n} color={DERBY.home} size={beadSize} />)}
           </div>
-          <span style={{ color: DERBY.gold, fontSize: 12, fontWeight: 900 }}>{title} TOTAL {finalHome + finalAway}</span>
+          <span style={{ color: DERBY.gold, fontSize: 12, fontWeight: 900 }}>{title} 合计 {finalHome + finalAway}</span>
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(5, ${beadSize}px)`, gap: isMobile ? 3 : 4 }}>
             {awayBalls.map((n, i) => <NumBead key={i} n={n} color={DERBY.away} size={beadSize} />)}
           </div>
@@ -891,7 +891,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
             background: lit ? DERBY.gold : 'rgba(255,255,255,0.14)',
             color: lit ? '#3a2c00' : DERBY.dim,
             fontSize: isMobile ? 11 : 12.5, fontWeight: 900, whiteSpace: 'nowrap',
-          }}>TOTAL {lit ? total : '—'}</span>
+          }}>合计 {lit ? total : '—'}</span>
         </div>
         {ballGrid(awayBalls, DERBY.away, lit)}
       </div>

@@ -33,15 +33,15 @@ const pLow = n => n / 13
 const RULES = [
   {
     icon: '🎯', title: '怎么玩',
-    body: '桌面翻开一张评分牌，点数 1–13。你押下一张牌比它「更高 HIGH」还是「更低 LOW」，猜中即赢。\n关键：当下一张和当前牌「相同（SAME）」时，HIGH 和 LOW 两个方向都算赢——所以按钮写作「HIGH OR SAME」「LOW OR SAME」，等号两边通吃，永远不会因为出到同号而白输。',
+    body: '桌面翻开一张评分牌，点数 1–13。你押下一张牌比它「更高」还是「更低」，猜中即赢。\n关键：当下一张和当前牌「相同（SAME）」时，「高或同」和「低或同」两个方向都算赢——所以按钮写作「高或同」「低或同」，等号两边通吃，永远不会因为出到同号而白输。',
   },
   {
     icon: '📈', title: '倍数与累乘',
-    body: '每一押的倍数 = 0.97 ÷ 猜中概率（理论返还率 RTP = 97%）。当前牌越极端，某个方向越好猜、倍数越低；越难猜、倍数越高。\n例：当前是 13 押 HIGH，只有再出一张 13 才算「相同（SAME）」赢，概率 1/13，倍数约 12.61×；反过来押 LOW 几乎必中，倍数约 0.97×。\n连续猜中时倍数会「逐张累乘」，越滚越高，累乘数以后端结算为准。',
+    body: '每一押的倍数 = 0.97 ÷ 猜中概率（理论返还率 RTP = 97%）。当前牌越极端，某个方向越好猜、倍数越低；越难猜、倍数越高。\n例：当前是 13 押「高或同」，只有再出一张 13 才算「相同（SAME）」赢，概率 1/13，倍数约 12.61×；反过来押「低或同」几乎必中，倍数约 0.97×。\n连续猜中时倍数会「逐张累乘」，越滚越高，累乘数以后端结算为准。',
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '先设好本金，点下注开局并翻出第一张牌。之后每一张都可以：\n· 押 HIGH OR SAME / LOW OR SAME —— 猜中累乘、继续；猜错本局结束。\n· ⟲ 跳过（skip）—— 觉得当前牌不好押，可换一张，累乘不清零，但每局跳过次数有限。\n· 兑现 —— 随时锁定当前累乘，把「本金 × 累乘」收进余额，落袋为安。',
+    body: '先设好本金，点下注开局并翻出第一张牌。之后每一张都可以：\n· 押「高或同」/「低或同」 —— 猜中累乘、继续；猜错本局结束。\n· ⟲ 跳过（skip）—— 觉得当前牌不好押，可换一张，累乘不清零，但每局跳过次数有限。\n· 兑现 —— 随时锁定当前累乘，把「本金 × 累乘」收进余额，落袋为安。',
   },
   {
     icon: '💡', title: '小技巧',
@@ -613,14 +613,14 @@ export default function HiLo({ serverBalance, setServerBalance, caps, playerToke
         }}>
           <div style={{ textAlign: 'center' }}>
             <button type="button" onClick={() => guess('low')} disabled={phase !== 'playing' || flipping || busy}
-              style={choicePill(HILO.low, phase !== 'playing' || flipping || busy)}>⌄ LOW OR SAME</button>
+              style={choicePill(HILO.low, phase !== 'playing' || flipping || busy)}>⌄ 低或同</button>
             <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
               {round2(RTP / pLow(card ?? 9)).toFixed(2)}x
             </div>
           </div>
           <div style={{ textAlign: 'center' }}>
             <button type="button" onClick={() => guess('high')} disabled={phase !== 'playing' || flipping || busy}
-              style={choicePill(HILO.high, phase !== 'playing' || flipping || busy)}>⌃ HIGH OR SAME</button>
+              style={choicePill(HILO.high, phase !== 'playing' || flipping || busy)}>⌃ 高或同</button>
             <div style={{ marginTop: 6, color: COLORS.white, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
               {round2(RTP / pHigh(card ?? 9)).toFixed(2)}x
             </div>

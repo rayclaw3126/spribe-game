@@ -38,7 +38,7 @@ const RULES = [
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '在「Target Odds」输入目标赔率，或点 1.5× / 2× / 5× / 10× 预设一键设定；设好本金后点「下注」开球。每局独立结算，上一局不影响下一局，结算后即可再来一局。',
+    body: '在「目标赔率」输入目标赔率，或点 1.5× / 2× / 5× / 10× 预设一键设定；设好本金后点「下注」开球。每局独立结算，上一局不影响下一局，结算后即可再来一局。',
   },
   {
     icon: '💡', title: '小技巧',
@@ -474,7 +474,7 @@ export default function Limbo({ serverBalance, setServerBalance, caps, playerTok
   const deskParams = (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'nowrap' }}>
-        <span style={{ color: '#8a97a6', fontSize: 12, fontWeight: 600, flex: '0 0 auto' }}>Target Odds</span>
+        <span style={{ color: '#8a97a6', fontSize: 12, fontWeight: 600, flex: '0 0 auto' }}>目标赔率</span>
         <input type="number" min="1.01" max={maxTarget} step="0.01" value={target} disabled={rolling}
           onChange={e => applyTarget(e.target.value)}
           style={{ ...darkInput, width: 86, padding: '7px 10px', flex: '0 0 auto' }}
@@ -493,10 +493,10 @@ export default function Limbo({ serverBalance, setServerBalance, caps, playerTok
         background: 'rgba(26,34,48,0.9)', border: '1px solid #232c39', borderRadius: 10,
         padding: '8px 10px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8,
       }}>
-        <StatBox label="Win Chance" value={`${winChance.toFixed(1)}%`} color={COLOR} />
-        <StatBox label="Multiplier" value={`${t.toFixed(2)}×`} color='#10B981' />
-        <StatBox label="Payout" value={`$${payout.toFixed(2)}`} color={AMBER} />
-        <StatBox label="Profit" value={`$${(payout - bet).toFixed(2)}`} color={COLOR} />
+        <StatBox label="中奖率" value={`${winChance.toFixed(1)}%`} color={COLOR} />
+        <StatBox label="倍数" value={`${t.toFixed(2)}×`} color='#10B981' />
+        <StatBox label="赔付" value={`$${payout.toFixed(2)}`} color={AMBER} />
+        <StatBox label="盈利" value={`$${(payout - bet).toFixed(2)}`} color={COLOR} />
       </div>
       {result && (
         <div style={{
@@ -509,7 +509,7 @@ export default function Limbo({ serverBalance, setServerBalance, caps, playerTok
         }}>
           <img src={result.win ? badgeWinUrl : badgeLoseUrl} alt="" draggable={false}
             style={{ height: 15, width: 'auto', pointerEvents: 'none', display: 'block' }} />
-          <span>Final {result.mult.toFixed(2)}× — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Below target'}</span>
+          <span>Final {result.mult.toFixed(2)}× — {result.win ? `赢 $${result.profit.toFixed(2)}！` : '未达目标'}</span>
         </div>
       )}
     </div>
@@ -718,7 +718,7 @@ function SideControls({ bet, target, setTarget, maxTarget, cap, rolling, result,
       ...(fill ? { height: '100%', boxSizing: 'border-box' } : {}),
     }}>
       <div style={{ marginBottom: 16 }}>
-        <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Target Odds</label>
+        <label style={{ display: 'block', color: '#8a97a6', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>目标赔率</label>
         <input type="number" min="1.01" max={maxTarget} step="0.01" value={target}
           onChange={e => setTarget(e.target.value)}
           disabled={rolling}
@@ -738,10 +738,10 @@ function SideControls({ bet, target, setTarget, maxTarget, cap, rolling, result,
       </div>
       <div style={{ background: '#1a2230', border: '1px solid #232c39', borderRadius: 12, padding: '12px 14px',
         display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
-        <StatBox label="Win Chance" value={`${winChance.toFixed(1)}%`} color={COLOR} />
-        <StatBox label="Multiplier" value={`${t.toFixed(2)}×`} color='#10B981' />
-        <StatBox label="Payout" value={`$${payout.toFixed(2)}`} color={AMBER} />
-        <StatBox label="Profit" value={`$${(payout - bet).toFixed(2)}`} color={COLOR} />
+        <StatBox label="中奖率" value={`${winChance.toFixed(1)}%`} color={COLOR} />
+        <StatBox label="倍数" value={`${t.toFixed(2)}×`} color='#10B981' />
+        <StatBox label="赔付" value={`$${payout.toFixed(2)}`} color={AMBER} />
+        <StatBox label="盈利" value={`$${(payout - bet).toFixed(2)}`} color={COLOR} />
       </div>
       {result && (
         <div style={{ marginTop: 14, padding: '12px 16px', borderRadius: 12,
@@ -752,7 +752,7 @@ function SideControls({ bet, target, setTarget, maxTarget, cap, rolling, result,
           display: 'flex', alignItems: 'center', gap: 8 }}>
           <img src={result.win ? badgeWinUrl : badgeLoseUrl} alt="" draggable={false}
             style={{ height: 18, width: 'auto', pointerEvents: 'none', display: 'block' }} />
-          <span>Final {result.mult.toFixed(2)}× — {result.win ? `Won $${result.profit.toFixed(2)}!` : 'Below target'}</span>
+          <span>Final {result.mult.toFixed(2)}× — {result.win ? `赢 $${result.profit.toFixed(2)}！` : '未达目标'}</span>
         </div>
       )}
     </Panel>

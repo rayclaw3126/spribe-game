@@ -49,11 +49,11 @@ const RULES = [
   },
   {
     icon: '📈', title: '三档风险与倍数分布',
-    body: '同一排钉数下，三档的中奖机率完全一样，区别只在倍数怎么分布：\n· 绿 GREEN（最平缓）：边格顶赔最小、中格倍数最高，波动小、最稳。\n· 黄 YELLOW（居中）：介于绿红之间，风险与回报折中。\n· 红 RED（最陡）：边格顶赔最大、中格倍数被压到最低，搏两边大奖但中间格常常亏。\n档位越陡，边格越高、中格越低——高风险高回报，但期望返还率三档一致。',
+    body: '同一排钉数下，三档的中奖机率完全一样，区别只在倍数怎么分布：\n· 绿（最平缓）：边格顶赔最小、中格倍数最高，波动小、最稳。\n· 黄（居中）：介于绿红之间，风险与回报折中。\n· 红（最陡）：边格顶赔最大、中格倍数被压到最低，搏两边大奖但中间格常常亏。\n档位越陡，边格越高、中格越低——高风险高回报，但期望返还率三档一致。',
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '· 选档发球：直接点 GREEN / YELLOW / RED 三个大按钮之一，即按该档下注并发出一球。\n· 调钉数：点「Pins」下拉，可选 8–16 排，钉数越多底格越多、两边最高倍数越大、命中越分散。\n· 设金额：先用筹码设好每球本金，再发球，确认后一次扣款，落点结算直接入余额。',
+    body: '· 选档发球：直接点 绿 / 黄 / 红 三个大按钮之一，即按该档下注并发出一球。\n· 调钉数：点「钉数」下拉，可选 8–16 排，钉数越多底格越多、两边最高倍数越大、命中越分散。\n· 设金额：先用筹码设好每球本金，再发球，确认后一次扣款，落点结算直接入余额。',
   },
   {
     icon: '💡', title: '小技巧',
@@ -409,7 +409,7 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
                 background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.25)',
                 color: COLORS.white, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
                 cursor: flying ? 'not-allowed' : 'pointer', opacity: flying ? 0.6 : 1,
-              }}>Pins: {pins} ˅</button>
+              }}>钉数: {pins} ˅</button>
             {pinsOpen && (
               <span style={{
                 position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 5,
@@ -661,9 +661,9 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
             border: '1px solid rgba(255,255,255,0.4)',
             fontSize: 17, fontWeight: 900, cursor: 'not-allowed',
           }}>⟳</button>
-          <button type="button" disabled={locked} onClick={() => kick('green')} style={bigBtn(PLINKO.btnGreen)}>GREEN</button>
-          <button type="button" disabled={locked} onClick={() => kick('yellow')} style={bigBtn(PLINKO.btnYellow)}>YELLOW</button>
-          <button type="button" disabled={locked} onClick={() => kick('red')} style={bigBtn(PLINKO.btnRed)}>RED</button>
+          <button type="button" disabled={locked} onClick={() => kick('green')} style={bigBtn(PLINKO.btnGreen)}>绿</button>
+          <button type="button" disabled={locked} onClick={() => kick('yellow')} style={bigBtn(PLINKO.btnYellow)}>黄</button>
+          <button type="button" disabled={locked} onClick={() => kick('red')} style={bigBtn(PLINKO.btnRed)}>红</button>
         </div>
       </Panel>
   )

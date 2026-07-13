@@ -632,7 +632,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
           background: DERBY.gold, color: '#3a2c00',
           fontSize: isMobile ? 13 : 15, fontWeight: 900, letterSpacing: 0.5,
           transform: `scale(${view.slamAge != null ? 1 + 0.3 * Math.sin(Math.min(1, view.slamAge / 350) * Math.PI) : 1})`,
-        }}>TOTAL {view.sum}</span>
+        }}>合计 {view.sum}</span>
         <span style={{ color: DERBY.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 900 }}>
           上 {view.up} <span style={{ color: DERBY.dim, fontWeight: 700 }}>/</span> 下 {view.litN - view.up}
         </span>

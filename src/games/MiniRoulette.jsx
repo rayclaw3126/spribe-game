@@ -30,10 +30,10 @@ const ROW_EVEN = [2, 4, 6, 8, 10, 12]
 const ROW_ODD = [1, 3, 5, 7, 9, 11]
 const OUTSIDE = [
   { key: 'low', label: '1-6' },
-  { key: 'even', label: 'Even' },
-  { key: 'black', label: 'black' },
-  { key: 'red', label: 'red' },
-  { key: 'odd', label: 'Odd' },
+  { key: 'even', label: '双' },
+  { key: 'black', label: '黑' },
+  { key: 'red', label: '红' },
+  { key: 'odd', label: '单' },
   { key: 'high', label: '7-12' },
 ]
 const CHIPS = [
@@ -415,9 +415,9 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
           <div style={{ flex: 1, minWidth: 0, position: 'relative', width: '100%', paddingTop: isMobile ? 0 : 26 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ color: COLORS.white, fontSize: 13, fontWeight: 900 }}>
-                <span style={{ opacity: 0.75, fontWeight: 700 }}>Bet: </span>{totalBet.toFixed(2)} USD
+                <span style={{ opacity: 0.75, fontWeight: 700 }}>注额: </span>{totalBet.toFixed(2)} USD
               </span>
-              <span style={{ color: COLORS.white, fontSize: 12, fontWeight: 800, textDecoration: 'underline', cursor: 'default' }}>Paytable</span>
+              <span style={{ color: COLORS.white, fontSize: 12, fontWeight: 800, textDecoration: 'underline', cursor: 'default' }}>赔付表</span>
             </div>
 
             <div style={{ border: cellBorder }}>
@@ -455,10 +455,10 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
-              <button type="button" disabled={spinning || !betStack.length} onClick={undoBet} style={pillBtn(!spinning && betStack.length > 0)}>↩ Back</button>
-              <button type="button" disabled={spinning || !totalBet} onClick={clearBets} style={pillBtn(!spinning && totalBet > 0)}>✕ Clear</button>
+              <button type="button" disabled={spinning || !betStack.length} onClick={undoBet} style={pillBtn(!spinning && betStack.length > 0)}>↩ 撤销</button>
+              <button type="button" disabled={spinning || !totalBet} onClick={clearBets} style={pillBtn(!spinning && totalBet > 0)}>✕ 清空</button>
               {note && <span style={{ color: ROULETTE.ball, fontSize: 12, fontWeight: 800 }}>{note}</span>}
-              <button type="button" disabled={spinning || !lastBets} onClick={rebet} style={{ ...pillBtn(!spinning && !!lastBets), marginLeft: 'auto' }}>⟳ Rebet</button>
+              <button type="button" disabled={spinning || !lastBets} onClick={rebet} style={{ ...pillBtn(!spinning && !!lastBets), marginLeft: 'auto' }}>⟳ 重注</button>
             </div>
 
             {hoverNum && (
@@ -470,7 +470,7 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
               }}>
                 <img src={PLAYER[hoverNum - 1]} alt="" style={{ width: 68, height: 68, objectFit: 'contain', display: 'block' }} />
                 <div>
-                  <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 900 }}>Team {String(hoverNum).padStart(2, '0')}</div>
+                  <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 900 }}>{String(hoverNum).padStart(2, '0')} 号球队</div>
                   <div style={{ color: RED_SET.has(hoverNum) ? '#ff8a80' : COLORS.textMuted, fontSize: 11, fontWeight: 700 }}>
                     {RED_SET.has(hoverNum) ? '红队' : '黑队'} · 王牌球星
                   </div>
@@ -506,7 +506,7 @@ export default function MiniRoulette({ serverBalance, setServerBalance, playerTo
               </button>
             )
           })}
-          <button type="button" onClick={spin} disabled={spinning || !totalBet} title="SPIN" style={{
+          <button type="button" onClick={spin} disabled={spinning || !totalBet} title="旋转" style={{
             width: 62, height: 62, borderRadius: RADIUS.pill, marginLeft: 14,
             background: `radial-gradient(circle at 40% 32%, #1c8f45, ${ROULETTE.band})`,
             color: COLORS.white,

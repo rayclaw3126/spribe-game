@@ -453,7 +453,7 @@ export default function Mines({ serverBalance, setServerBalance, caps, playerTok
                   color: COLORS.white, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
                   cursor: phase === 'playing' ? 'not-allowed' : 'pointer',
                   opacity: phase === 'playing' ? 0.6 : 1,
-                }}>Defenders: {mineCount} ▾</button>
+                }}>防守人数: {mineCount} ▾</button>
               {defOpen && (
                 <span style={{
                   position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 6,
@@ -478,7 +478,7 @@ export default function Mines({ serverBalance, setServerBalance, caps, playerTok
               marginLeft: 'auto', padding: '3px 14px', borderRadius: RADIUS.pill,
               background: MINES.next, color: '#3a2c00',
               fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-            }}>Next: {round2(nextMult).toFixed(2)}x</span>
+            }}>下档: {round2(nextMult).toFixed(2)}x</span>
           </div>
           <div style={{ height: 4, borderRadius: 2, background: MINES.progressTrack, marginTop: 4, overflow: 'hidden' }}>
             <div style={{ width: `${(gems / (GRID - mineCount)) * 100}%`, height: '100%', background: MINES.progress, transition: 'width 0.2s' }} />

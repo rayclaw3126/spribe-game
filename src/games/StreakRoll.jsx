@@ -51,7 +51,7 @@ const STRIPS = {
   normal: Array.from({ length: COPIES }, () => PATTERN_NORMAL).flat(),
   high: Array.from({ length: COPIES }, () => PATTERN_HIGH).flat(),
 }
-const COLOR_LABEL = { R: 'RED', B: 'BLACK', F: 'FIRE' }
+const COLOR_LABEL = { R: '红', B: '黑', F: '火' }
 
 // ---- rAF spin physics: one continuous critically-damped motion ----
 // x(t) = T − (D + C2·t)·e^(−ωt) with initial kick v0 = KICK·ω·D. KICK > 1
@@ -65,19 +65,19 @@ const G = GAME_BY_ID['StreakRoll']
 const RULES = [
   {
     icon: '🎯', title: '怎么玩',
-    body: '转盘由一长条彩色号码带组成，每格是三种颜色之一：红(RED) / 黑(BLACK) / 王牌(FIRE 火焰)。你先押其中一种颜色，然后开转，转盘绕行后停在某一格，就按该格的颜色结算——押中该色即获胜，按对应倍数赔付。',
+    body: '转盘由一长条彩色号码带组成，每格是三种颜色之一：红 / 黑 / 王牌(火焰)。你先押其中一种颜色，然后开转，转盘绕行后停在某一格，就按该格的颜色结算——押中该色即获胜，按对应倍数赔付。',
   },
   {
     icon: '📊', title: '两档赔率',
-    body: '游戏有两档模式，切换「High risk mode」即换一套号码分布与赔率：\n· 普通档(normal)：红 2.03× / 黑 1.9× / 王牌 30.4×。红黑格数接近，王牌极稀有，故王牌赔率最高。\n· 高倍档(high)：红 2.53× / 黑 1.9× / 王牌 7.6×。王牌格变多、更易命中，赔率随之降低，红则相应升高。\n倍数 = RTP × 号码带长度 ÷ 该色格数，两档理论返还率均约 95%。',
+    body: '游戏有两档模式，切换「高风险模式」即换一套号码分布与赔率：\n· 普通档：红 2.03× / 黑 1.9× / 王牌 30.4×。红黑格数接近，王牌极稀有，故王牌赔率最高。\n· 高倍档：红 2.53× / 黑 1.9× / 王牌 7.6×。王牌格变多、更易命中，赔率随之降低，红则相应升高。\n倍数 = RTP × 号码带长度 ÷ 该色格数，两档理论返还率均约 95%。',
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '① 选档：点「High risk mode」在普通/高倍之间切换，赔率按钮会即时更新。\n② 选色并下注：用 −/+ 或输入框设好每注金额，点 RED / FIRE / BLACK 三个按钮之一即以该金额押注该色并开转。\n③ 转：转盘绕行 2–4 圈后落格，命中金框高亮结算，赔付直接入余额。',
+    body: '① 选档：点「高风险模式」在普通/高倍之间切换，赔率按钮会即时更新。\n② 选色并下注：用 −/+ 或输入框设好每注金额，点 红 / 火 / 黑 三个按钮之一即以该金额押注该色并开转。\n③ 转：转盘绕行 2–4 圈后落格，命中金框高亮结算，赔付直接入余额。',
   },
   {
     icon: '💡', title: '小技巧',
-    body: '· 求稳押红/黑，中奖率高、赔率低；求大赔押王牌(FIRE)，稀有但一击回报可观。\n· 普通档王牌高达 30.4×但极难中；高倍档王牌只 7.6×却好中得多——按你偏好的风险选档。\n· 每局独立开奖，上一局结果不影响下一局。本游戏属娱乐性质，理性游戏。',
+    body: '· 求稳押红/黑，中奖率高、赔率低；求大赔押王牌(火)，稀有但一击回报可观。\n· 普通档王牌高达 30.4×但极难中；高倍档王牌只 7.6×却好中得多——按你偏好的风险选档。\n· 每局独立开奖，上一局结果不影响下一局。本游戏属娱乐性质，理性游戏。',
   },
 ]
 
@@ -618,7 +618,7 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
                 transition: 'left 0.15s, background 0.15s',
               }} />
             </span>
-            High risk mode
+            高风险模式
           </button>
         </div>
 
@@ -671,7 +671,7 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
             return (
               <>
                 <button type="button" disabled={locked} onClick={() => betOn('R')} style={withLock(betBigBtn(`linear-gradient(160deg, ${HOTLINE.cardRed}, ${HOTLINE.cardRedDeep})`, COLORS.white))}>
-                  <span>RED</span><span>X{mults.R}</span>
+                  <span>红</span><span>X{mults.R}</span>
                 </button>
                 <button type="button" disabled={locked} onClick={() => betOn('F')} style={withLock(betBigBtn(`radial-gradient(circle at 50% 30%, ${HOTLINE.gold}, ${HOTLINE.fireDeep})`, COLORS.white))}>
                   <img src={flameUrl} alt="" draggable={false} style={{
@@ -679,7 +679,7 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
                   }} /><span>X{mults.F}</span>
                 </button>
                 <button type="button" disabled={locked} onClick={() => betOn('B')} style={withLock(betBigBtn(HOTLINE.black, COLORS.white))}>
-                  <span>BLACK</span><span>X{mults.B}</span>
+                  <span>黑</span><span>X{mults.B}</span>
                 </button>
               </>
             )

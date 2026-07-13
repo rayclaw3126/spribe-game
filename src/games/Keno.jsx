@@ -50,7 +50,7 @@ const RULES = [
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '在号码盘上点选号码（最多 10 个），或点随机机选、CLEAR 清空。用 − / + 或输入框设每注金额，选好号后点下注开奖，10 个球逐个落下，命中的号码高亮，赔付直接入余额。点「再来一轮」清盘重下。',
+    body: '在号码盘上点选号码（最多 10 个），或点随机机选、清空。用 − / + 或输入框设每注金额，选好号后点下注开奖，10 个球逐个落下，命中的号码高亮，赔付直接入余额。点「再来一轮」清盘重下。',
   },
   {
     icon: '💡', title: '小技巧',
@@ -189,8 +189,8 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
     if (won) playWin(); else playLose()
     setMessage(
       won
-        ? { text: `${matches}/${picks} matched — ${mult}× — Won $${Number(payout).toFixed(2)}!`, win: true }
-        : { text: `${matches}/${picks} matched — No win this time`, win: false }
+        ? { text: `命中 ${matches}/${picks} — ${mult}× — 赢 $${Number(payout).toFixed(2)}！`, win: true }
+        : { text: `命中 ${matches}/${picks} — 未中奖`, win: false }
     )
     setRoundHistory(h => [mult, ...h].slice(0, 20))
     // 余额只认后端 balanceAfter，不本地加减
@@ -339,12 +339,12 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
             color: message ? (message.win ? KENO.green : '#ff8a80') : KENO.green,
             fontSize: 12, fontWeight: 800, letterSpacing: 1.5,
           }}>
-            {phase === 'drawing' ? 'DRAWING…' : message ? (
+            {phase === 'drawing' ? '开奖中…' : message ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle' }}>
                 {message.win && <img src={badgeWinUrl} alt="" draggable={false} style={{ height: 16, width: 'auto', pointerEvents: 'none', display: 'block' }} />}
                 {message.text}
               </span>
-            ) : 'PICK NUMBERS FOR START'}
+            ) : '选号开始'}
           </div>
 
           <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 14 }}>
@@ -394,7 +394,7 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
           {/* RANDOM / CLEAR */}
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
             <button type="button" onClick={() => quickPick(10)} style={wideBtn(true)}>随机</button>
-            <button type="button" onClick={clearSelection} style={wideBtn(selected.length > 0)}>CLEAR</button>
+            <button type="button" onClick={clearSelection} style={wideBtn(selected.length > 0)}>清空</button>
           </div>
         </div>
 

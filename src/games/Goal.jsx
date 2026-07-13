@@ -38,11 +38,11 @@ const RULES = [
   },
   {
     icon: '📈', title: '档位与倍数',
-    body: '开局用 Field 选每列炸弹数，档位越高越险、单列跳倍越猛（理论返还率 97%）：\n· ▪ 简单：每列 1 颗炸弹（安全率 3/4），每推进一列 ×1.29。\n· ▪▪ 中等（默认）：每列 2 颗炸弹（安全率 2/4），每列 ×1.94。\n· ▪▪▪ 困难：每列 3 颗炸弹（安全率 1/4），每列 ×3.88。\n倍数逐列累乘，「Next」pill 实时显示推进下一列后的总倍数。档位仅开局可选，局中锁定。',
+    body: '开局用 场地 选每列炸弹数，档位越高越险、单列跳倍越猛（理论返还率 97%）：\n· ▪ 简单：每列 1 颗炸弹（安全率 3/4），每推进一列 ×1.29。\n· ▪▪ 中等（默认）：每列 2 颗炸弹（安全率 2/4），每列 ×1.94。\n· ▪▪▪ 困难：每列 3 颗炸弹（安全率 1/4），每列 ×3.88。\n倍数逐列累乘，「下档」pill 实时显示推进下一列后的总倍数。档位仅开局可选，局中锁定。',
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '设好投注额与 Field 档位，点下注开局。之后每列点一格前进，顶栏与兑现按钮实时显示当前可兑现金额（本金 × 累计倍数）。随时点兑现锁定收益、结束本局；若一路安全推满第 7 列则触顶，自动按满额派彩。随机可替你在当前列点一格，自动游戏逐列推进。',
+    body: '设好投注额与 场地 档位，点下注开局。之后每列点一格前进，顶栏与兑现按钮实时显示当前可兑现金额（本金 × 累计倍数）。随时点兑现锁定收益、结束本局；若一路安全推满第 7 列则触顶，自动按满额派彩。随机可替你在当前列点一格，自动游戏逐列推进。',
   },
   {
     icon: '💡', title: '小技巧',
@@ -381,7 +381,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
                 background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.25)',
                 color: COLORS.white, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap',
                 cursor: playing ? 'not-allowed' : 'pointer', opacity: playing ? 0.6 : 1,
-              }}>Field: {TIERS[tier].label} ▾</button>
+              }}>场地: {TIERS[tier].label} ▾</button>
             {tierOpen && (
               <span style={{
                 position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 6,
@@ -405,7 +405,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
             marginLeft: 'auto', padding: '3px 14px', borderRadius: RADIUS.pill,
             background: GOAL.orange, color: COLORS.white,
             fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-          }}>Next: {nextMult.toFixed(2)}x</span>
+          }}>下档: {nextMult.toFixed(2)}x</span>
         </div>
 
         {/* ---- main 7×4 grid ---- */}

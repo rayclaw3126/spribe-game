@@ -32,19 +32,19 @@ const payoutFor = chance => round2(RTP * 100 / chance)
 const RULES = [
   {
     icon: '🎯', title: '怎么玩',
-    body: '每局开出一个 0–100 的点数（保留 2 位小数，均匀分布）。你先拖动滑块把「目标线」设在 4–96 之间，再选押 UNDER 还是 OVER：\n· UNDER：开点严格小于目标线才赢（正好等于目标线不算赢）。\n· OVER：开点严格大于目标线才赢（正好等于目标线不算赢）。',
+    body: '每局开出一个 0–100 的点数（保留 2 位小数，均匀分布）。你先拖动滑块把「目标线」设在 4–96 之间，再选押 小 还是 大：\n· 小：开点严格小于目标线才赢（正好等于目标线不算赢）。\n· 大：开点严格大于目标线才赢（正好等于目标线不算赢）。',
   },
   {
     icon: '📊', title: '赔率与中奖率',
-    body: '赔率 = 97% × 100 ÷ 中奖率，目标线越靠近能赢的一侧、中奖率越高、赔率越低；反之赔率越高。\n· UNDER 中奖率 = 目标线数值%，赔率 = 97 ÷ 目标线。\n· OVER 中奖率 =（100 − 目标线）%，赔率 = 97 ÷（100 − 目标线）。\n面板会实时显示当前 Payout（赔率）、Chance（中奖率）与 Potential win（可赢金额）。本游戏理论返还率（RTP）约 97%。',
+    body: '赔率 = 97% × 100 ÷ 中奖率，目标线越靠近能赢的一侧、中奖率越高、赔率越低；反之赔率越高。\n· 小 中奖率 = 目标线数值%，赔率 = 97 ÷ 目标线。\n· 大 中奖率 =（100 − 目标线）%，赔率 = 97 ÷（100 − 目标线）。\n面板会实时显示当前 赔付（赔率）、概率（中奖率）与 预计赢额（可赢金额）。本游戏理论返还率（RTP）约 97%。',
   },
   {
     icon: '🎰', title: '如何下注',
-    body: '用 − / + 或输入框设定每注金额（USD），拖滑块选好目标线后，点 UNDER 或 OVER 按钮即下注。开点由服务器算出，落定后按结果结算，赢的赔付直接入余额。每局独立，上一局不影响下一局。',
+    body: '用 − / + 或输入框设定每注金额（USD），拖滑块选好目标线后，点 小 或 大 按钮即下注。开点由服务器算出，落定后按结果结算，赢的赔付直接入余额。每局独立，上一局不影响下一局。',
   },
   {
     icon: '💡', title: '小技巧',
-    body: '· 想稳一点：把目标线拖向能赢的一侧，中奖率高但赔率低。\n· 想搏大赔：把目标线拖向另一侧，中奖率低但赔率高。\n· 注意两侧都是「严格不等」，开点正好落在目标线上，UNDER 和 OVER 都不算赢。\n· 娱乐为主，理性游戏。',
+    body: '· 想稳一点：把目标线拖向能赢的一侧，中奖率高但赔率低。\n· 想搏大赔：把目标线拖向另一侧，中奖率低但赔率高。\n· 注意两侧都是「严格不等」，开点正好落在目标线上，小 和 大 都不算赢。\n· 娱乐为主，理性游戏。',
   },
 ]
 
@@ -495,7 +495,7 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
             padding: isMobile ? '10px 12px' : '12px 16px',
           }}>
             <div style={{ flex: '0 0 auto', textAlign: 'center' }}>
-              <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Payout</div>
+              <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>赔付</div>
               <div style={{
                 padding: '6px 18px', borderRadius: 8,
                 background: DICE.panelDeep, border: '1px solid rgba(255,255,255,0.3)',
@@ -532,10 +532,10 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
             padding: '8px 16px', background: DICE.panelDeep,
           }}>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, fontWeight: 700 }}>
-              Potential win: <span style={{ color: COLORS.white, fontSize: 13, fontWeight: 900 }}>{round2(bet * payoutUnder).toFixed(2)} USD</span>
+              预计赢额: <span style={{ color: COLORS.white, fontSize: 13, fontWeight: 900 }}>{round2(bet * payoutUnder).toFixed(2)} USD</span>
             </span>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, fontWeight: 700 }}>
-              Chance: <span style={{ color: COLORS.white, fontSize: 13, fontWeight: 900 }}>{underChance.toFixed(2)} %</span>
+              概率: <span style={{ color: COLORS.white, fontSize: 13, fontWeight: 900 }}>{underChance.toFixed(2)} %</span>
             </span>
           </div>
         </div>
@@ -597,11 +597,11 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
             fontSize: 17, fontWeight: 900, cursor: 'not-allowed',
           }}>⟳</button>
           <button type="button" disabled={locked} onClick={() => betOn('under')} style={bigBtn(DICE.btnUnder, locked)}>
-            <span>UNDER</span>
+            <span>小</span>
             <span style={{ fontSize: 12, opacity: 0.9 }}>↓ X{payoutUnder.toFixed(2)}</span>
           </button>
           <button type="button" disabled={locked} onClick={() => betOn('over')} style={bigBtn(DICE.btnOver, locked)}>
-            <span>OVER</span>
+            <span>大</span>
             <span style={{ fontSize: 12, opacity: 0.9 }}>↑ X{payoutOver.toFixed(2)}</span>
           </button>
         </div>
