@@ -24,9 +24,6 @@ const FILL_TOP = '#5DCAA5'
 const AMBER = '#F59E0B'
 const HOUSE_EDGE = 0.99
 const MAX_MULT = 1000000
-// 单局派彩封顶，对齐 server risk.js perGame.limbo.maxPayout（改 cap 两边同步）。
-// target 上限动态钳到 MAX_PAYOUT/bet，使 bet×target 永不虚高过 cap；后端另有 LEAST 钳制兜底。
-const MAX_PAYOUT = 50000
 const CLIMB_MS = 1400
 const TICKS = [1, 1.5, 2, 3, 5, 10, 100]
 
@@ -67,7 +64,10 @@ function easeOutCubic(p) {
 }
 
 
-export default function Limbo({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
+export default function Limbo({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack }) {
+  // 单局派彩封顶：优先用后端下发的 caps.limbo.maxPayout（单一数据源），后端未下发时兜底 50000（对齐 server risk.js default）。
+  // target 上限动态钳到 cap/bet，使 bet×target 永不虚高过 cap；后端另有 LEAST 钳制兜底。
+  const cap = caps?.limbo?.maxPayout ?? 50000
   const isMobile = useIsMobile()
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装
   const canvasRef = useRef(null)
@@ -104,13 +104,13 @@ export default function Limbo({ serverBalance, setServerBalance, playerToken, on
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000)
   }
 
-  // target 动态上限：使 bet×target ≤ MAX_PAYOUT（截断到 2 位小数，向下取整不越界）
-  const maxTarget = Math.max(1.01, Math.floor((MAX_PAYOUT / Math.max(bet, 1)) * 100) / 100)
+  // target 动态上限：使 bet×target ≤ cap（截断到 2 位小数，向下取整不越界）
+  const maxTarget = Math.max(1.01, Math.floor((cap / Math.max(bet, 1)) * 100) / 100)
   // 统一 target 落点：钳到 [1.01, maxTarget]，输入框/预设/回落都走这里
   const applyTarget = (v) => setTarget(Math.min(Math.max(1.01, Number(v) || 1.01), maxTarget))
   const t = Math.min(Math.max(1.01, target || 1.01), maxTarget)
   const winChance = Math.min(99, (HOUSE_EDGE / t) * 100)
-  const payout = parseFloat(Math.min(bet * t, MAX_PAYOUT).toFixed(2))
+  const payout = parseFloat(Math.min(bet * t, cap).toFixed(2))
   targetRef.current = t
 
   // bet 改变时若当前 target 超新上限，自动回落到 maxTarget

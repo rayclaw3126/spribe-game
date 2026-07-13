@@ -56,6 +56,7 @@ export default function App() {
   const [activeGame, setActiveGame] = useState(null)
   // 全部 21 款游戏都由后端结算，余额一律以服务器为准。
   const [serverBalance, setServerBalance] = useState(null)
+  const [caps, setCaps] = useState(null)   // 后端下发的全量风控 caps { [game]: { maxBet, maxPayout } }；旧后端未下发时保持 null，各游戏 fallback 兜底
   const [playerToken, setPlayerToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '')
 
   const GameComponent = activeGame ? GAMES[activeGame] : null
@@ -89,6 +90,7 @@ export default function App() {
         if (!resp.ok) return
         const data = await resp.json()
         if (!cancelled && data.balance != null) setServerBalance(Number(data.balance))
+        if (!cancelled && data.caps) setCaps(data.caps)
       })
       .catch(() => {})
     return () => { cancelled = true }
@@ -113,6 +115,7 @@ export default function App() {
           <GameComponent
             serverBalance={serverBalance}
             setServerBalance={setServerBalance}
+            caps={caps}
             playerToken={playerToken}
             onLogout={handlePlayerLogout}
             onBack={() => setActiveGame(null)}

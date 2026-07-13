@@ -29,9 +29,6 @@ const G = GAME_BY_ID['Mines']
 //   内部全精度，显示才 round2。
 const GRID = 25  // 5x5
 const RTP = 0.97
-// 单局派彩封顶，对齐 server risk.js perGame.mines.maxPayout（改 cap 两边同步）。
-// 兑现真实到账由后端钳制并回 data.payout；此常量仅用于「兑现前」按钮预估不虚高过 cap。
-const MAX_PAYOUT = 50000
 const round2 = x => Math.round(x * 100) / 100
 
 function calcMultiplier(gems, mines) {
@@ -93,7 +90,10 @@ function BallLineArt({ size }) {
   )
 }
 
-export default function Mines({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
+export default function Mines({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack }) {
+  // 单局派彩封顶：优先用后端下发的 caps.mines.maxPayout（单一数据源），后端未下发时兜底 50000（对齐 server risk.js default）。
+  // 兑现真实到账由后端钳制并回 data.payout；此值仅用于「兑现前」按钮预估不虚高过 cap。
+  const cap = caps?.mines?.maxPayout ?? 50000
   const isMobile = useIsMobile()
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装
   const [bet, setBet] = useState(10)
@@ -134,7 +134,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
     toastTimer.current = setTimeout(() => setToastMsg(''), 3000)
   }
 
-  // 赢额提示：一律用后端 data.payout（已钳到 MAX_PAYOUT），不再本地 bet×mult 估算
+  // 赢额提示：一律用后端 data.payout（已钳到 cap），不再本地 bet×mult 估算
   function pushWin(payout) {
     setWinMsg(`WIN +${round2(Number(payout)).toFixed(2)} USD`)
     if (winTimer.current) clearTimeout(winTimer.current)
@@ -616,7 +616,7 @@ export default function Mines({ serverBalance, setServerBalance, playerToken, on
               display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
             }}>
               <span>CASH OUT</span>
-              <span style={{ fontSize: 12, opacity: 0.9 }}>{round2(Math.min(bet * currentMult, MAX_PAYOUT)).toFixed(2)} USD</span>
+              <span style={{ fontSize: 12, opacity: 0.9 }}>{round2(Math.min(bet * currentMult, cap)).toFixed(2)} USD</span>
             </button>
           ) : (
             <button type="button" onClick={startGame} disabled={busy || bet > (serverBalance ?? 0) || bet < 1} style={{

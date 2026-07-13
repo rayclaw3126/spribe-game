@@ -5,8 +5,19 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireType } from '../middleware/auth.js';
+import riskCfg from '../config/risk.js';
 
 const router = Router();
+
+// caps 单一数据源：把 risk.js 的 default+perGame 合成成 { [game]: { maxBet, maxPayout } } 下发给前端，
+// 让前端「兑现前」预估/输入封顶与后端同源（后端另有 LEAST 钳制/limits 兜底，前端只做展示防虚高）。
+// game 列表取自 perGame 的 key（现即全 21 款）；数值为 perGame 覆盖 default 后的合成结果，转 Number。
+const CAPS = Object.fromEntries(
+  Object.keys(riskCfg.perGame).map((game) => {
+    const merged = { ...riskCfg.default, ...riskCfg.perGame[game] };
+    return [game, { maxBet: Number(merged.maxBet), maxPayout: Number(merged.maxPayout) }];
+  })
+);
 
 // limit 钳制到 1–50，防一次拉爆；非法/缺省取 20
 function clampLimit(raw) {
@@ -20,13 +31,13 @@ function parseCursor(raw) {
   return /^\d+$/.test(String(raw)) ? String(raw) : null;
 }
 
-// GET /player/me —— 玩家自己的钱包余额（只读，参数化查询）
+// GET /player/me —— 玩家自己的钱包余额 + 全量风控 caps（只读，参数化查询）
 router.get('/me', requireAuth, requireType('player'), async (req, res, next) => {
   try {
     const playerId = req.user.sub;
     const result = await query('SELECT balance FROM wallets WHERE player_id = $1', [playerId]);
     const balance = result.rowCount > 0 ? result.rows[0].balance : '0.00';
-    return res.json({ balance });
+    return res.json({ balance, caps: CAPS });
   } catch (err) {
     return next(err);
   }
