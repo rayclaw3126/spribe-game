@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel } from '../components/GameLayout'
+import { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
@@ -69,6 +69,16 @@ const comboHit = (key, n) => COMBO[key].every(s => GROUPS[s].hit(n))
 const COMBO_C = Object.fromEntries(Object.keys(COMBO).map(k =>
   [k, Array.from({ length: 75 }, (_, i) => i + 1).filter(n => comboHit(k, n)).length]))
 const R_SINGLE = 0.9523
+
+// 珠盘路视角：从整局 3 球号码派生。判定全走引擎 helper（GROUPS.hit / isRed），禁手写第二份表。
+// 每视角 judge(号码) → { t: 单字, red: 是否红色珠 }（珠子红蓝双色 + 单字，沿用现有样式）。
+const ROAD_VIEWS = [
+  { key: '1big', label: '1球大小', ball: 0, judge: n => GROUPS.big.hit(n) ? { t: '大', red: true } : { t: '小', red: false } },
+  { key: '1oe', label: '1球单双', ball: 0, judge: n => GROUPS.odd.hit(n) ? { t: '单', red: true } : { t: '双', red: false } },
+  { key: '1rb', label: '1球红蓝', ball: 0, judge: n => isRed(n) ? { t: '红', red: true } : { t: '蓝', red: false } },
+  { key: '2big', label: '2球大小', ball: 1, judge: n => GROUPS.big.hit(n) ? { t: '大', red: true } : { t: '小', red: false } },
+  { key: '3big', label: '3球大小', ball: 2, judge: n => GROUPS.big.hit(n) ? { t: '大', red: true } : { t: '小', red: false } },
+]
 
 // 命中判定（单个球号 n）
 export function hitOf(key, n) {
@@ -140,11 +150,13 @@ const RULES = [
 ]
 const ROUND_DATE = 'SS20260706'
 const SEED_LAST = [21, 44, 7]          // 上局回顾种子（真开奖逐期顶掉）
+// 珠盘路种子：整局 3 球号码形态（每局 3 个互不相同的 1-75，符合无放回），首屏各视角即有料。
 const SEED_ROAD = [
-  '大', '小', '大', '大', '小', '大', '小', '小', '大', '小',
-  '大', '大', '小', '大', '小', '大', '大', '小', '小', '大',
-  '小', '大', '小', '大', '大', '小', '大', '小', '大', '小',
-  '小', '大', '大', '小', '大', '小', '大', '大', '小', '大',
+  [42, 17, 63], [8, 51, 29], [70, 34, 5], [23, 68, 11], [56, 2, 39],
+  [14, 47, 72], [61, 26, 9], [33, 50, 18], [7, 44, 65], [40, 21, 58],
+  [3, 69, 36], [52, 15, 28], [66, 10, 45], [19, 60, 31], [48, 6, 73],
+  [27, 54, 12], [71, 38, 1], [16, 43, 62], [35, 20, 57], [4, 67, 30],
+  [59, 22, 46], [13, 49, 74], [64, 37, 25], [41, 24, 55],
 ]
 
 // 盘面玩法元数据（名/区间/底色；赔率运行时动态取）
@@ -286,6 +298,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  const [acc, setAcc] = useState({ comboRow: true, col: true, num: false })   // 手机手风琴折叠态（默认组合/列注展开、单号收起）；纯 UI，不动任何下注 state
+  const [roadView, setRoadView] = useState('1big')   // 珠盘路视角（手机 pill 选，默认 1球大小）；纯显示，零请求零 state 污染
   const [bet, setBet] = useState(10)
   const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
@@ -317,6 +331,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   const transitioningRef = useRef(false)                  // 开球 POST 进行中，防 tick 重入
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
+  const roadRecordedRef = useRef(null)                    // 珠盘路整局记账去重：存已记的 roundId，防 StrictMode 双调用重复入
 
   const ballIdx = Number(phase[1]) - 1
   const sub = phase.slice(3)   // bet | draw | settle
@@ -462,7 +477,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
     if (win > 0) { pushToast(`第${idx + 1}球命中`, win); sfxHit() }
     setResult({ idx, ball: n, hits, win })
     if (idx === 2) sfxFinal()   // 三球齐 → 终场哨
-    if (idx === 0 && n != null) setRoad(r => [...r, n >= 38 ? '大' : '小'].slice(-ROAD_CAP))
+    // 珠盘路整局记账移到 endRound（一局恰记一次完整 3 球，见下）——此处不再写 road。
   }
 
   // 单心跳驱动状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
@@ -480,7 +495,16 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       }
       // 本局收尾 → 回新局（清 roundId/已开球；无注/失败/开满 3 球共用）
       const endRound = () => {
-        if (pendingRef.current?.length === 3) setLastRound(pendingRef.current)
+        if (pendingRef.current?.length === 3) {
+          setLastRound(pendingRef.current)
+          // 珠盘路：整局结束记一次完整 3 球号码；按 roundId 去重（StrictMode 双调用防重）。
+          const rid = roundIdRef.current
+          if (rid != null && roadRecordedRef.current !== rid) {
+            roadRecordedRef.current = rid
+            const balls = pendingRef.current.slice()
+            setRoad(r => [...r, balls].slice(-ROAD_CAP))
+          }
+        }
         roundIdRef.current = null
         pendingRef.current = []
         pendingDataRef.current = null
@@ -874,7 +898,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   // ---- ③ 珠盘路（第1球大小单轨，抄 Line Up）----
   const ROAD_COLS = 20
   const roadBead = isMobile ? 18 : 14
-  const beads = road.slice(-ROAD_CAP)
+  const beads = road.slice(-ROAD_CAP)   // road 现存整局 3 球号码数组 [[b1,b2,b3],...]（旧衍生大小字已改）
+  const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 当前珠盘视角（手机 pill 选）
   const beadRoad = (
     <div style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, margin: isMobile ? '0 12px 8px' : '0 18px 8px' }}>
       <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
@@ -890,15 +915,19 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
           gap: 2, width: 'max-content',
         }}>
           {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const t = beads[i]
+            // 桌面单视角：第1球大小（从整局 3 球取 balls[0]，走引擎 GROUPS.big.hit 派生，不手写表）
+            const balls = beads[i]
+            const b1 = balls != null ? balls[0] : undefined
+            const big = b1 != null && GROUPS.big.hit(b1)
+            const t = b1 != null ? (big ? '大' : '小') : ''
             return (
               <span key={i} style={{
                 width: roadBead, height: roadBead, borderRadius: '50%',
-                background: t ? (t === '大' ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.05)',
-                border: t ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                background: b1 != null ? (big ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.05)',
+                border: b1 != null ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
                 color: COLORS.white, fontSize: roadBead / 2, fontWeight: 900,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
-              }}>{t || ''}</span>
+              }}>{t}</span>
             )
           })}
         </div>
@@ -1004,6 +1033,196 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
     </Panel>
   )
 
+  // ============ 手机三段式 v2（<1024）：锁顶(顶栏+舞台+主盘) / 中间滚(三折叠盘区) / 锁底(珠盘路+注栏) ============
+  // 折叠纯 UI（acc 状态），不动任何下注 state（picks/betsPlaced/bet 组件级持有，收起也保留）；钱路(confirmBets/结算/odds)一行未动。
+  const COMBO_ROW_KEYS = new Set([...COMBO_META.map(m => m.slot), ...ROWS.map(m => m.slot)])
+  const selCount = (section) => {
+    let n = 0
+    new Set([...picks, ...betsPlaced.keys()]).forEach(k => {
+      const belong = section === 'num' ? k.startsWith('num-')
+        : section === 'col' ? k.startsWith('col-')
+          : COMBO_ROW_KEYS.has(k)
+      if (belong) n++
+    })
+    return n
+  }
+  const accSection = (key, title, body) => {
+    const open = acc[key]
+    const cnt = selCount(key)
+    return (
+      <div style={{ ...secBox, padding: 0, overflow: 'hidden', marginBottom: 6 }}>
+        <button type="button" onClick={() => setAcc(a => ({ ...a, [key]: !a[key] }))} style={{
+          width: '100%', height: 36, boxSizing: 'border-box',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <span style={{ color: DERBY.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+            {cnt > 0 && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flex: '0 0 auto', color: DERBY.sel, fontSize: 10, fontWeight: 900 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: DERBY.sel, display: 'inline-block' }} />{cnt}
+              </span>
+            )}
+          </span>
+          <span style={{ color: COLORS.white, fontSize: 12, fontWeight: 900, flex: '0 0 auto' }}>{open ? '˄' : '˅'}</span>
+        </button>
+        <div style={{ maxHeight: open ? 1400 : 0, overflow: 'hidden', transition: 'max-height 0.2s ease' }}>
+          <div style={{ padding: '0 6px 6px' }}>{body}</div>
+        </div>
+      </div>
+    )
+  }
+  const comboBody = (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginBottom: 5 }}>
+        {COMBO_META.map(m => rowCell(m.slot, m.name, ''))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
+        {ROWS.map(m => stackCell(m.slot, m.name, m.range))}
+      </div>
+    </>
+  )
+  const colBody = (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
+      {[1, 2, 3, 4, 5].map(c => stackCell(`col-${c}`, `列${c}`, ''))}
+    </div>
+  )
+  const numBody = (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 3 }}>
+      {Array.from({ length: 75 }, (_, i) => {
+        const n = i + 1
+        const key = `num-${n}`
+        return (
+          <button key={n} type="button" className="rbCell" data-key={key} disabled={!betting || oddsAt(key) == null}
+            onClick={() => toggleSel(key)}
+            style={{ ...cellBase(key, isRed(n) ? DERBY.away : DERBY.home), padding: '3px 0', minHeight: 30 }}>
+            <span style={{ ...cellName, fontSize: 12, fontFamily: "'Space Grotesk', sans-serif" }}>{String(n).padStart(2, '0')}</span>
+            {stakeChip(key)}
+          </button>
+        )
+      })}
+    </div>
+  )
+  const mobileCard = (
+    <Panel style={{
+      background: `radial-gradient(circle at 50% 28%, ${DERBY.bgCenter}, ${DERBY.bgOuter})`,
+      borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
+    }}>
+      <style>{`
+        .rbCell:hover:not(:disabled) { filter: brightness(1.2); }
+        @keyframes rbCardPop { 0% { transform: translateX(-50%) scale(0.3); opacity: 0; } 14% { transform: translateX(-50%) scale(1.18); opacity: 1; } 24% { transform: translateX(-50%) scale(1); opacity: 1; } 80% { transform: translateX(-50%) scale(1); opacity: 1; } 100% { transform: translateX(-50%) scale(0.96); opacity: 0; } }
+        @keyframes rbPoolBump { 0% { transform: scale(1.4); color: ${DERBY.gold}; } 100% { transform: scale(1); } }
+        @keyframes rbOddsFlash { 0%, 35% { filter: brightness(2); text-shadow: 0 0 6px currentColor; } 100% { filter: none; text-shadow: none; } }
+        .rbOdds { display: inline-block; animation: rbOddsFlash 0.6s ease-out; }
+        @keyframes rbSlotIn { 0% { transform: translateY(-8px) scale(0.7); opacity: 0.3; } 100% { transform: none; opacity: 1; } }
+        @keyframes rbPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+        @keyframes rbBetBounce { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.04); } }
+      `}</style>
+
+      {/* ① 锁顶 flex:0 0 auto：顶栏 + 开奖舞台(逐球流程常驻) + 主盘6键 */}
+      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column' }}>
+        {topBar}
+        {drawZone}
+        <div style={{ padding: '4px 12px 6px', position: 'relative', zIndex: 1 }}>
+          {ballSwitch}
+          {mainBoard}
+        </div>
+      </div>
+
+      {/* ② 中间滚 flex:1 overflow-y:auto：三个折叠盘区（展开收起互不影响，可同时全开） */}
+      <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '4px 12px', position: 'relative', zIndex: 1 }}>
+        <WinToast toasts={toasts} />
+        {accSection('comboRow', '组合·大小×单双', comboBody)}
+        {accSection('col', '列注·1-75', colBody)}
+        {accSection('num', '单号直选·5×15', numBody)}
+      </div>
+
+      {/* ③ 锁底 flex:0 0 auto：珠盘路(压缩~64px 横滑) + 注栏，均钉死不随滚动 */}
+      <div style={{ flex: '0 0 auto' }}>
+        {/* 珠盘路 ~64px（锁底不变）：5 视角 pill 横滑 + 珠子网格(2 行)，按 curView 从整局 3 球派生重画 */}
+        <div style={{ padding: '3px 12px 0', position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none', marginBottom: 3 }}>
+            {ROAD_VIEWS.map(v => {
+              const on = roadView === v.key
+              return (
+                <button key={v.key} type="button" onClick={() => setRoadView(v.key)} style={{
+                  flex: '0 0 auto', whiteSpace: 'nowrap',
+                  background: on ? DERBY.sel : 'rgba(0,0,0,0.35)', color: on ? '#083a1b' : DERBY.dim,
+                  border: `1px solid ${on ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
+                  borderRadius: RADIUS.pill, padding: '3px 10px', fontSize: 10, fontWeight: 900, cursor: 'pointer',
+                }}>{v.label}</button>
+              )
+            })}
+          </div>
+          <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 14px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 14px)`, gap: 2, width: 'max-content' }}>
+              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
+                const balls = beads[i]
+                const num = balls != null ? balls[curView.ball] : undefined
+                const d = num != null ? curView.judge(num) : null
+                return (
+                  <span key={i} style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    background: d ? (d.red ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.05)',
+                    border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                    color: COLORS.white, fontSize: 7, fontWeight: 900,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+                  }}>{d ? d.t : ''}</span>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+        {/* 注栏（原样） */}
+        <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
+        }}>
+          {[
+            { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+            { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+          ].map(({ v, col, row }) => (
+            <button key={v} type="button" className="rbChip" disabled={!betting} onClick={() => setBet(v)} style={{
+              gridColumn: col, gridRow: row, width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+              background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
+              border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
+              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
+            }}>{v}</button>
+          ))}
+          <div style={{
+            gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+            borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+          }}>
+            <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
+            <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
+          </div>
+          <div style={{
+            gridColumn: 3, gridRow: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 8, background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.15)',
+            color: DERBY.dim, fontSize: 10, fontWeight: 800, whiteSpace: 'nowrap', boxSizing: 'border-box', overflow: 'hidden',
+          }}>连开 3 球 · 逐球结算</div>
+          <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+            <BetButton
+              state="bet"
+              label={betting ? `下注 ${picks.size} 格` : sub === 'draw' ? '开球中' : '本球已结'}
+              sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+              onClick={confirmBets} disabled={!confirmOk} stretch
+            />
+          </div>
+        </div>
+      </div>
+      </div>
+
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
+    </Panel>
+  )
+
   // ---- Spribe-parity desktop skeleton (≥1024) ----
   if (isDesk) {
     return (
@@ -1021,8 +1240,9 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   }
 
   return (
-    <GameLayout color={DERBY.sel}>
-      {gameCard}
-    </GameLayout>
+    <>
+      <style>{`.rbMobileRoot{height:100vh;height:100dvh;overflow:hidden}`}</style>
+      <div className="rbMobileRoot">{mobileCard}</div>
+    </>
   )
 }
