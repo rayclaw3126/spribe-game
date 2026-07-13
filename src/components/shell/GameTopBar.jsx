@@ -3,6 +3,13 @@ import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { useBgm, useSfxMuted } from './bgmManager'
 import { MusicNoteIcon, SpeakerIcon } from './AudioIcons'
 import { shortRoundNo } from '../drawFormatters'
+import { GAME_REGISTRY } from '../../gameRegistry'
+
+// venue（架空场馆名）→ 游戏本名 反查：仅带 venue 的款入表。venue 串全站唯一且与游戏名零重叠，
+// 故可由 venue 值反推出对应 displayName——无需改 21 款调用方，改动面收敛到本文件一处。
+const VENUE_TO_NAME = Object.fromEntries(
+  GAME_REGISTRY.filter(g => g.venue).map(g => [g.venue, g.displayName])
+)
 
 // 游戏顶栏共享件：
 //   移动（<1024）两行 —— 上行 = ← 大厅 钮 + 右侧 ?/音乐/音效；
@@ -14,7 +21,8 @@ import { shortRoundNo } from '../drawFormatters'
 //   右侧：? 橙圆钮直接触发 onHowTo；音乐 = useBgm；音效 = useSfxMuted（全局同步）
 // 砍掉旧内联顶栏的 余额 USD / DEMO MODE pill / 文字版 How-to-Play pill。
 // 色值全部取 tokens 现组；band 缺省 DERBY.band（绿系轮次彩通用档）。
-// 注：gameName 已不再显示（18 个调用方均传 venue，场馆行足以标识当前游戏）。
+// 注：venue 命中反查时顶栏显「游戏名 · 场馆名」（游戏名白/永不截断，场馆名金绿/窄屏 ellipsis）；
+//     venue 为游戏名兜底（无架空场馆）时保持现状，只显该名。
 
 export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo, onFairness, onHistory, onBack, balance, rightExtra, band }) {
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
@@ -40,19 +48,31 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
       cursor: 'pointer', whiteSpace: 'nowrap',
     }}>← 大厅</button>
   )
-  // 场馆件：场馆名全字（禁截断）+ 期号小字；桌面内联入顶行，移动落场馆行
+  // 场馆件：命中反查=真场馆款，显「游戏名 · 场馆名」——游戏名白/永不截断，场馆名金绿/窄屏 ellipsis；
+  //   未命中=venue 实为游戏名的兜底款，保持现状只显该名（不截断）。期号小字永远尾随、flex 固定不被挤叠。
+  const gameName = venue ? VENUE_TO_NAME[venue] : null
   const venueBits = venue && (
-    <>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0, flex: gameName ? '0 1 auto' : '0 0 auto' }}>
+      {gameName && (
+        <>
+          <span style={{
+            color: COLORS.white, fontSize: isDesk ? 11 : 10.5, fontWeight: 900, letterSpacing: 1,
+            fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap', flex: '0 0 auto',
+          }}>{gameName}</span>
+          <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: isDesk ? 10 : 9.5, fontWeight: 900, flex: '0 0 auto' }}>·</span>
+        </>
+      )}
       <span style={{
         color: DERBY.gold, fontSize: isDesk ? 11 : 10.5, fontWeight: 900, letterSpacing: 1,
-        fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap', flex: '0 0 auto',
+        fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap',
+        ...(gameName ? { overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: '0 1 auto' } : { flex: '0 0 auto' }),
       }}>{venue}</span>
       {roundId && (
         <span title={String(roundId)} style={{ color: 'rgba(255,255,255,0.55)', fontSize: isDesk ? 10 : 9.5, fontWeight: 800, whiteSpace: 'nowrap', flex: '0 0 auto' }}>
           #{shortRoundNo(roundId)}
         </span>
       )}
-    </>
+    </span>
   )
   // 余额：数字按 2 位小数渲染；已格式化的字符串（如 Aviator 的 money()）原样透出。
   const balanceBits = balance != null && (
