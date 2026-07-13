@@ -105,7 +105,7 @@ const check1Sql = `
          (init + sum_in - sum_out) AS expected,
          (credit IS DISTINCT FROM (init + sum_in - sum_out)) AS bad
   FROM flow
-  WHERE has_row OR sum_in <> 0 OR sum_out <> 0        -- 静默过滤：纯零活动 agent 不打印
+  WHERE has_row OR sum_in <> 0 OR sum_out <> 0        -- silent filter: skip agents with no row and no flow
   ORDER BY agent_id`;
 
 // —— 检2：上下分双边镜像 count + sum ——
