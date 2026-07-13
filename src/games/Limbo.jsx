@@ -586,19 +586,6 @@ export default function Limbo({ serverBalance, setServerBalance, caps, playerTok
         <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
           venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
-        {/* DEMO 条 — arena 系打法（同 Breakaway 顶部金条，无顶栏胶囊碰撞问题） */}
-        {isDesk && (
-          <div style={{
-            height: LAYOUT.demoBarH, flex: '0 0 auto',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: COLORS.amberTint, color: COLORS.amber,
-            fontSize: 11, fontWeight: 900, letterSpacing: 3,
-            position: 'relative', zIndex: 1,
-          }}>
-            DEMO MODE
-          </div>
-        )}
-
         {/* ---- middle zone: 力量表居中，弹性吸收余量 ---- */}
         <div style={{
           flex: 1, minHeight: 0, position: 'relative', zIndex: 1,

@@ -854,16 +854,6 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
         <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
           venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
 
-        {isDesk && (
-          <div style={{
-            height: LAYOUT.demoBarH, flex: '0 0 auto',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: COLORS.amberTint, color: COLORS.amber,
-            fontSize: 11, fontWeight: 900, letterSpacing: 3,
-          }}>
-            DEMO MODE
-          </div>
-        )}
         <RoundHistoryBar rounds={history} />
         <div style={{
           position: 'relative',

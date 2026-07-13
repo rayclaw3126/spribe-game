@@ -377,5 +377,4 @@ export const LAYOUT = {
   canvasRadius: 16,  // arena card corner radius
   bottomH: 185,      // bottom bet-bay section (min height)
   bayW: 500,         // single centered bet bay width
-  demoBarH: 22,      // golden DEMO MODE strip inside the arena card
 }
