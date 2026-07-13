@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { usePlayerApi } from '../lib/playerApi'
-import GameLayout, { Panel } from '../components/GameLayout'
+import { Panel } from '../components/GameLayout'
 import { GAME_BY_ID } from '../gameRegistry'
 import { COLORS, RADIUS, LAYOUT, HALFTIME } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
@@ -435,6 +435,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   const [picks, setPicks] = useState(() => new Set())        // 待确认选格
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())   // key → 已下注额
   const [roadTab, setRoadTab] = useState('O/U')
+  const [userAcc, setUserAcc] = useState({ m1: true, m2: true, m3: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开）；纯 UI，不动下注 state
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
 
   // ---- 本地「表演」状态机（仅动画层；相位真相在 room）----
@@ -910,6 +911,174 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
     </Panel>
   )
 
+  // ============ 手机三段式（<1024，照德比模板）：锁顶(顶栏+单舞台) / 中滚(三盘区手风琴) / 锁底(路珠+注栏) ============
+  // 折叠纯 UI（userAcc），不动下注 state；结算相位(settled)自动展开三盘区看 hit/lose 高亮，betting 恢复玩家手动态。
+  const SEC_KEYS = {
+    m1: new Set([...ROW1, ...PARLAY].map(m => m.key)),
+    m2: new Set(ZONES.map(m => m.key)),
+    m3: new Set(ROW3.map(m => m.key)),
+  }
+  const selCount = (sec) => {
+    let n = 0
+    new Set([...picks, ...betsPlaced.keys()]).forEach(k => { if (SEC_KEYS[sec].has(k)) n++ })
+    return n
+  }
+  const effAcc = settled ? { m1: true, m2: true, m3: true } : userAcc
+  const accSection = (key, title, body) => {
+    const open = effAcc[key]
+    const cnt = selCount(key)
+    return (
+      <div style={{ borderRadius: 12, background: HALFTIME.strip, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden', marginBottom: 6 }}>
+        <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
+          width: '100%', height: 36, boxSizing: 'border-box',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <span style={{ color: HALFTIME.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+            {cnt > 0 && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flex: '0 0 auto', color: HALFTIME.sel, fontSize: 10, fontWeight: 900 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: HALFTIME.sel, display: 'inline-block' }} />{cnt}
+              </span>
+            )}
+          </span>
+          <span style={{ color: COLORS.white, fontSize: 12, fontWeight: 900, flex: '0 0 auto' }}>{open ? '˄' : '˅'}</span>
+        </button>
+        <div style={{ maxHeight: open ? 1400 : 0, overflow: 'hidden', transition: 'max-height 0.2s ease' }}>
+          <div style={{ padding: '0 6px 6px' }}>{body}</div>
+        </div>
+      </div>
+    )
+  }
+  const body1 = (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{ flex: '1 1 100%', display: 'flex', gap: 6 }}>{ROW1.map(m => betCell(m))}</div>
+      <div style={{ flex: '1 1 100%', display: 'flex', gap: 6 }}>{PARLAY.map(m => betCell(m, { compact: true }))}</div>
+    </div>
+  )
+  const body2 = (
+    <div style={{ position: 'relative', padding: 2 }}>
+      <div style={{ position: 'absolute', left: '50%', top: 4, bottom: 4, width: 1, background: 'rgba(255,255,255,0.18)', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', left: '50%', top: '50%', width: 34, height: 34, border: '1px solid rgba(255,255,255,0.18)', borderRadius: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }} />
+      <div style={{ display: 'flex', gap: 4, position: 'relative' }}>{ZONES.map(m => betCell(m))}</div>
+    </div>
+  )
+  const body3 = (
+    <div style={{ display: 'flex', gap: 6, width: '100%' }}>{ROW3.map(m => betCell(m))}</div>
+  )
+  const mobileCard = (
+    <Panel style={{
+      background: `radial-gradient(circle at 50% 28%, ${HALFTIME.bgCenter}, ${HALFTIME.bgOuter})`,
+      borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
+    }}>
+      <style>{`.htCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
+
+      {/* ① 锁顶：GameTopBar + 单舞台（drawing/settled 才出，canvas 常驻锁顶不折叠不卸载） */}
+      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column' }}>
+        {topBar}
+        {(drawing || settled) && pendingRef.current && (
+          <div style={{ flex: '0 0 auto', margin: '10px 12px 0', position: 'relative', zIndex: 1 }}>
+            <DrawStage key={room.roundNo} round={pendingRef.current}
+              height={150} shakeRef={cardShakeRef} sfx={stageSfx}
+              onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
+          </div>
+        )}
+      </div>
+
+      {/* ② 中滚：三盘区手风琴（大小单双过关 / 球场五段 / 半场，默认全开；结算全展开） */}
+      <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '4px 12px', position: 'relative', zIndex: 1 }}>
+        <WinToast toasts={toasts} />
+        {accSection('m1', '大小 · 单双 · 过关', body1)}
+        {accSection('m2', '球场五段', body2)}
+        {accSection('m3', '半场', body3)}
+      </div>
+
+      {/* ③ 锁底：路珠(5视角 pill 原样 + 珠压 2 行) + 注栏 */}
+      <div style={{ flex: '0 0 auto' }}>
+        <div style={{ padding: '4px 12px 0', position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none', marginBottom: 3 }}>
+            {ROAD_TABS.map(t => (
+              <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
+                flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: RADIUS.pill,
+                background: roadTab === t ? HALFTIME.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : HALFTIME.dim,
+                border: `1px solid ${roadTab === t ? HALFTIME.sel : 'rgba(255,255,255,0.2)'}`,
+                fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
+              }}>{ROAD_TAB_LABELS[t]}</button>
+            ))}
+          </div>
+          <div style={{ overflowX: 'auto', borderRadius: 8, background: HALFTIME.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
+              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
+                const b = beads[i]
+                return (
+                  <span key={i} style={{
+                    width: 15, height: 15, borderRadius: '50%',
+                    background: b ? b.c : 'rgba(255,255,255,0.05)',
+                    border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                    color: COLORS.white, fontSize: b && b.t.length > 1 ? 6 : 8, fontWeight: 900,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+                  }}>{b ? b.t : ''}</span>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: '6px 12px', background: HALFTIME.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
+          }}>
+            {[
+              { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+              { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+            ].map(({ v, col, row }) => (
+              <button key={v} type="button" className="htChip" disabled={!betting} onClick={() => setBet(v)} style={{
+                gridColumn: col, gridRow: row, width: '100%', height: '100%', borderRadius: 8,
+                fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+                background: bet === v ? HALFTIME.selTint : 'rgba(0,0,0,0.35)',
+                border: `1px solid ${bet === v ? HALFTIME.sel : 'rgba(255,255,255,0.35)'}`,
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
+              }}>{v}</button>
+            ))}
+            <div style={{
+              gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+              borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+            }}>
+              <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
+              <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
+            </div>
+            <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
+              gridColumn: 3, gridRow: 2, width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+              color: repeatOk ? COLORS.white : HALFTIME.dim, background: 'rgba(0,0,0,0.35)',
+              border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
+              cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+              <BetButton
+                state="bet"
+                label={betting ? `下注 ${picks.size} 格` : drawing ? '开奖中…' : '本期已结算'}
+                sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+                onClick={confirmBets}
+                disabled={!confirmOk}
+                stretch
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setHistoryOpen(true)} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
+    </Panel>
+  )
+
   // ---- Spribe-parity desktop skeleton (≥1024), same bones as Dribble ----
   if (isDesk) {
     return (
@@ -934,12 +1103,11 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
     )
   }
 
-  // ---- stacked layout (<1024) ----
+  // ---- 手机三段锁死（<1024）----
   return (
-    <GameLayout color={HALFTIME.sel}>
-      <div ref={cardShakeRef}>
-        {gameCard}
-      </div>
-    </GameLayout>
+    <>
+      <style>{`.htMobileRoot{height:100vh;height:100dvh;overflow:hidden}`}</style>
+      <div className="htMobileRoot" ref={cardShakeRef}>{mobileCard}</div>
+    </>
   )
 }
