@@ -2,13 +2,47 @@ import { useState, useEffect } from 'react'
 import { COLORS, RADIUS } from './shell/tokens'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlayerApi } from '../lib/playerApi'
-import { GAME_BY_BACKEND_ID } from '../gameRegistry'
+import { GAME_BY_BACKEND_ID, GAME_REGISTRY } from '../gameRegistry'
 
 // 账单抽屉：右侧滑入，两 tab —— 资金流水(/player/ledger) / 投注记录(/player/bets)。
 // keyset 分页（nextCursor），只读 GET 走 playerApi.apiGet。色值全走 tokens。
+// 筛选：游戏下拉(backendId) + 起止日期 + 今天/7天/30天快捷；切筛选清 cursor+list 同批重拉。
 
 const NOOP = () => {}   // apiGet 不写余额，setServerBalance 传稳定 noop，保 usePlayerApi memo 不抖
 const TABS = [{ k: 'ledger', label: '资金流水' }, { k: 'bets', label: '投注记录' }]
+// 游戏下拉选项：{ value: backendId, label: displayName }，'' = 全部。用 registry 中文名渲染。
+const GAME_OPTIONS = GAME_REGISTRY.map(g => ({ value: g.backendId, label: g.displayName }))
+const round2 = x => Math.round(x * 100) / 100
+
+// 本地日期 → YYYY-MM-DD（与后端 ::date 当天边界口径一致）
+function ymd(d) {
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+// 快捷区间：days=1 今天、7 近 7 天、30 近 30 天（含今天，from=今天-(days-1)，to=今天）
+function quickRange(days) {
+  const now = new Date()
+  const start = new Date(now)
+  start.setDate(now.getDate() - (days - 1))
+  return { from: ymd(start), to: ymd(now) }
+}
+
+// 投注摘要：范式B(轮次彩)selections={key:n} → "key×n key×n" 通吃；
+// 范式A(单人局)selections=null 且 /bets 不返 result（防泄露未开局雷位/牌序），
+// 仅 mines/limbo/dice/hilo 四款用「兑现倍数=payout/amount」作摘要，其余范式A空串。
+const SUMMARY_FMT_A = new Set(['mines', 'limbo', 'dice', 'hilo'])
+function betSummary(it) {
+  // 多注同轮：派彩为「本轮本人总额」而非单注份额（rollingball 逐球 / aviator 多注 / selections 多键），加后缀标注
+  const suffix = (it.game === 'rollingball' || it.game === 'aviator'
+    || (it.selections && typeof it.selections === 'object' && Object.keys(it.selections).length > 1)) ? ' ·本轮合计' : ''
+  if (it.selections && typeof it.selections === 'object') {
+    return Object.entries(it.selections).map(([k, v]) => `${k}×${v}`).join(' ') + suffix
+  }
+  if (SUMMARY_FMT_A.has(it.game) && it.outcome === 'win' && Number(it.amount) > 0) {
+    return `×${round2(Number(it.payout) / Number(it.amount)).toFixed(2)}` + suffix
+  }
+  return suffix.trim()   // rollingball/aviator（selections=null 且非四款）：只显标注，提示派彩为本轮合计
+}
 
 // ledger.type → { 展示名, up(是否入账), 类型词 }。type 前缀=backendId，去 _bet/_payout 后缀反查 registry。
 function ledgerMeta(type) {
@@ -37,24 +71,37 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState(null)
   const [firstLoad, setFirstLoad] = useState(true)
+  const [game, setGame] = useState('')           // 游戏筛选：'' = 全部，否则 backendId
+  const [from, setFrom] = useState('')            // 起始日期 YYYY-MM-DD，'' = 不筛
+  const [to, setTo] = useState('')                // 结束日期 YYYY-MM-DD（含当天），'' = 不筛
 
-  // open 或 tab 变化 → 重置并拉第一页
+  // 组装查询串：limit + 筛选(game/from/to) + 可选 cursor。cursor 只夹 id，与筛选并存不冲突。
+  function qs(cur) {
+    const p = new URLSearchParams({ limit: '20' })
+    if (game) p.set('game', game)
+    if (from) p.set('from', from)
+    if (to) p.set('to', to)
+    if (cur) p.set('cursor', String(cur))
+    return p.toString()
+  }
+
+  // open / tab / 任一筛选变化 → 清 cursor+list，同批重拉第一页
   useEffect(() => {
     if (!open) return
     let cancelled = false
     setItems([]); setCursor(null); setErr(null); setFirstLoad(true); setLoading(true)
-    api.apiGet(`/player/${tab}?limit=20`)
+    api.apiGet(`/player/${tab}?${qs(null)}`)
       .then(d => { if (cancelled) return; setItems(d.items); setCursor(d.nextCursor) })
       .catch(e => { if (!cancelled) setErr(e?.message || '加载失败，请重试') })
       .finally(() => { if (!cancelled) { setLoading(false); setFirstLoad(false) } })
     return () => { cancelled = true }
-  }, [open, tab])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, tab, game, from, to])   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadMore() {
     if (!cursor || loading) return
     setLoading(true); setErr(null)
     try {
-      const d = await api.apiGet(`/player/${tab}?limit=20&cursor=${cursor}`)
+      const d = await api.apiGet(`/player/${tab}?${qs(cursor)}`)
       setItems(prev => [...prev, ...d.items])
       setCursor(d.nextCursor)
     } catch (e) {
@@ -119,6 +166,39 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
           })}
         </div>
 
+        {/* 筛选栏：游戏下拉 + 起止日期 + 今天/7天/30天快捷。变更即触发 effect 清 cursor+list 同批重拉 */}
+        <div style={{ flex: '0 0 auto', display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 18px', borderBottom: `1px solid ${COLORS.border}` }}>
+          <select value={game} onChange={e => setGame(e.target.value)} style={{
+            flex: '1 1 120px', minWidth: 0, padding: '6px 8px', borderRadius: RADIUS.pill,
+            background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.text, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+          }}>
+            <option value="">全部游戏</option>
+            {GAME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} style={{
+            flex: '1 1 110px', minWidth: 0, padding: '6px 8px', borderRadius: RADIUS.pill,
+            background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.text, fontSize: 12, fontWeight: 700,
+          }} />
+          <input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} style={{
+            flex: '1 1 110px', minWidth: 0, padding: '6px 8px', borderRadius: RADIUS.pill,
+            background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.text, fontSize: 12, fontWeight: 700,
+          }} />
+          <div style={{ display: 'flex', gap: 6, flex: '1 1 100%' }}>
+            {[{ label: '今天', d: 1 }, { label: '近7天', d: 7 }, { label: '近30天', d: 30 }].map(q => (
+              <button key={q.d} type="button" onClick={() => { const r = quickRange(q.d); setFrom(r.from); setTo(r.to) }} style={{
+                flex: 1, padding: '5px 0', borderRadius: RADIUS.pill, cursor: 'pointer',
+                background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.textMuted, fontSize: 11, fontWeight: 700,
+              }}>{q.label}</button>
+            ))}
+            {(game || from || to) && (
+              <button type="button" onClick={() => { setGame(''); setFrom(''); setTo('') }} style={{
+                flex: '0 0 auto', padding: '5px 12px', borderRadius: RADIUS.pill, cursor: 'pointer',
+                background: 'transparent', border: `1px solid ${COLORS.border}`, color: COLORS.textFaint, fontSize: 11, fontWeight: 700,
+              }}>清除</button>
+            )}
+          </div>
+        </div>
+
         {/* 列表体 */}
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 12px' }}>
           {firstLoad && loading ? (
@@ -159,10 +239,14 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
               const g = GAME_BY_BACKEND_ID[it.game]
               const won = it.outcome === 'win'
               const badge = won ? { t: '赢', c: COLORS.green, bg: COLORS.greenTint } : it.outcome === 'lose' ? { t: '输', c: COLORS.slate, bg: COLORS.slateTint } : { t: '进行中', c: COLORS.amber, bg: COLORS.amberTint }
+              const summary = betSummary(it)
               return (
                 <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 6px', borderBottom: `1px solid ${COLORS.border}` }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>{g ? g.displayName : it.game}</div>
+                    {summary && (
+                      <div style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</div>
+                    )}
                     <div style={smallMuted}>注 {money(it.amount)} · {fmtTime(it.created_at)}</div>
                   </div>
                   <div style={{ textAlign: 'right', flex: '0 0 auto' }}>

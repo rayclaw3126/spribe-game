@@ -30,6 +30,21 @@ function parseCursor(raw) {
   if (raw == null || raw === '') return null;
   return /^\d+$/.test(String(raw)) ? String(raw) : null;
 }
+// game 白名单：只接受 risk.js perGame 里已知的 21 款 backendId，防注入/越权枚举。
+// 缺省返回 null（不筛）；非法值直接抛 400（前端下拉只给合法值，非法即防御）。
+const GAME_WHITELIST = new Set(Object.keys(riskCfg.perGame));
+function parseGame(raw) {
+  if (raw == null || raw === '') return null;
+  const g = String(raw);
+  if (!GAME_WHITELIST.has(g)) { const e = new Error('未知的 game 筛选值'); e.status = 400; throw e; }
+  return g;
+}
+// 日期：只接受 YYYY-MM-DD，透传给 SQL ::date 转当天边界（>=from 当天 00:00，<to+1 含 to 全天）。
+// 非法/缺省返回 null（不筛）。时区随 DB 会话，dev 一致即可。
+function parseDate(raw) {
+  if (raw == null || raw === '') return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(raw)) ? String(raw) : null;
+}
 
 // GET /player/me —— 玩家自己的钱包余额 + 全量风控 caps（只读，参数化查询）
 router.get('/me', requireAuth, requireType('player'), async (req, res, next) => {
@@ -43,18 +58,27 @@ router.get('/me', requireAuth, requireType('player'), async (req, res, next) => 
   }
 });
 
-// GET /player/ledger?limit=20&cursor=<id> —— 资金流水（含全 21 款 _bet/_payout + deposit/withdraw）
+// GET /player/ledger?limit=20&cursor=<id>&game=<backendId>&from=YYYY-MM-DD&to=YYYY-MM-DD
+// 资金流水（含全 21 款 _bet/_payout + deposit/withdraw）。game 筛选按 type IN (game_bet, game_payout)；
+// 日期筛选按 created_at 落 [from 00:00, to+1) 当天含头尾。keyset 与筛选并存（cursor 只夹 id，筛选各自独立）。
 router.get('/ledger', requireAuth, requireType('player'), async (req, res, next) => {
   try {
     const playerId = req.user.sub;                 // 只从 token 取，不收 query，杜绝越权
     const limit = clampLimit(req.query.limit);
     const cursor = parseCursor(req.query.cursor);
+    const game = parseGame(req.query.game);
+    const from = parseDate(req.query.from);
+    const to = parseDate(req.query.to);
     const result = await query(
       `SELECT id, type, amount, balance_before, balance_after, round_id, created_at
        FROM ledger
-       WHERE player_id = $1 AND ($2::bigint IS NULL OR id < $2)
-       ORDER BY id DESC LIMIT $3`,
-      [playerId, cursor, limit],
+       WHERE player_id = $1
+         AND ($2::bigint IS NULL OR id < $2)
+         AND ($3::text IS NULL OR type IN ($3 || '_bet', $3 || '_payout'))
+         AND ($4::date IS NULL OR created_at >= $4::date)
+         AND ($5::date IS NULL OR created_at < ($5::date + 1))
+       ORDER BY id DESC LIMIT $6`,
+      [playerId, cursor, game, from, to, limit],
     );
     const items = result.rows;
     const nextCursor = items.length === limit ? items[items.length - 1].id : null;
@@ -64,18 +88,40 @@ router.get('/ledger', requireAuth, requireType('player'), async (req, res, next)
   }
 });
 
-// GET /player/bets?limit=20&cursor=<id> —— 投注记录（注单 + 游戏名 + 结果；不返 r.result，最小暴露）
+// GET /player/bets?limit=20&cursor=<id>&game=<backendId>&from=YYYY-MM-DD&to=YYYY-MM-DD
+// 投注记录（注单 + 游戏名 + selections + 结果 + 派彩）。不返 r.result，最小暴露。
+// 派彩口径修正：r.payout 对轮次彩/共享开奖局恒 null（rounds 是全场共享开奖行），
+// 改从 ledger 按 (player_id, round_id, type=game_payout) SUM 聚合取本人真实派彩（LATERAL 单行不乘行）。
+// 取值：COALESCE(NULLIF(ledger聚合,0), r.payout, 0)——ledger 有派彩优先（轮次彩真源）；
+// 为 0/无（含远古走通用 type='payout' 的 settle 局）则回落 r.payout，保单人局与旧口径逐位一致。
+// 多注同轮（rollingball 逐球 / speedgrid 多注）每行显示该轮本人总派彩。
 router.get('/bets', requireAuth, requireType('player'), async (req, res, next) => {
   try {
     const playerId = req.user.sub;
     const limit = clampLimit(req.query.limit);
     const cursor = parseCursor(req.query.cursor);
+    const game = parseGame(req.query.game);
+    const from = parseDate(req.query.from);
+    const to = parseDate(req.query.to);
     const result = await query(
-      `SELECT b.id, b.amount, b.outcome, b.created_at, r.game, r.payout
-       FROM bets b JOIN rounds r ON b.round_id = r.id
-       WHERE b.player_id = $1 AND ($2::bigint IS NULL OR b.id < $2)
-       ORDER BY b.id DESC LIMIT $3`,
-      [playerId, cursor, limit],
+      `SELECT b.id, b.amount, b.outcome, b.created_at, r.game, b.selections,
+              COALESCE(NULLIF(lp.payout, 0), r.payout, 0) AS payout
+       FROM bets b
+       JOIN rounds r ON b.round_id = r.id
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(l.amount), 0) AS payout
+         FROM ledger l
+         WHERE l.player_id = b.player_id
+           AND l.round_id = b.round_id
+           AND l.type = r.game || '_payout'
+       ) lp ON true
+       WHERE b.player_id = $1
+         AND ($2::bigint IS NULL OR b.id < $2)
+         AND ($3::text IS NULL OR r.game = $3)
+         AND ($4::date IS NULL OR b.created_at >= $4::date)
+         AND ($5::date IS NULL OR b.created_at < ($5::date + 1))
+       ORDER BY b.id DESC LIMIT $6`,
+      [playerId, cursor, game, from, to, limit],
     );
     const items = result.rows;
     const nextCursor = items.length === limit ? items[items.length - 1].id : null;

@@ -104,6 +104,11 @@ app.use((err, req, res, next) => {
     return res.status(err.status).json({ error: err.message, code: err.code });
   }
 
+  // 路由主动抛出的、带显式 4xx status 的客户端错误（如账单非法 game 筛选值）：按其 status 透出。
+  if (Number.isInteger(err.status) && err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.message });
+  }
+
   // 业务代码里主动抛出的「余额不足」「钱包不存在」等属于客户端可读的提示，用 400 返回；
   // 其余未预期的异常按 500 处理，且不把 err.stack 等内部细节吐给客户端。
   const knownBusinessErrors = ['余额不足', '钱包不存在'];
