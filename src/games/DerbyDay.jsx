@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel } from '../components/GameLayout'
+import { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
@@ -517,6 +517,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [roadTab, setRoadTab] = useState('FT-H/A')
+  const [userAcc, setUserAcc] = useState({ ht: true, ft: true, htft: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开，玩家可自行收）；纯 UI，不动下注 state
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
 
   // ---- 本地「表演」子相位（仅动画层；相位/期号/倒计时真相在 room）----
@@ -1222,6 +1223,213 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
     </Panel>
   )
 
+  // ============ 手机三段式（<1024，照滚球 5fb7171）：锁顶(顶栏+双舞台) / 中滚(三折叠盘区) / 锁底(珠盘路+注栏) ============
+  // 折叠纯 UI（userAcc），不动下注 state；结算相位(settled)自动展开三盘区看 hit/push/lose 高亮，betting 恢复玩家手动态。
+  const settledOpen = gamePhase === 'settled'
+  const effAcc = settledOpen ? { ht: true, ft: true, htft: true } : userAcc
+  const selCount = (section) => {
+    let n = 0
+    new Set([...picks, ...betsPlaced.keys()]).forEach(k => {
+      const belong = section === 'htft' ? k.startsWith('ht-ft-')
+        : section === 'ht' ? (k.startsWith('ht-') && !k.startsWith('ht-ft-'))
+          : k.startsWith('ft-')
+      if (belong) n++
+    })
+    return n
+  }
+  const accSection = (key, title, body) => {
+    const open = effAcc[key]
+    const cnt = selCount(key)
+    return (
+      <div style={{ ...secBox, padding: 0, overflow: 'hidden', marginBottom: 6 }}>
+        <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
+          width: '100%', height: 36, boxSizing: 'border-box',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <span style={{ color: DERBY.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+            {cnt > 0 && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flex: '0 0 auto', color: DERBY.sel, fontSize: 10, fontWeight: 900 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: DERBY.sel, display: 'inline-block' }} />{cnt}
+              </span>
+            )}
+          </span>
+          <span style={{ color: COLORS.white, fontSize: 12, fontWeight: 900, flex: '0 0 auto' }}>{open ? '˄' : '˅'}</span>
+        </button>
+        <div style={{ maxHeight: open ? 1400 : 0, overflow: 'hidden', transition: 'max-height 0.2s ease' }}>
+          <div style={{ padding: '0 6px 6px' }}>{body}</div>
+        </div>
+      </div>
+    )
+  }
+  // 盘区体（去 secBox/secHead，供折叠体；桌面仍走 marketGroup/htftGroup 原 const，零改）
+  const marketBody = g => (
+    <>
+      <div style={{ display: 'flex', gap: 5, marginBottom: 5 }}>
+        <button type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-home`)} style={cellBase(`${g.key}-home`, DERBY.home)}>
+          <span style={cellName}>主队</span><span style={cellOdds}>{ODDS.main.toFixed(2)}</span>{stakeChip(`${g.key}-home`)}
+        </button>
+        <button type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-away`)} style={cellBase(`${g.key}-away`, DERBY.away)}>
+          <span style={cellName}>客队</span><span style={cellOdds}>{ODDS.main.toFixed(2)}</span>{stakeChip(`${g.key}-away`)}
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {[
+          { k: 'big', name: '大', range: g.big },
+          { k: 'small', name: '小', range: g.small },
+          { k: 'odd', name: '单', range: '和值单' },
+          { k: 'even', name: '双', range: '和值双' },
+        ].map(m => (
+          <button key={m.k} type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-${m.k}`)} style={cellBase(`${g.key}-${m.k}`, DERBY.grey)}>
+            <span style={cellName}>{m.name}</span><span style={cellRange}>{m.range}</span><span style={cellOdds}>{MARKETS[`${g.key}-${m.k}`].odds.toFixed(2)}</span>{stakeChip(`${g.key}-${m.k}`)}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+  const htftBody = (
+    <>
+      <div style={{ display: 'flex', gap: 5, marginBottom: 5 }}>{HTFT.slice(0, 2).map(htftCell)}</div>
+      <div style={{ display: 'flex', gap: 5 }}>{HTFT.slice(2).map(htftCell)}</div>
+    </>
+  )
+  const mobileCard = (
+    <Panel style={{
+      background: `radial-gradient(circle at 50% 28%, ${DERBY.bgCenter}, ${DERBY.bgOuter})`,
+      borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
+    }}>
+      <style>{`
+        .ddCell:hover:not(:disabled) { filter: brightness(1.2); }
+        @keyframes ddWinBreathH { 0%, 100% { box-shadow: 0 0 8px ${hexA(DERBY.home, 0.45)}; } 50% { box-shadow: 0 0 18px ${hexA(DERBY.home, 0.8)}, 0 0 30px ${hexA(DERBY.home, 0.4)}; } }
+        @keyframes ddWinBreathA { 0%, 100% { box-shadow: 0 0 8px ${hexA(DERBY.away, 0.45)}; } 50% { box-shadow: 0 0 18px ${hexA(DERBY.away, 0.8)}, 0 0 30px ${hexA(DERBY.away, 0.4)}; } }
+      `}</style>
+
+      {/* ① 锁顶：GameTopBar + 双舞台 drawZone（canvas 常驻挂载，禁折叠禁卸载） */}
+      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column' }}>
+        {topBar}
+        {drawZone}
+      </div>
+
+      {/* ② 中滚：三盘区手风琴（HT 开 / FT 开 / 半全场 收；结算相位全展开） */}
+      <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '4px 12px', position: 'relative', zIndex: 1 }}>
+        <WinToast toasts={toasts} />
+        {accSection('ht', GROUPS[0].label, marketBody(GROUPS[0]))}
+        {accSection('ft', GROUPS[1].label, marketBody(GROUPS[1]))}
+        {accSection('htft', '半全场 · 半场胜方 / 全场胜方', htftBody)}
+      </div>
+
+      {/* ③ 锁底：珠盘路(6视角 pill 原样 + 珠压 2 行 + 占比细条 ~110px) + 注栏 */}
+      <div style={{ flex: '0 0 auto' }}>
+        <div style={{ padding: '4px 12px 0', position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none', marginBottom: 3 }}>
+            {ROAD_TABS.map(t => (
+              <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
+                flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 9px', borderRadius: RADIUS.pill,
+                background: roadTab === t ? DERBY.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : DERBY.dim,
+                border: `1px solid ${roadTab === t ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
+                fontSize: 9.5, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
+              }}>{ROAD_TAB_LABELS[t]}</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+            <span style={{ color: DERBY.home, fontSize: 8.5, fontWeight: 900, whiteSpace: 'nowrap' }}>主 {pct(hw)}%</span>
+            <div style={{ flex: 1, height: 4, borderRadius: 2, overflow: 'hidden', display: 'flex', background: 'rgba(0,0,0,0.35)' }}>
+              <span style={{ width: `${pct(hw)}%`, background: DERBY.home }} />
+              <span style={{ width: `${pct(dw)}%`, background: 'rgba(255,255,255,0.4)' }} />
+              <span style={{ width: `${pct(aw)}%`, background: DERBY.away }} />
+            </div>
+            <span style={{ color: DERBY.away, fontSize: 8.5, fontWeight: 900, whiteSpace: 'nowrap' }}>客 {pct(aw)}%</span>
+          </div>
+          <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
+              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
+                const b = beads[i]
+                return (
+                  <span key={i} style={{
+                    width: 15, height: 15, borderRadius: '50%',
+                    background: b ? b.c : 'rgba(255,255,255,0.05)',
+                    border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                    color: COLORS.white, fontSize: 7.5, fontWeight: 900,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+                  }}>{b ? b.t : ''}</span>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+            gridTemplateRows: 'repeat(2, 28px)',
+            gap: 6,
+            maxWidth: 480, margin: '0 auto',
+          }}>
+            {[
+              { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+              { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+            ].map(({ v, col, row }) => (
+              <button key={v} type="button" className="ddChip" disabled={!betting} onClick={() => setBet(v)} style={{
+                gridColumn: col, gridRow: row,
+                width: '100%', height: '100%', borderRadius: 8,
+                fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+                background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
+                border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
+                boxSizing: 'border-box',
+              }}>{v}</button>
+            ))}
+            <div style={{
+              gridColumn: 3, gridRow: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+              borderRadius: 8, padding: '0 6px',
+              background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+            }}>
+              <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
+              <input
+                value={bet}
+                disabled={!betting}
+                onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                style={{
+                  width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
+                  color: COLORS.white, fontSize: 14, fontWeight: 900,
+                }}
+              />
+            </div>
+            <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
+              gridColumn: 3, gridRow: 2,
+              width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+              color: repeatOk ? DERBY.text : DERBY.dim,
+              background: 'rgba(0,0,0,0.35)',
+              border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
+              cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+              <BetButton
+                state="bet"
+                label={betting ? `▷ 下注 ${pricedOf(picks).length} 格` : gamePhase === 'settled' ? '本期已结算' : '已锁盘 · 开赛中'}
+                sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+                onClick={confirmBets}
+                disabled={!confirmOk}
+                stretch
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setHistoryOpen(true)} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
+    </Panel>
+  )
+
   // ---- Spribe-parity desktop skeleton (≥1024), same bones as Hat Trick ----
   if (isDesk) {
     return (
@@ -1245,10 +1453,11 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
     )
   }
 
-  // ---- stacked layout (<1024) ----
+  // ---- 手机三段锁死（<1024）----
   return (
-    <GameLayout color={DERBY.sel}>
-      {gameCard}
-    </GameLayout>
+    <>
+      <style>{`.ddMobileRoot{height:100vh;height:100dvh;overflow:hidden}`}</style>
+      <div className="ddMobileRoot">{mobileCard}</div>
+    </>
   )
 }
