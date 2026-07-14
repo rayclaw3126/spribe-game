@@ -37,6 +37,7 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
   // 游戏内切换（仅移动端）：从 Context 拿 setActiveGame；当前款由 venue 反查（venue??displayName 全站唯一）。
   const switchGame = useContext(GameNavContext)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)   // 手机 ⋯ 溢出菜单
   const curGame = venue ? GAME_REGISTRY.find(g => (g.venue ?? g.displayName) === venue) : null
 
   const roundBtn = (onClick, title, active, children) => (
@@ -91,6 +92,47 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
       {' '}
       <span style={{ color: COLORS.textFaint, fontSize: 11, fontWeight: 700 }}>USD</span>
     </span>
+  )
+
+  // 手机 ⋯ 溢出菜单：账单/公平性/玩法说明(各回调没传就不显该项，老规矩) + 音效开关(音乐+静音合并，显 开/关)。
+  const soundOn = !muted
+  const toggleSound = () => { toggleMuted(); if (bgmOn !== muted) toggleBgm() }   // 静音翻转 + bgm 同步到目标态
+  const menuItem = (icon, label, onClick, hint) => (
+    <button type="button" onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+      padding: '9px 12px', borderRadius: 8, background: 'transparent', border: 'none',
+      color: COLORS.text, fontSize: 13, fontWeight: 700, cursor: 'pointer', textAlign: 'left', whiteSpace: 'nowrap',
+    }}>
+      <span style={{ fontSize: 14, width: 18, textAlign: 'center', flex: '0 0 auto' }}>{icon}</span>
+      <span style={{ flex: 1 }}>{label}</span>
+      {hint && <span style={{ color: COLORS.green, fontSize: 12, fontWeight: 900, flex: '0 0 auto' }}>{hint}</span>}
+    </button>
+  )
+  const overflowBtn = (
+    <button type="button" onClick={() => setMenuOpen(o => !o)} title="更多" style={{
+      width: 28, height: 28, borderRadius: RADIUS.pill, flex: '0 0 auto',
+      background: menuOpen ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.3)',
+      color: COLORS.white, border: '1px solid rgba(255,255,255,0.25)',
+      fontSize: 18, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    }}>⋯</button>
+  )
+  // 锚定小面板（右对齐，点外关闭）；面板挂在顶栏 div(position:relative)内、绝对定位下垂。
+  const menuPanel = !isDesk && menuOpen && (
+    <>
+      <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 6 }} />
+      <div style={{
+        position: 'absolute', top: 'calc(100% + 4px)', right: 8, zIndex: 7,
+        minWidth: 156, background: COLORS.panel, border: `1px solid ${COLORS.border}`,
+        borderRadius: 10, padding: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
+        display: 'flex', flexDirection: 'column', gap: 1,
+      }}>
+        {onHistory && menuItem('📜', '账单', () => { setMenuOpen(false); onHistory() })}
+        {onFairness && menuItem('⚖', '公平性', () => { setMenuOpen(false); onFairness() })}
+        {onHowTo && menuItem('?', '玩法说明', () => { setMenuOpen(false); onHowTo() })}
+        {menuItem(soundOn ? '♪' : '🔇', '音效开关', () => toggleSound(), soundOn ? '开' : '关')}
+      </div>
+    </>
   )
 
   const rightBits = (
@@ -149,7 +191,10 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
         {isDesk && subRow && (
           <div style={{ minWidth: 0, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>{subRow}</div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>{rightBits}</div>
+        {/* 桌面：全钮内联；手机：只留 余额（永不挤切）+ ⋯（其余钮收进菜单） */}
+        {isDesk
+          ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>{rightBits}</div>
+          : <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>{rightExtra}{balanceBits}{overflowBtn}</div>}
       </div>
       {/* 移动场馆行（venue/subRow 有值才渲染）：场馆名优先左 + chip + subRow 同行拼排 */}
       {!isDesk && (venue || subRow) && (
@@ -168,6 +213,7 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
             : <><span style={{ marginLeft: 'auto' }} />{phaseChip}</>}
         </div>
       )}
+      {menuPanel}
     </div>
     {!isDesk && (
       <GameSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)}
