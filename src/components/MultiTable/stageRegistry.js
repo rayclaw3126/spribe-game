@@ -5,6 +5,9 @@ import NumberUpStage from '../../games/stages/NumberUpStage'
 import HatTrickStage from '../../games/stages/HatTrickStage'
 import HalfTimeStage from '../../games/stages/HalfTimeStage'
 import GoldenBootStage from '../../games/stages/GoldenBootStage'
+import WuXingStage from '../../games/stages/WuXingStage'
+import LineUpStage from '../../games/stages/LineUpStage'
+import DerbyDayStage from '../../games/stages/DerbyDayStage'
 
 export const STAGE_BY_ID = {
   SpeedGrid: SpeedGridStage,
@@ -12,4 +15,7 @@ export const STAGE_BY_ID = {
   HatTrick: HatTrickStage,
   HalfTime: HalfTimeStage,
   GoldenBoot: GoldenBootStage,
+  WuXing: WuXingStage,
+  LineUp: LineUpStage,
+  DerbyDay: DerbyDayStage,
 }
