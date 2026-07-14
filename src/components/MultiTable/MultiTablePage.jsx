@@ -21,7 +21,17 @@ const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 // 钱路径唯一 = playerApi.apiPlay（每款一次 POST /round/<be>/play，自动幂等键 + balanceAfter 回写）；
 // 余额只认 balanceAfter（下注回写 + settleInfo 回写）；禁改后端。相位/期号/开奖/路珠走 useRoundRoom。
 // 两栏：左列 200(GameRail + BetSlip) / 中 2 列网格竖滚。仅 PC ≥1024。
-export default function MultiTablePage({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack }) {
+// 换桌记忆 localStorage 键：上桌列表 + 选中筹码持久（回页恢复）。
+// ⚠️ 快投模式故意不记忆——每次进页默认「注单」：快投点盘口即真钱秒扣，安全优先。
+const LS_TABLES = 'spribe_multi_tables'
+const LS_CHIP = 'spribe_multi_chip'
+function loadTables() {
+  try { const s = JSON.parse(localStorage.getItem(LS_TABLES)); if (Array.isArray(s) && s.length && s.every(id => ALL_TABLE_IDS.includes(id))) return s } catch { /* ignore */ }
+  return DEFAULT_TABLES
+}
+function loadChip() { const n = Number(localStorage.getItem(LS_CHIP)); return CHIP_VALUES.includes(n) ? n : CHIP_VALUES[0] }
+
+export default function MultiTablePage({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack, onOpenGame }) {
   const isDesk = useMediaQuery('(min-width: 1024px)')
   const playerName = (typeof localStorage !== 'undefined' && localStorage.getItem('spribe_player_username')) || ''  // 战绩卡脱敏用
   const [sfxMuted, toggleSfxMuted] = useSfxMuted()       // 全局音效静音（单例，切了单游戏页同步生效）
@@ -29,8 +39,8 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // apiPlay 自动回写 balanceAfter
   const apiRef = useRef(api); apiRef.current = api                         // 广播轮询用稳定引用，免 effect 抖动
 
-  const [tables, setTables] = useState(DEFAULT_TABLES)
-  const [chip, setChip] = useState(CHIP_VALUES[0])
+  const [tables, setTables] = useState(loadTables)   // 上桌列表：localStorage 恢复
+  const [chip, setChip] = useState(loadChip)          // 选中筹码：localStorage 恢复
   const [slip, setSlip] = useState([])                 // [{id, gameId, gameName, key, market, odds, amount, error}]
   const [submitted, setSubmitted] = useState({})       // {gameId:{roundNo,total}} 本期已投（roundNo 不匹配即隐）
   const [confirming, setConfirming] = useState(false)  // 确认中：禁重入
@@ -40,7 +50,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   const submittedRef = useRef({})                      // submitted 镜像：结算 effect 只读本地已投算档位（免闭包过期）
   submittedRef.current = submitted
   const [bigwins, setBigwins] = useState({ marquee: [], top: [] })   // 平台内广播（跑马灯 + 今日大奖），20s 轮询
-  const [mode, setMode] = useState('slip')             // 'slip' 注单模式(默认) | 'quick' 快投
+  const [mode, setMode] = useState('slip')             // 'slip' 注单(默认) | 'quick' 快投 —— 故意不持久：每次进页默认注单（快投真钱秒扣，安全优先）
   const [quickState, setQuickState] = useState({})     // {`gid:key`: 'flying'|'ok'|'err'} 快投按钮态
   const [quickLog, setQuickLog] = useState([])         // 已发快投明细（只读不可撤）
   const slipSeq = useRef(0)
@@ -218,6 +228,10 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
     })
   }, [settleSig])   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 换桌记忆：上桌列表 + 筹码变更即写 localStorage（回页恢复）。mode 不在此列（安全优先，见上）。
+  useEffect(() => { try { localStorage.setItem(LS_TABLES, JSON.stringify(tables)) } catch { /* ignore */ } }, [tables])
+  useEffect(() => { try { localStorage.setItem(LS_CHIP, String(chip)) } catch { /* ignore */ } }, [chip])
+
   // 平台内广播轮询：页面开着（isDesk）才每 20s 拉 /player/bigwins；离开即停。不碰 /ws/rounds。
   useEffect(() => {
     if (!isDesk) return undefined
@@ -353,7 +367,8 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
             return (
               <TableCard key={id} id={id} room={room} playerToken={playerToken} onLogout={onLogout}
                 stakedAmt={stakedAmt} mode={mode} quickState={quickState}
-                onAddBet={addBet} onQuickBet={quickBet} onToast={pushToast} onClose={closeTable} flash={flashId === id} />
+                onAddBet={addBet} onQuickBet={quickBet} onToast={pushToast} onClose={closeTable}
+                onOpenGame={onOpenGame} flash={flashId === id} />
             )
           })}
         </div>

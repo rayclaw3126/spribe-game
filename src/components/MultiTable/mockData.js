@@ -13,8 +13,9 @@ export const RAIL_GROUPS = [
   { key: 'duel',  label: '对决',   ids: ['DerbyDay', 'DominoDuel'] },
 ]
 
-// 「我的最爱」占位（纯假值）：假收藏 2 款（★），静态不做折叠；日后接大厅收藏
-export const FAV_IDS = ['WuXing', 'DerbyDay']
+// 「我的最爱」：#44 接大厅真收藏后恢复（届时改从收藏源派生）。当前清空——
+// 占位假收藏撤下，收藏组空则整组不渲染（见 GameRail）。
+export const FAV_IDS = []
 
 export const ALL_TABLE_IDS = RAIL_GROUPS.flatMap(g => g.ids)     // 9 款全集
 export const CATALOG = ALL_TABLE_IDS                             // 目录 = 9 款

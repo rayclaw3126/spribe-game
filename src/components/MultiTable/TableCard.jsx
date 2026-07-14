@@ -49,7 +49,7 @@ function useInViewport(ref) {
 
 // 单张桌卡（接活）：room 下发相位/期号/倒计时/开奖；上期+迷你路珠首帧 /round/history 播种、
 // 之后收 drawn 结果滚动追加；盘口赔率读 markets（oddsStr）；下注仍假（onAddBet → 右栏注单）。
-export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, mode, quickState, onAddBet, onQuickBet, onClose, flash }) {
+export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, mode, quickState, onAddBet, onQuickBet, onClose, onOpenGame, flash }) {
   const be = backendOf(id)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮同步；speedgrid 真舞台用）
   // 盘口点击：快投模式 → 立即发单键；注单模式 → 进 slip
@@ -89,6 +89,7 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
   const beads = [...liveCur, ...past].slice(0, 8)
 
   const ph = phaseMeta(room.phase)
+  const disc = room.connected === false   // 断线：相位 chip 转「重连中」灰；恢复自动回正（退避重连在 useRoundRoom）
   const cd = fmtMs(room.countdownMs)
   const lastTxt = beads[0]?.drawResult ? (formatDraw(be, beads[0].drawResult) || '—') : '—'
   const drawTxt = room.drawResult ? (formatDraw(be, room.drawResult) || '') : ''
@@ -113,15 +114,15 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
         )}
         <span style={{
           marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
-          background: ph.bg, color: ph.c, border: `1px solid ${ph.c}`,
+          background: disc ? M.cardHi : ph.bg, color: disc ? M.txtMute : ph.c, border: `1px solid ${disc ? M.line : ph.c}`,
           borderRadius: 999, padding: '2px 8px', fontSize: 10, fontWeight: 900, whiteSpace: 'nowrap',
         }}>
-          <span style={{ width: 5, height: 5, borderRadius: '50%', background: ph.c }} />
-          {ph.text}{ph.timed && room.countdownMs > 0 && ` · ${cd}`}
+          <span style={{ width: 5, height: 5, borderRadius: '50%', background: disc ? M.txtMute : ph.c }} />
+          {disc ? '重连中' : `${ph.text}${ph.timed && room.countdownMs > 0 ? ` · ${cd}` : ''}`}
         </span>
-        <button type="button" disabled aria-label="全屏（占位）" style={{
-          flex: '0 0 auto', width: 22, height: 22, borderRadius: 6, cursor: 'not-allowed',
-          background: M.cardHi, border: `1px solid ${M.line}`, color: M.txtMute, fontSize: 12, fontWeight: 700,
+        <button type="button" onClick={() => onOpenGame?.(id)} aria-label="进入完整游戏页" title="进入完整游戏页" style={{
+          flex: '0 0 auto', width: 22, height: 22, borderRadius: 6, cursor: 'pointer',
+          background: M.cardHi, border: `1px solid ${M.line}`, color: M.txtDim, fontSize: 12, fontWeight: 700,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>⤢</button>
         <button type="button" onClick={() => onClose(id)} aria-label="下桌" style={{

@@ -50,17 +50,6 @@ export default function Lobby({ onSelect, onOpenMulti }) {
           电子游戏
         </h1>
 
-        {/* TODO 单5 正式入口：PC 临时「多桌专区」入口钮（紧邻分类栏顶部；手机分支不加） */}
-        {isDesk && onOpenMulti && (
-          <button type="button" onClick={onOpenMulti} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 16,
-            background: D.accent, color: D.accentInk, border: 'none',
-            borderRadius: 999, padding: '9px 18px', fontSize: 14, fontWeight: 800, cursor: 'pointer',
-          }}>
-            <span>▦</span> 多桌专区
-          </button>
-        )}
-
         <div style={{ display: isDesk ? 'flex' : 'block', gap: 24, alignItems: 'flex-start' }}>
           {/* ---- PC 左侧栏（分类列表） ---- */}
           {isDesk ? (
@@ -68,6 +57,8 @@ export default function Lobby({ onSelect, onOpenMulti }) {
               flex: '0 0 200px', width: 200, position: 'sticky', top: 64,
               background: D.panel, border: `1px solid ${D.line}`, borderRadius: 12, padding: 6,
             }}>
+              {/* 多桌专区正式入口：融入侧栏体系（accent 底强调=导航非筛选；PC ≥1024 专属，手机分支不显） */}
+              {onOpenMulti && <MultiRow onClick={onOpenMulti} />}
               {TABS.map(t => (
                 <SideRow key={t.key} label={t.label} count={catCount(t.key)}
                   active={cat === t.key} onClick={() => setCat(t.key)} />
@@ -104,6 +95,24 @@ export default function Lobby({ onSelect, onOpenMulti }) {
         </div>
       </div>
     </div>
+  )
+}
+
+// 多桌专区入口行：与 SideRow 同版式（同宽/圆角/内距），accentBg 底 + 绿字 + 左绿条 + → 箭头，
+// 醒目区分「导航动作」于下方「分类筛选」；置于侧栏顶部并留下边距分隔。
+function MultiRow({ onClick }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      position: 'relative', width: '100%',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      background: D.accentBg, border: `1px solid ${D.accent}`,
+      borderRadius: 8, padding: '10px 12px', margin: '0 0 8px', cursor: 'pointer',
+      color: D.accent, fontSize: 14, fontWeight: 800, textAlign: 'left',
+    }}>
+      <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 2, borderRadius: 2, background: D.accent }} />
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span>▦</span> 多桌专区</span>
+      <span style={{ fontSize: 13, fontWeight: 900 }}>→</span>
+    </button>
   )
 }
 

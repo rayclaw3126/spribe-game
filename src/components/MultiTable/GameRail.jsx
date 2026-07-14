@@ -27,11 +27,13 @@ function TopBoard({ top }) {
 }
 
 // room.phase → 相位点色（与 TableCard 同口径）
-const dotColor = (phase) => (
-  phase === 'betting' ? M.betting
-    : phase === 'locked' ? M.locked
-      : (phase === 'drawn' || phase === 'settled') ? M.drawing
-        : M.txtMute
+// 断线（room.connected=false）相位点转灰；恢复自动回正（纯显示，退避重连在 useRoundRoom）
+const dotColor = (room) => (
+  room && room.connected === false ? M.txtMute
+    : room?.phase === 'betting' ? M.betting
+      : room?.phase === 'locked' ? M.locked
+        : (room?.phase === 'drawn' || room?.phase === 'settled') ? M.drawing
+          : M.txtMute
 )
 // 右侧小字：betting/idle 走倒计时 mm:ss，其余走相位短字
 const fmtMs = (ms) => {
@@ -55,7 +57,7 @@ function RailRow({ id, room, active, star, onSelect }) {
       borderRadius: 8, padding: '8px 8px 8px 12px', margin: '1px 0', cursor: 'pointer', textAlign: 'left',
     }}>
       {active && <span style={{ position: 'absolute', left: 0, top: 7, bottom: 7, width: 2, borderRadius: 2, background: M.accent }} />}
-      <span style={{ flex: '0 0 auto', width: 6, height: 6, borderRadius: '50%', background: dotColor(room?.phase) }} />
+      <span style={{ flex: '0 0 auto', width: 6, height: 6, borderRadius: '50%', background: dotColor(room) }} />
       <span style={{
         flex: 1, minWidth: 0, color: active ? M.txt : M.txtDim, fontSize: 12, fontWeight: active ? 800 : 600,
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -77,15 +79,18 @@ export default function GameRail({ tables, onSelect, rooms, top }) {
       flex: '1 1 auto', width: '100%', minHeight: 0,
       background: M.panel, border: `1px solid ${M.line}`, borderRadius: 12, padding: 6, overflowY: 'auto',
     }}>
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '6px 8px 4px' }}>
-          <span style={{ color: M.txtMute, fontSize: 10, fontWeight: 800, letterSpacing: 0.5 }}>我的最爱</span>
-          <span style={{ color: M.txtMute, fontSize: 9, fontWeight: 600, opacity: 0.7 }}>大厅 ☆ 收藏</span>
+      {/* 收藏组空则整组不渲染（#44 接大厅真收藏时恢复标题+行） */}
+      {FAV_IDS.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '6px 8px 4px' }}>
+            <span style={{ color: M.txtMute, fontSize: 10, fontWeight: 800, letterSpacing: 0.5 }}>我的最爱</span>
+            <span style={{ color: M.txtMute, fontSize: 9, fontWeight: 600, opacity: 0.7 }}>大厅 ☆ 收藏</span>
+          </div>
+          {FAV_IDS.map(id => (
+            <RailRow key={`fav-${id}`} id={id} room={rooms?.[id]} star active={onTable.has(id)} onSelect={onSelect} />
+          ))}
         </div>
-        {FAV_IDS.map(id => (
-          <RailRow key={`fav-${id}`} id={id} room={rooms?.[id]} star active={onTable.has(id)} onSelect={onSelect} />
-        ))}
-      </div>
+      )}
 
       {RAIL_GROUPS.map(grp => (
         <div key={grp.key} style={{ marginBottom: 8 }}>

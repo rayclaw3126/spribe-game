@@ -58,6 +58,7 @@ const NAME_KEY = 'spribe_player_username'
 export default function App() {
   const [activeGame, setActiveGame] = useState(null)
   const [activeView, setActiveView] = useState(null)   // null | 'multi' —— 多桌专区（不复用 activeGame，避免 GAMES 映射查空崩）
+  const [gameFrom, setGameFrom] = useState(null)       // 'multi' —— 记住游戏由多桌 ⤢ 进入，其「← 大厅」回多桌（游戏组件零改）
   // 全部 21 款游戏都由后端结算，余额一律以服务器为准。
   const [serverBalance, setServerBalance] = useState(null)
   const [caps, setCaps] = useState(null)   // 后端下发的全量风控 caps { [game]: { maxBet, maxPayout } }；旧后端未下发时保持 null，各游戏 fallback 兜底
@@ -82,6 +83,7 @@ export default function App() {
     // 不清 activeGame 的话，重新登录会直接弹回上一局的游戏里。
     setActiveGame(null)
     setActiveView(null)
+    setGameFrom(null)
   }
 
   // 已登录（token 在 localStorage）刷新页面时，主动拉一次玩家余额作为 serverBalance 初值，
@@ -123,6 +125,7 @@ export default function App() {
           playerToken={playerToken}
           onLogout={handlePlayerLogout}
           onBack={() => setActiveView(null)}
+          onOpenGame={(id) => { setGameFrom('multi'); setActiveView(null); setActiveGame(id) }}
         />
       </Suspense>
     )
@@ -142,7 +145,7 @@ export default function App() {
               caps={caps}
               playerToken={playerToken}
               onLogout={handlePlayerLogout}
-              onBack={() => setActiveGame(null)}
+              onBack={() => { setActiveGame(null); if (gameFrom === 'multi') setActiveView('multi'); setGameFrom(null) }}
             />
           </Suspense>
         </GameNavContext.Provider>
