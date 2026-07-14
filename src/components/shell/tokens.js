@@ -17,6 +17,36 @@ export const LOBBY_DARK = {
   scrim: 'rgba(10,12,16,0.92)',   // 覆盖式卡片底部遮罩色（#0a0c10·92%），压住封面下半保白字可读
 }
 
+// #41 多桌专区专用色组（风格沿用 LOBBY_DARK 暗黑B版，底色/文字/线全 reference 之，
+// 纯追加不改现有键）。新增：相位三色（投注中/锁盘/开奖中）+ 各自淡底、金额金、路珠三向色。
+export const MULTI_DARK = {
+  // —— 底/面/线/文字：全部引用 LOBBY_DARK，不另造 ——
+  bg: LOBBY_DARK.bg,
+  panel: LOBBY_DARK.panel,
+  card: LOBBY_DARK.card,
+  cardHi: LOBBY_DARK.cardHi,
+  line: LOBBY_DARK.line,
+  txt: LOBBY_DARK.txt,
+  txtDim: LOBBY_DARK.txtDim,
+  txtMute: LOBBY_DARK.txtMute,
+  accent: LOBBY_DARK.accent,
+  accentInk: LOBBY_DARK.accentInk,
+  scrim: LOBBY_DARK.scrim,
+  // —— 相位三色 + 淡底（chip / 相位点 / 舞台描边共用）——
+  betting: '#4ade80',                        // 投注中·绿（= accent 同值，独立键便于日后分道）
+  bettingTint: 'rgba(74,222,128,0.14)',
+  locked: '#f5a623',                         // 锁盘·琥珀
+  lockedTint: 'rgba(245,166,35,0.16)',
+  drawing: '#3b9eff',                        // 开奖中·蓝
+  drawingTint: 'rgba(59,158,255,0.16)',
+  // —— 金额金（注单额 / 合计 / 赔率字）——
+  amount: '#ffd54f',
+  // —— 迷你路珠三向色（大/红/主 ← up；小/黑/客 ← down；和/豹 ← tie）——
+  beadUp: '#e2564a',
+  beadDown: '#2f6fe0',
+  beadTie: '#ffd54f',
+}
+
 export const COLORS = {
   bg: '#0a1119',
   panel: '#101923',

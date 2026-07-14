@@ -26,7 +26,7 @@ function filterGames(key) {
   return GAMES.filter(g => g.navCat === key)
 }
 
-export default function Lobby({ onSelect }) {
+export default function Lobby({ onSelect, onOpenMulti }) {
   const isDesk = useMediaQuery('(min-width: 1024px)')   // PC ≥1024 左侧栏 / 手机 <1024 顶部横滑
   const [cat, setCat] = useState('all')                 // 默认激活「全部」
   const shown = filterGames(cat)
@@ -49,6 +49,17 @@ export default function Lobby({ onSelect }) {
           <span style={{ color: D.accent, fontSize: isDesk ? 22 : 20 }}>⚽</span>
           电子游戏
         </h1>
+
+        {/* TODO 单5 正式入口：PC 临时「多桌专区」入口钮（紧邻分类栏顶部；手机分支不加） */}
+        {isDesk && onOpenMulti && (
+          <button type="button" onClick={onOpenMulti} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 16,
+            background: D.accent, color: D.accentInk, border: 'none',
+            borderRadius: 999, padding: '9px 18px', fontSize: 14, fontWeight: 800, cursor: 'pointer',
+          }}>
+            <span>▦</span> 多桌专区
+          </button>
+        )}
 
         <div style={{ display: isDesk ? 'flex' : 'block', gap: 24, alignItems: 'flex-start' }}>
           {/* ---- PC 左侧栏（分类列表） ---- */}

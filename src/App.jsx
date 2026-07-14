@@ -28,6 +28,8 @@ const SpeedGrid = lazy(() => import('./games/SpeedGrid'))
 const WuXing = lazy(() => import('./games/WuXing'))
 const RollingBall = lazy(() => import('./games/RollingBall'))
 const DominoDuel = lazy(() => import('./games/DominoDuel'))
+// #41 多桌专区（静态版）：与游戏同走 lazy，大厅首屏不含其 JS。
+const MultiTablePage = lazy(() => import('./components/MultiTable/MultiTablePage'))
 
 // id → 游戏组件映射（lazy 组件）。游戏元数据（名/封面/分类/backendId）单一数据源见
 // src/gameRegistry.js —— 此处的键须与 GAME_REGISTRY 的 id 一一对应。
@@ -55,6 +57,7 @@ const NAME_KEY = 'spribe_player_username'
 
 export default function App() {
   const [activeGame, setActiveGame] = useState(null)
+  const [activeView, setActiveView] = useState(null)   // null | 'multi' —— 多桌专区（不复用 activeGame，避免 GAMES 映射查空崩）
   // 全部 21 款游戏都由后端结算，余额一律以服务器为准。
   const [serverBalance, setServerBalance] = useState(null)
   const [caps, setCaps] = useState(null)   // 后端下发的全量风控 caps { [game]: { maxBet, maxPayout } }；旧后端未下发时保持 null，各游戏 fallback 兜底
@@ -78,6 +81,7 @@ export default function App() {
     setServerBalance(null)
     // 不清 activeGame 的话，重新登录会直接弹回上一局的游戏里。
     setActiveGame(null)
+    setActiveView(null)
   }
 
   // 已登录（token 在 localStorage）刷新页面时，主动拉一次玩家余额作为 serverBalance 初值，
@@ -107,6 +111,18 @@ export default function App() {
   // 单2改：反馈悬浮入口暂隐藏（挪去代理后台）。恢复时取消下方两行 + 顶部 import 注释即可。
   // const username = localStorage.getItem(NAME_KEY) || ''
   // const feedback = <FeedbackWidget activeGame={activeGame} username={username} />
+
+  // 已登录且进了多桌专区：全屏渲染（结构照 activeGame 分支），页面自绘暗黑底，onBack 清回大厅。
+  if (activeView === 'multi') {
+    return (
+      <Suspense fallback={<GameLoading />}>
+        <MultiTablePage
+          serverBalance={serverBalance}
+          onBack={() => setActiveView(null)}
+        />
+      </Suspense>
+    )
+  }
 
   // 已登录且选了游戏：全屏铺满，不挂 Header，也不留顶部留白。
   if (GameComponent) {
@@ -141,7 +157,7 @@ export default function App() {
         playerToken={playerToken}
       />
       <main style={{ paddingTop: '52px' }}>
-        <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} />
+        <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} onOpenMulti={() => setActiveView('multi')} />
       </main>
       {/* {feedback} */}
     </div>
