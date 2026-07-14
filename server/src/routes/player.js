@@ -9,6 +9,22 @@ import riskCfg from '../config/risk.js';
 
 const router = Router();
 
+// —— 平台内广播（跑马灯 + 今日大奖）阈值常量 ——
+// 跑马灯收录：近 1 小时内，单局（player_id,round_id 聚合）派彩 ≥ $50 或 倍数 ≥ 10×，取最近 20 条。
+const MARQUEE_MIN_PAYOUT = 50;   // 大额线（美元）
+const MARQUEE_MIN_MULT = 10;     // 高倍线（Σpayout/Σ同键bet）
+const MARQUEE_LIMIT = 20;
+const TOP_LIMIT = 5;             // 今日大奖榜 Top5
+
+// 用户名脱敏（与前端 BetFeed 同规则，改由后端出，前端不接触 raw）：
+// 首字 + *** + 末字；≤2 字仅首字 + ***。空/异常回 '玩家'。
+function maskName(name) {
+  const s = typeof name === 'string' ? name.trim() : '';
+  if (!s) return '玩家';
+  if (s.length <= 2) return `${s[0]}***`;
+  return `${s[0]}***${s[s.length - 1]}`;
+}
+
 // caps 单一数据源：把 risk.js 的 default+perGame 合成成 { [game]: { maxBet, maxPayout } } 下发给前端，
 // 让前端「兑现前」预估/输入封顶与后端同源（后端另有 LEAST 钳制/limits 兜底，前端只做展示防虚高）。
 // game 列表取自 perGame 的 key（现即全 21 款）；数值为 perGame 覆盖 default 后的合成结果，转 Number。
@@ -126,6 +142,77 @@ router.get('/bets', requireAuth, requireType('player'), async (req, res, next) =
     const items = result.rows;
     const nextCursor = items.length === limit ? items[items.length - 1].id : null;
     return res.json({ items, nextCursor });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// GET /player/bigwins —— 平台内广播（只读）：跑马灯近 1h 大奖流 + 今日大奖榜 Top5。
+// 数据源 = ledger <game>_payout / <game>_bet 按 (player_id, round_id) 聚合（对齐账单派彩真源口径，
+// 与 /player/bets 的 ledger 聚合同源）；倍数 = Σpayout / Σ同键bet。join players 取名后端脱敏，
+// join rounds 取 game/round_no。纯参数化只读 SELECT，不碰任何写路径；mine 由 token sub 判，不外泄 player_id。
+router.get('/bigwins', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const me = String(req.user.sub);
+    // 跑马灯：近 1h 派彩局，按 (player,round) 聚合 payout/bet，过大额或高倍线，最近 20 条。
+    const marqueeRes = await query(
+      `WITH wins AS (
+         SELECT l.player_id, l.round_id, r.game, r.round_no, MAX(l.created_at) AS won_at
+         FROM ledger l
+         JOIN rounds r ON r.id = l.round_id
+         WHERE l.type = r.game || '_payout'
+           AND l.created_at >= now() - interval '1 hour'
+         GROUP BY l.player_id, l.round_id, r.game, r.round_no
+       ), agg AS (
+         SELECT w.player_id, w.round_id, w.game, w.round_no, w.won_at,
+           (SELECT COALESCE(SUM(lp.amount), 0) FROM ledger lp
+              WHERE lp.player_id = w.player_id AND lp.round_id = w.round_id AND lp.type = w.game || '_payout') AS payout,
+           (SELECT COALESCE(SUM(lb.amount), 0) FROM ledger lb
+              WHERE lb.player_id = w.player_id AND lb.round_id = w.round_id AND lb.type = w.game || '_bet') AS bet
+         FROM wins w
+       )
+       SELECT a.player_id, a.game, a.round_no, a.payout, a.bet, a.won_at, p.username
+       FROM agg a
+       JOIN players p ON p.id = a.player_id
+       WHERE a.payout >= $1 OR (a.bet > 0 AND a.payout / a.bet >= $2)
+       ORDER BY a.won_at DESC
+       LIMIT $3`,
+      [MARQUEE_MIN_PAYOUT, MARQUEE_MIN_MULT, MARQUEE_LIMIT],
+    );
+    // 今日大奖榜：当日派彩局按 (player,round) 聚合 payout，取 Top5。
+    const topRes = await query(
+      `WITH wins_today AS (
+         SELECT l.player_id, l.round_id, r.game, r.round_no,
+                SUM(l.amount) AS payout, MAX(l.created_at) AS won_at
+         FROM ledger l
+         JOIN rounds r ON r.id = l.round_id
+         WHERE l.type = r.game || '_payout'
+           AND l.created_at >= current_date
+         GROUP BY l.player_id, l.round_id, r.game, r.round_no
+       )
+       SELECT w.player_id, w.game, w.round_no, w.payout, p.username
+       FROM wins_today w
+       JOIN players p ON p.id = w.player_id
+       ORDER BY w.payout DESC
+       LIMIT $1`,
+      [TOP_LIMIT],
+    );
+    const marquee = marqueeRes.rows.map((r) => ({
+      game: r.game,
+      roundNo: r.round_no,
+      name: maskName(r.username),
+      payout: Number(r.payout),
+      mult: Number(r.bet) > 0 ? Number((Number(r.payout) / Number(r.bet)).toFixed(2)) : null,
+      mine: String(r.player_id) === me,
+    }));
+    const top = topRes.rows.map((r) => ({
+      game: r.game,
+      roundNo: r.round_no,
+      name: maskName(r.username),
+      payout: Number(r.payout),
+      mine: String(r.player_id) === me,
+    }));
+    return res.json({ marquee, top });
   } catch (err) {
     return next(err);
   }

@@ -1,5 +1,30 @@
 import { MULTI_DARK as M } from '../shell/tokens'
-import { RAIL_GROUPS, FAV_IDS, nameOf } from './mockData'
+import { RAIL_GROUPS, FAV_IDS, nameOf, nameOfBackend } from './mockData'
+
+// 今日大奖榜块（只读 /player/bigwins.top）：Top5 行 名/游戏/金额；空态由父级 top.length 决定不挂载。
+// 自己上榜(mine)高亮金。挂在左栏「对决」组之下。
+function TopBoard({ top }) {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ color: M.amount, fontSize: 10, fontWeight: 900, letterSpacing: 0.5, padding: '6px 8px 4px' }}>今日大奖</div>
+      {top.map((it, i) => (
+        <div key={i} style={{
+          display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px 5px 12px',
+          borderRadius: 8, margin: '1px 0', background: it.mine ? M.cardHi : 'transparent',
+        }}>
+          <span style={{ flex: '0 0 auto', width: 16, color: i < 3 ? M.amount : M.txtMute, fontSize: 11, fontWeight: 900, textAlign: 'center' }}>{i + 1}</span>
+          <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+            <span style={{ color: it.mine ? M.amount : M.txt, fontSize: 11, fontWeight: it.mine ? 900 : 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {it.mine && <span style={{ marginRight: 3 }}>★</span>}{it.name}
+            </span>
+            <span style={{ color: M.txtMute, fontSize: 9, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nameOfBackend(it.game)}</span>
+          </span>
+          <span style={{ flex: '0 0 auto', color: M.betting, fontSize: 11, fontWeight: 900, fontVariantNumeric: 'tabular-nums' }}>+${Number(it.payout).toFixed(2)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // room.phase → 相位点色（与 TableCard 同口径）
 const dotColor = (phase) => (
@@ -45,7 +70,7 @@ function RailRow({ id, room, active, star, onSelect }) {
 }
 
 // 左列上半·可滚游戏栏：顶「我的最爱」占位 + 三分组（竞速PK/轮次彩/对决）。相位点+倒计时全接活。
-export default function GameRail({ tables, onSelect, rooms }) {
+export default function GameRail({ tables, onSelect, rooms, top }) {
   const onTable = new Set(tables)
   return (
     <aside style={{
@@ -70,6 +95,8 @@ export default function GameRail({ tables, onSelect, rooms }) {
           ))}
         </div>
       ))}
+
+      {top && top.length > 0 && <TopBoard top={top} />}
     </aside>
   )
 }

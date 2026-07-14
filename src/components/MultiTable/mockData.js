@@ -27,6 +27,10 @@ export const nameOf   = (id) => GAME_BY_ID[id]?.displayName ?? id
 export const venueOf  = (id) => GAME_BY_ID[id]?.venue ?? ''
 export const backendOf = (id) => GAME_BY_ID[id]?.backendId ?? id
 
+// 后端 backendId → 展示名（广播条目按 backendId 下发，前端反查显示名；未知回原值）
+const NAME_BY_BACKEND = Object.fromEntries(Object.values(GAME_BY_ID).map(g => [g.backendId, g.displayName]))
+export const nameOfBackend = (be) => NAME_BY_BACKEND[be] ?? be
+
 // ============================================================================
 // 盘口全量分组 —— 组名/键名严格抄各 games/markets/<be>.js 真实 MARKETS，中文 label 映射留本层。
 //   赔率 odds 不在此：改读 marketsRegistry.oddsStr(id, key)（MARKETS[key].odds）。

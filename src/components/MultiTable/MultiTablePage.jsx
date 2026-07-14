@@ -6,6 +6,7 @@ import { WinFxHost, tierOf } from '../shell/WinFx'
 import GameRail from './GameRail'
 import TableCard from './TableCard'
 import BetSlip from './BetSlip'
+import BigWinMarquee from './BigWinMarquee'
 import { useAllRooms } from './useAllRooms'
 import { mapBetError } from './betErrors'
 import { useSfxMuted } from '../shell/bgmManager'
@@ -21,6 +22,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   const [sfxMuted, toggleSfxMuted] = useSfxMuted()       // 全局音效静音（单例，切了单游戏页同步生效）
   const rooms = useAllRooms(isDesk ? playerToken : '')   // 9 条 WS 常驻
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // apiPlay 自动回写 balanceAfter
+  const apiRef = useRef(api); apiRef.current = api                         // 广播轮询用稳定引用，免 effect 抖动
 
   const [tables, setTables] = useState(DEFAULT_TABLES)
   const [chip, setChip] = useState(CHIP_VALUES[0])
@@ -32,6 +34,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   const winFxRef = useRef(null)                        // 中奖庆祝三档宿主（命令式 fire）
   const submittedRef = useRef({})                      // submitted 镜像：结算 effect 只读本地已投算档位（免闭包过期）
   submittedRef.current = submitted
+  const [bigwins, setBigwins] = useState({ marquee: [], top: [] })   // 平台内广播（跑马灯 + 今日大奖），20s 轮询
   const [mode, setMode] = useState('slip')             // 'slip' 注单模式(默认) | 'quick' 快投
   const [quickState, setQuickState] = useState({})     // {`gid:key`: 'flying'|'ok'|'err'} 快投按钮态
   const [quickLog, setQuickLog] = useState([])         // 已发快投明细（只读不可撤）
@@ -200,6 +203,18 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
     })
   }, [settleSig])   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 平台内广播轮询：页面开着（isDesk）才每 20s 拉 /player/bigwins；离开即停。不碰 /ws/rounds。
+  useEffect(() => {
+    if (!isDesk) return undefined
+    let cancelled = false
+    const pull = () => apiRef.current.apiGet('/player/bigwins')
+      .then(d => { if (!cancelled && d) setBigwins({ marquee: d.marquee || [], top: d.top || [] }) })
+      .catch(() => {})
+    pull()
+    const t = setInterval(pull, 20000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [isDesk])
+
   // —— <1024：提示 + 返回 ——
   if (!isDesk) {
     return (
@@ -289,13 +304,16 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
         </span>
       </header>
 
+      {/* 平台内广播·跑马灯（无数据整条隐藏，自己爆中高亮金） */}
+      <BigWinMarquee items={bigwins.marquee} />
+
       {/* 两栏体 */}
       <div style={{ display: 'flex', gap: 12, padding: 12, alignItems: 'flex-start' }}>
         <div style={{
           position: 'sticky', top: 65, alignSelf: 'flex-start', height: 'calc(100vh - 77px)',
           flex: '0 0 200px', width: 200, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0,
         }}>
-          <GameRail tables={tables} onSelect={selectGame} rooms={rooms} />
+          <GameRail tables={tables} onSelect={selectGame} rooms={rooms} top={bigwins.top} />
           <BetSlip items={slip} mode={mode} quickLog={quickLog} confirming={confirming} onRemove={removeBet} onEditAmount={editAmount} onConfirm={confirmBets} />
         </div>
 
