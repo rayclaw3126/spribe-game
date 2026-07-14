@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel } from '../components/GameLayout'
+import { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, HATTRICK } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
@@ -507,6 +507,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [roadTab, setRoadTab] = useState('TOTAL')
+  const [userAcc, setUserAcc] = useState({ total: true, triple: true, double: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开）；纯 UI，不动下注 state
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
 
   // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
@@ -1304,6 +1305,250 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     </Panel>
   )
 
+  // ============ 手机三段式（<1024，照德比模板）：锁顶(顶栏+悬念/飞金叠层+固定舞台) / 中滚(三盘区手风琴) / 锁底(路珠+注栏) ============
+  // 折叠纯 UI（userAcc），不动下注 state；结算相位(settled)自动展开三盘区看 hit 高亮，betting 恢复玩家手动态。
+  const SEC_TEST = {
+    total: k => k.startsWith('t-') || k.startsWith('s-'),
+    triple: k => k.startsWith('tr-'),
+    double: k => k.startsWith('d-'),
+  }
+  const selCount = (sec) => {
+    let n = 0
+    new Set([...picks, ...betsPlaced.keys()]).forEach(k => { if (SEC_TEST[sec](k)) n++ })
+    return n
+  }
+  const effAcc = settled ? { total: true, triple: true, double: true } : userAcc
+  const accSection = (key, title, body) => {
+    const open = effAcc[key]
+    const cnt = selCount(key)
+    return (
+      <div style={{ ...secBox, padding: 0, overflow: 'hidden', marginBottom: 6 }}>
+        <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
+          width: '100%', height: 36, boxSizing: 'border-box',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <span style={{ color: HATTRICK.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+            {cnt > 0 && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flex: '0 0 auto', color: HATTRICK.sel, fontSize: 10, fontWeight: 900 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: HATTRICK.sel, display: 'inline-block' }} />{cnt}
+              </span>
+            )}
+          </span>
+          <span style={{ color: COLORS.white, fontSize: 12, fontWeight: 900, flex: '0 0 auto' }}>{open ? '˄' : '˅'}</span>
+        </button>
+        <div style={{ maxHeight: open ? 1600 : 0, overflow: 'hidden', transition: 'max-height 0.2s ease' }}>
+          <div style={{ padding: '0 6px 6px' }}>{body}</div>
+        </div>
+      </div>
+    )
+  }
+  const body1 = (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3, marginBottom: 6 }}>
+        {Array.from({ length: 14 }, (_, i) => totalCell(i + 4))}
+      </div>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {SIDES.map(m => (
+          <button key={m.key} type="button" className={cellCls(m.key)} disabled={!betting} onClick={() => toggleSel(m.key)} style={cellBtn(m.key, { compact: true })}>
+            <span style={cellName}>{m.name}</span>
+            <span style={cellRange}>{m.range}</span>
+            <span className={fxCls(m.key)} style={{ ...cellOdds, fontSize: 10, whiteSpace: 'nowrap' }}>{betsPlaced.has(m.key) ? winTxt(m.key, MARKETS[m.key].odds) : ODDS.side.toFixed(2)}</span>
+            <span style={{ color: HATTRICK.dim, fontSize: 7.5, fontWeight: 700, whiteSpace: 'nowrap' }}>豹子通杀</span>
+            {stakeChip(m.key)}
+            {nearBadge(m.key)}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+  const body2 = (
+    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+      <button type="button" className={cellCls('tr-any')} disabled={!betting} onClick={() => toggleSel('tr-any')}
+        style={{ ...cellBtn('tr-any'), flex: '1 1 100%' }}>
+        <span style={cellName}>任意豹子</span>
+        <span className={fxCls('tr-any')} style={{ ...cellOdds, whiteSpace: 'nowrap' }}>{betsPlaced.has('tr-any') ? winTxt('tr-any', MARKETS['tr-any'].odds) : ODDS.anyTriple.toFixed(2)}</span>
+        {stakeChip('tr-any')}
+      </button>
+      {Array.from({ length: 6 }, (_, i) => i + 1).map(v => (
+        <button key={v} type="button" className={cellCls(`tr-${v}`)} disabled={!betting} onClick={() => toggleSel(`tr-${v}`)}
+          style={{ ...cellBtn(`tr-${v}`, { compact: true }), flex: '1 1 30%' }}>
+          <span style={{ display: 'flex', gap: 2 }}>{[v, v, v].map((d, i) => <DieFace key={i} v={d} size={13} />)}</span>
+          <span className={fxCls(`tr-${v}`)} style={{ ...cellOdds, fontSize: 9.5, whiteSpace: 'nowrap' }}>{betsPlaced.has(`tr-${v}`) ? winTxt(`tr-${v}`, MARKETS[`tr-${v}`].odds) : ODDS.triple.toFixed(2)}</span>
+          {stakeChip(`tr-${v}`)}
+        </button>
+      ))}
+    </div>
+  )
+  const body3 = (
+    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+      {Array.from({ length: 6 }, (_, i) => i + 1).map(v => (
+        <button key={v} type="button" className={cellCls(`d-${v}`)} disabled={!betting} onClick={() => toggleSel(`d-${v}`)}
+          style={{ ...cellBtn(`d-${v}`, { compact: true }), flex: '1 1 30%' }}>
+          <span style={{ display: 'flex', gap: 2 }}>{[v, v].map((d, i) => <DieFace key={i} v={d} size={14} />)}</span>
+          <span className={fxCls(`d-${v}`)} style={{ ...cellOdds, fontSize: 9.5, whiteSpace: 'nowrap' }}>{betsPlaced.has(`d-${v}`) ? winTxt(`d-${v}`, MARKETS[`d-${v}`].odds) : ODDS.double.toFixed(2)}</span>
+          {stakeChip(`d-${v}`)}
+        </button>
+      ))}
+    </div>
+  )
+  const mobileCard = (
+    <Panel style={{
+      background: `radial-gradient(circle at 50% 28%, ${HATTRICK.bgCenter}, ${HATTRICK.bgOuter})`,
+      borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
+    }}>
+      <style>{`
+        .htCell:hover:not(:disabled) { filter: brightness(1.3); }
+        @keyframes htWinFly { 0% { transform: scale(1); opacity: 1; } 25% { transform: scale(1.65); opacity: 1; filter: drop-shadow(0 0 6px rgba(255,213,79,0.95)); } 100% { transform: translateY(-16px) scale(1.1); opacity: 0; } }
+        .htWinFly { animation: htWinFly 1s ease-out forwards; transform-origin: right center; }
+        @keyframes htLose { 0% { transform: scale(1); opacity: 1; filter: grayscale(0); } 100% { transform: scale(0.7); opacity: 0; filter: grayscale(1); } }
+        .htLose { animation: htLose 0.7s ease-in forwards; transform-origin: right center; }
+        @keyframes htFlyGold { 0% { transform: translateY(14px) scale(0.7); opacity: 0; } 18% { transform: translateY(0) scale(1.15); opacity: 1; } 100% { transform: translateY(-120px) scale(0.85); opacity: 0; } }
+        .htFlyGold { animation: htFlyGold 1.25s ease-out forwards; }
+        @keyframes htPulseRing { 0%,100% { box-shadow: 0 0 0 0 rgba(255,213,79,0); } 50% { box-shadow: 0 0 11px 2px rgba(255,213,79,0.9); } }
+        .htSuspense { animation: htPulseRing 0.6s ease-in-out infinite; border-color: #ffd54f !important; }
+        @keyframes htNearPop { 0% { transform: translate(-50%,-50%) scale(0.4); opacity: 0; } 45% { transform: translate(-50%,-50%) scale(1.15); opacity: 1; } 100% { transform: translate(-50%,-50%) scale(1); opacity: 1; } }
+        @keyframes htNearGlow { from { box-shadow: 0 0 6px rgba(255,106,61,0.5); } to { box-shadow: 0 0 14px rgba(255,106,61,0.95); } }
+        .htNear { animation: htNearPop 0.45s ease-out both, htNearGlow 0.85s ease-in-out 0.45s infinite alternate; }
+        @keyframes htBannerPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+        .htSuspenseBanner { animation: htBannerPulse 0.55s ease-in-out infinite; }
+      `}</style>
+
+      {/* ① 锁顶：topBar + 悬念横幅/结算飞金叠层（相对锁顶定位，不随滚动）+ 固定高舞台 160（去弹性） */}
+      <div style={{ flex: '0 0 auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        {topBar}
+        {suspense && (
+          <div style={{ position: 'absolute', top: 116, left: 0, right: 0, zIndex: 7, textAlign: 'center', pointerEvents: 'none' }}>
+            <span className="htSuspenseBanner" style={{
+              display: 'inline-block', padding: '6px 14px', borderRadius: RADIUS.pill,
+              background: 'rgba(8,18,12,0.92)', border: '2px solid #ffd54f', color: '#ffd54f',
+              fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', boxShadow: '0 0 18px rgba(255,213,79,0.7)',
+            }}>❤ {suspense.msg}</span>
+          </div>
+        )}
+        {settleFx && result?.winTotal > 0 && (
+          <div className="htFlyGold" style={{
+            position: 'absolute', top: '44%', left: 0, right: 0, zIndex: 6, textAlign: 'center', pointerEvents: 'none',
+            color: HATTRICK.gold, fontSize: 26, fontWeight: 900, fontFamily: "'Space Grotesk', sans-serif",
+            textShadow: '0 0 16px rgba(255,213,79,0.9)',
+          }}>+${result.winTotal.toFixed(2)}</div>
+        )}
+        <div style={{
+          flex: '0 0 auto', height: 160, position: 'relative', zIndex: 1,
+          margin: '8px 12px 0', background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box',
+        }}>
+          {(drawing || settled) && pendingRef.current ? (
+            <DiceStage key={room.roundNo} roll={pendingRef.current}
+              shakeRef={cardShakeRef} sfx={stageSfx}
+              onLastSuspense={onLastSuspense}
+              winTotal={winOfRoll(pendingRef.current)}
+              onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
+          ) : (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              <span style={{ color: HATTRICK.dim, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>上期</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{lastRoll.dice.map((v, i) => <DieFace key={i} v={v} size={30} />)}</span>
+              <span style={{ color: HATTRICK.gold, fontSize: 16, fontWeight: 900, fontFamily: "'Space Grotesk', sans-serif" }}>{lastRoll.isTriple ? `豹子 ${lastRoll.tripleFace}` : `和值 ${lastRoll.total}`}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ② 中滚：三盘区手风琴（和值·大小单双 / 豹子 / 对子，默认全开；结算全展开） */}
+      <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '4px 12px', position: 'relative', zIndex: 1 }}>
+        <WinToast toasts={toasts} />
+        {accSection('total', '和值 · 大小单双', body1)}
+        {accSection('triple', '豹子', body2)}
+        {accSection('double', '对子', body3)}
+      </div>
+
+      {/* ③ 锁底：路珠(3视角 pill 原样 + 珠压 2 行) + 注栏 */}
+      <div style={{ flex: '0 0 auto' }}>
+        <div style={{ padding: '4px 12px 0', position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none', marginBottom: 3 }}>
+            {ROAD_TABS.map(t => (
+              <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
+                flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: RADIUS.pill,
+                background: roadTab === t ? HATTRICK.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : HATTRICK.dim,
+                border: `1px solid ${roadTab === t ? HATTRICK.sel : 'rgba(255,255,255,0.2)'}`,
+                fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
+              }}>{ROAD_TAB_LABELS[t]}</button>
+            ))}
+          </div>
+          <div style={{ overflowX: 'auto', borderRadius: 8, background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
+              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
+                const b = beads[i]
+                return (
+                  <span key={i} style={{
+                    width: 15, height: 15, borderRadius: '50%',
+                    background: b ? b.c : 'rgba(255,255,255,0.05)',
+                    border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                    color: b?.dark ? '#3a2c00' : COLORS.white, fontSize: b && b.t.length > 1 ? 6 : 8, fontWeight: 900,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+                  }}>{b ? b.t : ''}</span>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: '6px 12px', background: HATTRICK.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
+          }}>
+            {[
+              { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+              { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+            ].map(({ v, col, row }) => (
+              <button key={v} type="button" className="htChip" disabled={!betting} onClick={() => setBet(v)} style={{
+                gridColumn: col, gridRow: row, width: '100%', height: '100%', borderRadius: 8,
+                fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+                background: bet === v ? HATTRICK.selTint : 'rgba(0,0,0,0.35)',
+                border: `1px solid ${bet === v ? HATTRICK.sel : 'rgba(255,255,255,0.35)'}`,
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
+              }}>{v}</button>
+            ))}
+            <div style={{
+              gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+              borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+            }}>
+              <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
+              <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
+            </div>
+            <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
+              gridColumn: 3, gridRow: 2, width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+              color: repeatOk ? HATTRICK.text : HATTRICK.dim, background: 'rgba(0,0,0,0.35)',
+              border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
+              cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+              <BetButton
+                state="bet"
+                label={betting ? `下注 ${picks.size} 格` : drawing ? '掷骰中…' : '本期已结算'}
+                sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+                onClick={confirmBets}
+                disabled={!confirmOk}
+                stretch
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setHistoryOpen(true)} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
+    </Panel>
+  )
+
   // ---- Spribe-parity desktop skeleton (≥1024), same bones as Number Up ----
   if (isDesk) {
     return (
@@ -1329,11 +1574,11 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   }
 
   // ---- stacked layout (<1024) ----
+  // ---- 手机三段锁死（<1024）----
   return (
-    <GameLayout color={HATTRICK.sel}>
-      <div ref={cardShakeRef}>
-        {gameCard}
-      </div>
-    </GameLayout>
+    <>
+      <style>{`.htMobileRoot{height:100vh;height:100dvh;overflow:hidden}`}</style>
+      <div className="htMobileRoot" ref={cardShakeRef}>{mobileCard}</div>
+    </>
   )
 }
