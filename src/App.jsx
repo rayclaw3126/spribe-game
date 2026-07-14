@@ -118,6 +118,10 @@ export default function App() {
       <Suspense fallback={<GameLoading />}>
         <MultiTablePage
           serverBalance={serverBalance}
+          setServerBalance={setServerBalance}
+          caps={caps}
+          playerToken={playerToken}
+          onLogout={handlePlayerLogout}
           onBack={() => setActiveView(null)}
         />
       </Suspense>
