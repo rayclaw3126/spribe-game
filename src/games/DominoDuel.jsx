@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import GameLayout, { Panel } from '../components/GameLayout'
+import { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
@@ -126,12 +126,24 @@ const RULES = [
   },
 ]
 const SEED_LAST = deriveRound([[3, 2], [1, 1], [2, 1], [0, 1]])   // 上局回顾种子（真开奖逐期顶掉）
+// 珠盘路种子：存整局 [主分, 客分]（真开奖逐期顶入），多视角一律从整局派生
 const SEED_ROAD = [
-  '主', '客', '主', '平', '客', '主', '客', '主', '主', '客',
-  '平', '主', '客', '主', '客', '主', '主', '客', '平', '主',
-  '客', '主', '客', '主', '主', '客', '主', '平', '客', '主',
-  '主', '客', '主', '客', '主', '平', '客', '主', '主', '客',
+  [6, 3], [2, 5], [7, 4], [5, 5], [1, 8], [9, 2], [3, 6], [8, 1], [6, 2], [4, 7],
+  [5, 5], [7, 3], [2, 6], [8, 4], [3, 7], [9, 1], [6, 4], [2, 8], [5, 5], [7, 2],
+  [3, 6], [8, 5], [4, 7], [6, 3], [7, 1], [2, 5], [6, 4], [5, 5], [3, 8], [9, 4],
+  [6, 2], [4, 7], [8, 3], [2, 6], [7, 5], [4, 4], [3, 7], [6, 1], [8, 4], [2, 7],
 ]
+// 珠盘路多视角（B 型：存整局 [hs,as]，判定一律走引擎 MARKETS 现成 helper，禁手写第二份表）
+const DD_ROAD_TABS = ['H/A', 'O/U', 'O/E']
+const DD_ROAD_LABELS = { 'H/A': '主客走势', 'O/U': '总分大小', 'O/E': '总分单双' }
+function ddBeadFor(tab, pair) {
+  const [hs, as] = pair
+  const r = { hs, as, gTotal: hs + as }
+  if (tab === 'O/U') return MARKETS['g-big'].hit(r) ? { t: '大', c: DERBY.away } : { t: '小', c: DERBY.home }
+  if (tab === 'O/E') return MARKETS['g-odd'].hit(r) ? { t: '单', c: DERBY.away } : { t: '双', c: DERBY.home }
+  if (MARKETS['draw'].hit(r)) return { t: '平', c: DERBY.grey }              // H/A：平/主/客
+  return MARKETS['home-win'].hit(r) ? { t: '主', c: DERBY.home } : { t: '客', c: DERBY.away }
+}
 
 // 多米诺点位（0-6，3×3 宫格索引；照 DieFace 先例）
 const DOMPIPS = {
@@ -234,6 +246,8 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   const [animRound, setAnimRound] = useState(null)        // 当前开奖动画的派生局（deriveRound 形状）
   const [lastRound, setLastRound] = useState(SEED_LAST)
   const [road, setRoad] = useState(SEED_ROAD)
+  const [roadTab, setRoadTab] = useState('H/A')   // 珠盘路视角（手机/桌面共用一个 state）
+  const [userAcc, setUserAcc] = useState({ main: true, totals: true, goals: true, correct: false })   // 手机手风琴（波胆高赔默认收，余默认全开）
   const [result, setResult] = useState(null)              // { hits:Set, pushes:Set, winTotal, refundTotal }
   const [toasts, setToasts] = useState([])
   const [hasLast, setHasLast] = useState(false)
@@ -380,8 +394,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     if (winTotal > 0) pushToast('本期命中', winTotal)
     if (refundTotal > 0) pushToast('平局退注', refundTotal)   // push 区分文案
     setLastRound(r)
-    const outcome = r.hs > r.as ? '主' : r.as > r.hs ? '客' : '平'
-    setRoad(rd => [...rd, outcome].slice(-ROAD_CAP))
+    setRoad(rd => [...rd, [r.hs, r.as]].slice(-ROAD_CAP))   // 存整局 → 珠盘路多视角派生（判定走引擎）
     setResult({ hits, pushes, winTotal, refundTotal })
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
@@ -694,37 +707,58 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     </div>
   )
 
-  // ---- ③ 珠盘路（主/平/客，按真开奖逐期顶入）----
+  // ---- ③ 珠盘路（B 型多视角：存整局 → roadTab 派生 主客/大小/单双；手机桌面共用 roadTab）----
   const ROAD_COLS = 20
   const roadBead = isMobile ? 18 : 14
-  const beads = road.slice(-ROAD_CAP)
+  const roadPairs = road.slice(-ROAD_CAP)
+  const beads = roadPairs.map(p => ddBeadFor(roadTab, p))
+  const ratioSrc = road.slice(-30)
+  let rHome = 0, rDraw = 0, rAway = 0
+  ratioSrc.forEach(([hs, as]) => { if (hs > as) rHome++; else if (hs === as) rDraw++; else rAway++ })
+  const pct = n => Math.round((n / Math.max(1, ratioSrc.length)) * 100)
+  const roadTabsBar = (fs = 10) => (
+    <div style={{ display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none', marginBottom: 4 }}>
+      {DD_ROAD_TABS.map(t => (
+        <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
+          flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: RADIUS.pill,
+          background: roadTab === t ? DERBY.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : DERBY.dim,
+          border: `1px solid ${roadTab === t ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
+          fontSize: fs, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
+        }}>{DD_ROAD_LABELS[t]}</button>
+      ))}
+    </div>
+  )
+  const ratioBar = (fs = 9) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+      <span style={{ color: DERBY.home, fontSize: fs, fontWeight: 900, whiteSpace: 'nowrap' }}>主 {pct(rHome)}%</span>
+      <div style={{ flex: 1, height: 4, borderRadius: 2, overflow: 'hidden', display: 'flex', background: 'rgba(0,0,0,0.35)' }}>
+        <span style={{ width: `${pct(rHome)}%`, background: DERBY.home }} />
+        <span style={{ width: `${pct(rDraw)}%`, background: 'rgba(255,255,255,0.4)' }} />
+        <span style={{ width: `${pct(rAway)}%`, background: DERBY.away }} />
+      </div>
+      <span style={{ color: DERBY.away, fontSize: fs, fontWeight: 900, whiteSpace: 'nowrap' }}>客 {pct(rAway)}%</span>
+    </div>
+  )
+  const beadCell = (b, i, sz) => (
+    <span key={i} style={{
+      width: sz, height: sz, borderRadius: '50%',
+      background: b ? b.c : 'rgba(255,255,255,0.05)',
+      border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+      color: COLORS.white, fontSize: sz / 2, fontWeight: 900,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+    }}>{b ? b.t : ''}</span>
+  )
   const beadRoad = (
     <div style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, margin: isMobile ? '0 12px 8px' : '0 18px 8px' }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-        <span style={{
-          padding: '3px 12px', borderRadius: RADIUS.pill, background: DERBY.sel, color: '#083a1b',
-          border: `1px solid ${DERBY.sel}`, fontSize: 10, fontWeight: 900, letterSpacing: 0.5,
-        }}>主客走势</span>
-      </div>
+      {roadTabsBar(10)}
+      {ratioBar(9.5)}
       <div style={{ overflowX: 'auto', borderRadius: 10, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6 }}>
         <div style={{
           display: 'grid', gridAutoFlow: 'column',
           gridTemplateRows: `repeat(6, ${roadBead}px)`, gridTemplateColumns: `repeat(${ROAD_COLS}, ${roadBead}px)`,
           gap: 2, width: 'max-content',
         }}>
-          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const t = beads[i]
-            const c = t === '主' ? DERBY.home : t === '客' ? DERBY.away : DERBY.grey
-            return (
-              <span key={i} style={{
-                width: roadBead, height: roadBead, borderRadius: '50%',
-                background: t ? c : 'rgba(255,255,255,0.05)',
-                border: t ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: COLORS.white, fontSize: roadBead / 2, fontWeight: 900,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
-              }}>{t || ''}</span>
-            )
-          })}
+          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => beadCell(beads[i], i, roadBead))}
         </div>
       </div>
     </div>
@@ -825,6 +859,150 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     </Panel>
   )
 
+  // ============ 手机三段式（<1024，照德比 fc5fcd1）：锁顶(顶栏+对决区) / 中滚(四折叠盘区) / 锁底(珠盘路多视角+注栏) ============
+  // 折叠纯 UI（userAcc），不动下注 state；结算相位(settled)自动展开看 hit/push/lose 高亮，betting 恢复玩家手动态。
+  const effAcc = settled ? { main: true, totals: true, goals: true, correct: true } : userAcc
+  const selCount = section => {
+    let n = 0
+    new Set([...picks, ...betsPlaced.keys()]).forEach(k => {
+      const belong = section === 'main' ? ['home-win', 'away-win', 'draw'].includes(k)
+        : section === 'totals' ? (k.startsWith('h-') || k.startsWith('a-'))
+          : section === 'goals' ? k.startsWith('g-')
+            : k.startsWith('cs-')   // correct
+      if (belong) n++
+    })
+    return n
+  }
+  const accSection = (key, title, body) => {
+    const open = effAcc[key]
+    const cnt = selCount(key)
+    return (
+      <div style={{ ...secBox, padding: 0, overflow: 'hidden', marginBottom: 6 }}>
+        <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
+          width: '100%', height: 36, boxSizing: 'border-box',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <span style={{ color: DERBY.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+            {cnt > 0 && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flex: '0 0 auto', color: DERBY.sel, fontSize: 10, fontWeight: 900 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: DERBY.sel, display: 'inline-block' }} />{cnt}
+              </span>
+            )}
+          </span>
+          <span style={{ color: COLORS.white, fontSize: 12, fontWeight: 900, flex: '0 0 auto' }}>{open ? '˄' : '˅'}</span>
+        </button>
+        <div style={{ maxHeight: open ? 1400 : 0, overflow: 'hidden', transition: 'max-height 0.2s ease' }}>
+          <div style={{ padding: '0 6px 6px' }}>{body}</div>
+        </div>
+      </div>
+    )
+  }
+  // 盘区体（去 secBox/secHead，供折叠体复用现成 cell 渲染函数；桌面 mainBoard/…Board 原 const 零改）
+  const subLabel = txt => <div style={{ color: DERBY.gold, fontSize: 9.5, fontWeight: 900, letterSpacing: 1, margin: '2px 0 4px' }}>{txt}</div>
+  const mainBody = <div style={{ display: 'flex', gap: 5 }}>{MAIN.map(m => rowCell(m.slot, m.name, '', m.bg))}</div>
+  const totalsBody = (
+    <>
+      {subLabel('主队总分')}
+      <div style={{ display: 'flex', gap: 5 }}>{totalRow('h').map(m => colCell(m.slot, m.name, m.range))}</div>
+      {subLabel('客队总分')}
+      <div style={{ display: 'flex', gap: 5 }}>{totalRow('a').map(m => colCell(m.slot, m.name, m.range))}</div>
+    </>
+  )
+  const goalsBody = <div style={{ display: 'flex', gap: 5 }}>{GOALS.map(m => colCell(m.slot, m.name, m.range))}</div>
+  const correctBody = <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>{CORRECT.map(scoreCell)}</div>
+
+  const mobileCard = (
+    <Panel style={{
+      background: `radial-gradient(circle at 50% 28%, ${DERBY.bgCenter}, ${DERBY.bgOuter})`,
+      borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
+    }}>
+      <style>{`
+        .ddCell:hover:not(:disabled) { filter: brightness(1.2); }
+        @keyframes ddFlip { from { transform: rotateY(180deg); } to { transform: rotateY(0deg); } }
+        @keyframes ddScoreIn { 0% { opacity: 0; transform: scale(0.5); } 60% { opacity: 1; transform: scale(1.18); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes ddConfFall { 0% { transform: translateY(-12px) rotate(0deg); opacity: 0; } 12% { opacity: 1; } 100% { transform: translateY(230px) rotate(var(--rot)); opacity: 0; } }
+      `}</style>
+
+      {/* ① 锁顶：GameTopBar + 对决区（DOM 常驻，禁折叠禁卸载） */}
+      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column' }}>
+        {topBar}
+        {duelZone}
+      </div>
+
+      {/* ② 中滚：四盘区手风琴（主要/总分/进球 开，波胆收；结算相位全展开） */}
+      <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '6px 12px', position: 'relative', zIndex: 1 }}>
+        <WinToast toasts={toasts} />
+        {accSection('main', '主要盘 · 主胜 / 平 / 客胜', mainBody)}
+        {accSection('totals', '队伍总分 · 大小单双', totalsBody)}
+        {accSection('goals', '全场总进球 · 大小单双', goalsBody)}
+        {accSection('correct', '正确比分 · 波胆', correctBody)}
+      </div>
+
+      {/* ③ 锁底：珠盘路多视角 pill + 注栏（原样搬） */}
+      <div style={{ flex: '0 0 auto' }}>
+        <div style={{ padding: '4px 12px 0', position: 'relative', zIndex: 1 }}>
+          {roadTabsBar(9.5)}
+          {ratioBar(8.5)}
+          <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
+              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => beadCell(beads[i], i, 15))}
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
+          }}>
+            {[
+              { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+              { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+            ].map(({ v, col, row }) => (
+              <button key={v} type="button" className="ddChip" disabled={!betting} onClick={() => setBet(v)} style={{
+                gridColumn: col, gridRow: row, width: '100%', height: '100%', borderRadius: 8,
+                fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+                background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
+                border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
+              }}>{v}</button>
+            ))}
+            <div style={{
+              gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+              borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+            }}>
+              <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
+              <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
+            </div>
+            <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
+              gridColumn: 3, gridRow: 2, width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+              color: repeatOk ? COLORS.white : DERBY.dim, background: 'rgba(0,0,0,0.35)',
+              border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
+              cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+              <BetButton state="bet"
+                label={betting ? `下注 ${picks.size} 格` : drawing ? '开牌中…' : '本局已结'}
+                sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+                onClick={confirmBets} disabled={!confirmOk} stretch />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setHistoryOpen(true)} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
+    </Panel>
+  )
+
   // ---- Spribe-parity desktop skeleton (≥1024) ----
   if (isDesk) {
     return (
@@ -841,9 +1019,11 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     )
   }
 
+  // ---- 手机三段锁死（<1024）----
   return (
-    <GameLayout color={DERBY.sel}>
-      {gameCard}
-    </GameLayout>
+    <>
+      <style>{`.ddMobileRoot{height:100vh;height:100dvh;overflow:hidden}`}</style>
+      <div className="ddMobileRoot">{mobileCard}</div>
+    </>
   )
 }
