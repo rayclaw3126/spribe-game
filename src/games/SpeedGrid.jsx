@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel } from '../components/GameLayout'
+import { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, DERBY, ROULETTE } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
@@ -117,13 +117,21 @@ const TEAMS = [
 ]
 const teamOf = n => TEAMS[Math.floor((n - 1) / 6)]
 
-// 40 期假珠盘（大小单轨，旧→新；真开奖逐期顶掉）
+// 40 期假珠盘：存整局冠军车号(1-24，旧→新；真开奖逐期顶掉)，多视角一律从整值派生
 const SEED_ROAD = [
-  '大', '小', '小', '大', '小', '大', '大', '小', '小', '大',
-  '大', '小', '大', '大', '小', '大', '小', '小', '大', '大',
-  '小', '大', '小', '小', '大', '小', '大', '大', '大', '小',
-  '小', '大', '小', '大', '小', '小', '大', '小', '大', '小',
+  17, 5, 9, 20, 3, 14, 22, 8, 11, 18,
+  15, 6, 19, 13, 4, 16, 7, 10, 21, 24,
+  2, 23, 12, 1, 17, 9, 14, 20, 15, 6,
+  5, 18, 11, 22, 8, 3, 19, 10, 16, 7,
 ]
+// 珠盘路多视角（B 型：存整值 champ，判定一律走引擎 MARKETS/RED 常量，禁手写第二份表）
+const SG_ROAD_TABS = ['BS', 'OE', 'RB']
+const SG_ROAD_LABELS = { BS: '大小', OE: '单双', RB: '红黑' }
+function sgBeadFor(tab, n) {
+  if (tab === 'OE') return MARKETS.odd.hit(n) ? { t: '单', c: DERBY.away } : { t: '双', c: DERBY.home }
+  if (tab === 'RB') return MARKETS.red.hit(n) ? { t: '红', c: DERBY.away } : { t: '黑', c: ROULETTE.black }
+  return MARKETS.big.hit(n) ? { t: '大', c: DERBY.away } : { t: '小', c: DERBY.home }   // BS 大小
+}
 
 // ---------- 冲线舞台（drawing 相位；结果进相前已锁定，动画只读）----------
 // sprite 切图坐标（PIL 包围盒实测，1024² 表）：车头朝左，绘制时水平镜像向右行进
@@ -398,6 +406,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   const [animChamp, setAnimChamp] = useState(null)     // 当前开奖动画的冠军车号
   const [lastChamp, setLastChamp] = useState(SEED_CHAMP)
   const [road, setRoad] = useState(SEED_ROAD)
+  const [roadTab, setRoadTab] = useState('BS')   // 珠盘路视角（手机/桌面共用一个 state）
   const [result, setResult] = useState(null)           // { champ, hits:Set, winTotal, perKeyOutcome }
   const [toasts, setToasts] = useState([])
 
@@ -534,7 +543,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       hits = hitsOf(champ); winTotal = 0
     }
     setLastChamp(champ)
-    setRoad(h => [...h, champ >= 13 ? '大' : '小'].slice(-ROAD_CAP))
+    setRoad(h => [...h, champ].slice(-ROAD_CAP))   // 存整值 champ → 珠盘路多视角派生（判定走引擎）
     setResult({ champ, hits, winTotal, perKeyOutcome })
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
@@ -741,6 +750,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       borderRadius: 12, padding: isMobile ? '6px 8px' : '6px 12px',
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       boxSizing: 'border-box', overflow: 'hidden',
+      // 手机三段锁死：两相位舞台同高常驻(锁顶不跳)；桌面原样
+      ...(isDesk ? {} : { height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center' }),
     }}>
       <RaceStage key={`${room.roundNo}-race`} champ={cur} sfx={stageSfx} />
     </div>
@@ -752,6 +763,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       gap: isMobile ? 10 : 18, boxSizing: 'border-box', flexWrap: 'wrap',
+      ...(isDesk ? {} : { height: 150, overflow: 'hidden' }),
     }}>
       {/* 冠军大牌 */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flex: '0 0 auto' }}>
@@ -855,22 +867,25 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     </div>
   )
 
-  // ---- ③ 珠盘路（大小单轨，样式抄 Line Up；真历史滚动，容量 120）----
+  // ---- ③ 珠盘路（B 型多视角：存整值 champ → roadTab 派生 大小/单双/红黑；手机桌面共用 roadTab）----
   const ROAD_COLS = 20
   const roadBead = isMobile ? 18 : 14
-  const beads = road.slice(-ROAD_CAP)
+  const roadInts = road.slice(-ROAD_CAP)
+  const beads = roadInts.map(n => sgBeadFor(roadTab, n))
   const beadRoad = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
       margin: isMobile ? '0 12px 8px' : '0 18px 8px',
     }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-        <span style={{
-          padding: '3px 12px', borderRadius: RADIUS.pill,
-          background: DERBY.sel, color: '#083a1b',
-          border: `1px solid ${DERBY.sel}`,
-          fontSize: 10, fontWeight: 900, letterSpacing: 0.5,
-        }}>大小</span>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        {SG_ROAD_TABS.map(t => (
+          <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
+            flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 12px', borderRadius: RADIUS.pill,
+            background: roadTab === t ? DERBY.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : DERBY.dim,
+            border: `1px solid ${roadTab === t ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
+            fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
+          }}>{SG_ROAD_LABELS[t]}</button>
+        ))}
       </div>
       <div style={{
         overflowX: 'auto', borderRadius: 10,
@@ -882,16 +897,16 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
           gap: 2, width: 'max-content',
         }}>
           {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const t = beads[i]
+            const b = beads[i]
             return (
               <span key={i} style={{
                 width: roadBead, height: roadBead, borderRadius: '50%',
-                background: t ? (t === '大' ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.05)',
-                border: t ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                background: b ? b.c : 'rgba(255,255,255,0.05)',
+                border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
                 color: COLORS.white, fontSize: roadBead / 2, fontWeight: 900,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 boxSizing: 'border-box',
-              }}>{t || ''}</span>
+              }}>{b ? b.t : ''}</span>
             )
           })}
         </div>
@@ -905,7 +920,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       borderColor: COLORS.border, padding: 0, overflow: 'hidden',
       position: 'relative',
       display: 'flex', flexDirection: 'column',
-      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
+      height: '100%', boxSizing: 'border-box',   // 手机三段锁死：撑满 100dvh 根（桌面本就 100%，渲染不变）
     }}>
       <style>{`.sgCell:hover:not(:disabled) { filter: brightness(1.2); }`}</style>
 
@@ -917,7 +932,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
 
       {/* ② 盘区（desk 主盘/三段并排压总高；空间不足内部纵滚兜底） */}
       <div style={{
-        flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
+        flex: isDesk ? '0 1 auto' : '1 1 0', minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column',
         padding: isMobile ? '6px 12px' : '4px 18px', boxSizing: 'border-box',
         gap: 4, overflowY: 'auto',
@@ -930,8 +945,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
         {pickBoard}
       </div>
 
-      {/* 弹性垫片：把珠盘路推向底部贴注栏 */}
-      <div style={{ flex: '1 0 auto' }} />
+      {/* 弹性垫片：把珠盘路推向底部贴注栏（桌面用；手机三段锁死删掉让中区真滚到底） */}
+      {isDesk && <div style={{ flex: '1 0 auto' }} />}
 
       {/* ③ 珠盘路 */}
       {beadRoad}
@@ -1034,10 +1049,11 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     )
   }
 
-  // ---- stacked layout (<1024) ----
+  // ---- 手机三段锁死（<1024）：100dvh 根锁死 + gameCard 撑满 ----
   return (
-    <GameLayout color={DERBY.sel}>
-      {gameCard}
-    </GameLayout>
+    <>
+      <style>{`.sgMobileRoot{height:100vh;height:100dvh;overflow:hidden}`}</style>
+      <div className="sgMobileRoot">{gameCard}</div>
+    </>
   )
 }
