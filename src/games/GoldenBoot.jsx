@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import GameLayout, { Panel } from '../components/GameLayout'
+import { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, GOLDENBOOT } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
@@ -897,7 +897,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       borderColor: COLORS.border, padding: 0, overflow: 'hidden',
       position: 'relative',
       display: 'flex', flexDirection: 'column',
-      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
+      height: '100%', boxSizing: 'border-box',   // 手机三段锁死：撑满 100dvh 根（桌面本就 100%，渲染不变）
     }}>
       <style>{`.gbCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
 
@@ -909,7 +909,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
 
       {/* ---- ② 下注区: 盘区三族，可滚 ---- */}
       <div style={{
-        flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
+        flex: isDesk ? '0 1 auto' : '1 1 0', minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column',
         padding: isMobile ? '8px 12px' : '8px 18px', boxSizing: 'border-box',
         gap: isMobile ? 8 : 10, overflowY: 'auto',
@@ -968,7 +968,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
 
       </div>
 
-      <div style={{ flex: '1 0 auto' }} />
+      {isDesk && <div style={{ flex: '1 0 auto' }} />}
 
       {/* ---- ③ 珠盘路（常驻底部）---- */}
       {beadRoad}
@@ -1054,12 +1054,13 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
     )
   }
 
-  // ---- stacked layout (<1024) ----
+  // ---- 手机三段锁死（<1024）：100dvh 根锁死 + gameCard 撑满；shake 挂根 ----
   return (
-    <GameLayout color={GOLDENBOOT.gold}>
-      <div ref={cardShakeRef}>
+    <>
+      <style>{`.gbMobileRoot{height:100vh;height:100dvh;overflow:hidden}`}</style>
+      <div className="gbMobileRoot" ref={cardShakeRef}>
         {gameCard}
       </div>
-    </GameLayout>
+    </>
   )
 }
