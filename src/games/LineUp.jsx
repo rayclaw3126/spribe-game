@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import GameLayout, { Panel } from '../components/GameLayout'
+import { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
@@ -152,11 +152,22 @@ const SEED_LAST = deriveRound([
 ])
 
 // 40 期假珠盘（大小单轨，旧→新；真开奖逐期顶掉）
+// 珠盘路种子：整局总和 total 形态（0-225，跨段位/大小/单双分布，首屏各视角有料）。
 const SEED_ROAD = [
-  '小', '大', '大', '小', '大', '小', '小', '大', '大', '大',
-  '小', '大', '小', '小', '大', '小', '大', '大', '小', '小',
-  '大', '小', '大', '大', '小', '大', '小', '小', '小', '大',
-  '大', '小', '大', '小', '大', '大', '小', '大', '小', '大',
+  90, 118, 135, 105, 88, 122, 100, 145, 92, 115,
+  108, 130, 96, 125, 85, 112, 140, 99, 113, 128,
+  94, 120, 106, 132,
+]
+
+// 珠盘路 3 视角（road 现存整局 total，从 total 派生）。段位判定复用 MARKETS zone-* 的实值 hit
+// （代码里段位带实值常量，注释值骗人；禁手写第二份表）；段珠显段位首字。
+const ZONE_KEYS = ['zone-releg', 'zone-mid', 'zone-euro', 'zone-champ']
+const ZONE_CHARS = ['降', '中', '欧', '冠']
+const ZONE_C = [DERBY.away, DERBY.home, DERBY.sel, DERBY.gold]   // 降红/中蓝/欧绿/冠金（仅显示）
+const ROAD_VIEWS = [
+  { key: 'bs', label: '大小', judge: n => n >= 113 ? { t: '大', c: DERBY.away } : { t: '小', c: DERBY.home } },
+  { key: 'oe', label: '单双', judge: n => n % 2 ? { t: '单', c: DERBY.away } : { t: '双', c: DERBY.home } },
+  { key: 'zone', label: '段位', judge: n => { const i = ZONE_KEYS.findIndex(k => MARKETS[k].hit({ total: n })); return { t: ZONE_CHARS[i] ?? '', c: ZONE_C[i] ?? 'rgba(255,255,255,0.2)' } } },
 ]
 
 // 普通盘四区（足球叙事换皮，段位照参考原文；⚠ RTP 出带待定，见 ODDS 注释）
@@ -297,7 +308,9 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
   const [uiPhase, setUiPhase] = useState('betting')
   const [animRound, setAnimRound] = useState(null)       // 当前开奖动画的派生局（deriveRound 结果）
   const [lastRound, setLastRound] = useState(SEED_LAST)
-  const [road, setRoad] = useState(SEED_ROAD)            // 珠盘路（旧→新）
+  const [road, setRoad] = useState(SEED_ROAD)            // 珠盘路（旧→新）：现存整局 total
+  const [roadView, setRoadView] = useState('bs')         // 手机/桌面共用路珠视角（默认大小）
+  const roadRecordedRef = useRef(null)                   // 珠盘路整局记账去重（按 rnd，防 StrictMode 双调用）
   const [result, setResult] = useState(null)             // { hits:Set, winTotal }
   const [toasts, setToasts] = useState([])
   const [hasLast, setHasLast] = useState(false)
@@ -389,7 +402,11 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
       hits = hitsOf(r); winTotal = 0
     }
     setLastRound(r)
-    setRoad(h => [...h, r.total >= 113 ? '大' : '小'].slice(-ROAD_CAP))
+    // 珠盘路改存整局 total（3 视角从 total 派生）；按 rnd 去重，一局恰记一次（StrictMode 防重）
+    if (rnd != null && roadRecordedRef.current !== rnd) {
+      roadRecordedRef.current = rnd
+      setRoad(h => [...h, r.total].slice(-ROAD_CAP))
+    }
     setResult({ hits, winTotal })
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
@@ -852,18 +869,24 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
   const ROAD_COLS = 20
   const roadBead = isMobile ? 18 : 14   // 移动端珠子大一档（可辨），桌面压一档保总高（同 Derby）
   const beads = road.slice(-ROAD_CAP)
+  const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 路珠视角（手机/桌面共用 roadView，切了两端一致）
   const beadRoad = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
       margin: isMobile ? '0 12px 8px' : '0 18px 8px',
     }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-        <span style={{
-          padding: '3px 12px', borderRadius: RADIUS.pill,
-          background: DERBY.sel, color: '#083a1b',
-          border: `1px solid ${DERBY.sel}`,
-          fontSize: 10, fontWeight: 900, letterSpacing: 0.5,
-        }}>大小</span>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
+        {ROAD_VIEWS.map(v => {
+          const on = roadView === v.key
+          return (
+            <button key={v.key} type="button" onClick={() => setRoadView(v.key)} style={{
+              padding: '3px 12px', borderRadius: RADIUS.pill,
+              background: on ? DERBY.sel : 'rgba(0,0,0,0.35)', color: on ? '#083a1b' : DERBY.dim,
+              border: `1px solid ${on ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
+              fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer', whiteSpace: 'nowrap',
+            }}>{v.label}</button>
+          )
+        })}
       </div>
       <div style={{
         overflowX: 'auto', borderRadius: 10,
@@ -875,16 +898,18 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
           gap: 2, width: 'max-content',
         }}>
           {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const t = beads[i]
+            // road 存整局 total；按当前视角 curView.judge 派生（同一份函数，桌面/手机共用）
+            const n = beads[i]
+            const d = n != null ? curView.judge(n) : null
             return (
               <span key={i} style={{
                 width: roadBead, height: roadBead, borderRadius: '50%',
-                background: t ? (t === '大' ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.05)',
-                border: t ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                background: d ? d.c : 'rgba(255,255,255,0.05)',
+                border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
                 color: COLORS.white, fontSize: roadBead / 2, fontWeight: 900,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 boxSizing: 'border-box',
-              }}>{t || ''}</span>
+              }}>{d ? d.t : ''}</span>
             )
           })}
         </div>
@@ -1002,6 +1027,117 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
     </Panel>
   )
 
+  // ============ 手机三段式（<1024，照德比模板）：锁顶(顶栏+舞台) / 中滚(单板整块不折叠) / 锁底(路珠3视角+注栏) ============
+  // LineUp 盘区是单一 marketSection（内置 A/B 视图），无多段可分 → 不套手风琴，单板整块进中滚。钱路零改。
+  const mobileCard = (
+    <Panel style={{
+      background: `radial-gradient(circle at 50% 28%, ${DERBY.bgCenter}, ${DERBY.bgOuter})`,
+      borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
+    }}>
+      <style>{`.luCell:hover:not(:disabled) { filter: brightness(1.2); }`}</style>
+
+      {/* ① 锁顶：GameTopBar + 舞台 drawZone（非弹性自成块，canvas 常驻不折叠不卸载） */}
+      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column' }}>
+        {topBar}
+        {drawZone}
+      </div>
+
+      {/* ② 中滚：单板 marketSection 整块（含 A/B 视图，不折叠） */}
+      <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '4px 12px', position: 'relative', zIndex: 1 }}>
+        <WinToast toasts={toasts} />
+        {marketSection}
+      </div>
+
+      {/* ③ 锁底：路珠(3视角 pill 大小/单双/段位 + 珠压 2 行,从 total 派生) + 注栏 */}
+      <div style={{ flex: '0 0 auto' }}>
+        <div style={{ padding: '4px 12px 0', position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none', marginBottom: 3 }}>
+            {ROAD_VIEWS.map(v => {
+              const on = roadView === v.key
+              return (
+                <button key={v.key} type="button" onClick={() => setRoadView(v.key)} style={{
+                  flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: RADIUS.pill,
+                  background: on ? DERBY.sel : 'rgba(0,0,0,0.35)', color: on ? '#083a1b' : DERBY.dim,
+                  border: `1px solid ${on ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
+                  fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
+                }}>{v.label}</button>
+              )
+            })}
+          </div>
+          <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
+              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
+                const n = beads[i]
+                const d = n != null ? curView.judge(n) : null
+                return (
+                  <span key={i} style={{
+                    width: 15, height: 15, borderRadius: '50%',
+                    background: d ? d.c : 'rgba(255,255,255,0.05)',
+                    border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                    color: COLORS.white, fontSize: 8, fontWeight: 900,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+                  }}>{d ? d.t : ''}</span>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
+            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
+          }}>
+            {[
+              { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
+              { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
+            ].map(({ v, col, row }) => (
+              <button key={v} type="button" className="luChip" disabled={!betting} onClick={() => setBet(v)} style={{
+                gridColumn: col, gridRow: row, width: '100%', height: '100%', borderRadius: 8,
+                fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+                background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
+                border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
+              }}>{v}</button>
+            ))}
+            <div style={{
+              gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+              borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
+            }}>
+              <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
+              <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
+            </div>
+            <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
+              gridColumn: 3, gridRow: 2, width: '100%', height: '100%', borderRadius: 8,
+              fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+              color: repeatOk ? DERBY.text : DERBY.dim, background: 'rgba(0,0,0,0.35)',
+              border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
+              cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
+              <BetButton
+                state="bet"
+                label={betting ? `下注 ${picks.size} 格` : settled ? '已结算' : '已锁盘'}
+                sub={betting ? `$${confirmTotal.toFixed(0)}` : undefined}
+                onClick={confirmBets}
+                disabled={!confirmOk}
+                stretch
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setHistoryOpen(true)} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
+        venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
+    </Panel>
+  )
+
   // ---- Spribe-parity desktop skeleton (≥1024), same bones as Derby Day ----
   if (isDesk) {
     return (
@@ -1025,10 +1161,11 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
     )
   }
 
-  // ---- stacked layout (<1024) ----
+  // ---- 手机三段锁死（<1024）----
   return (
-    <GameLayout color={DERBY.sel}>
-      {gameCard}
-    </GameLayout>
+    <>
+      <style>{`.luMobileRoot{height:100vh;height:100dvh;overflow:hidden}`}</style>
+      <div className="luMobileRoot">{mobileCard}</div>
+    </>
   )
 }
