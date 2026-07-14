@@ -4,6 +4,8 @@ import { usePlayerApi } from '../../lib/playerApi'
 import { formatDraw, shortRoundNo } from '../drawFormatters'
 import { MARKET_GROUPS, nameOf, venueOf, backendOf } from './mockData'
 import { oddsStr, beadOf } from './marketsRegistry'
+import { useSfxMuted } from '../shell/bgmManager'
+import SpeedGridStage from '../../games/stages/SpeedGridStage'
 
 const NOOP = () => {}   // apiGet 不写余额，setServerBalance 传稳定 noop 保 usePlayerApi memo 不抖
 const BEAD_C = { up: M.beadUp, down: M.beadDown, tie: M.beadTie }   // 路珠三色（tone → tokens 色）
@@ -49,6 +51,7 @@ function useInViewport(ref) {
 // 之后收 drawn 结果滚动追加；盘口赔率读 markets（oddsStr）；下注仍假（onAddBet → 右栏注单）。
 export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, mode, quickState, onAddBet, onQuickBet, onClose, flash }) {
   const be = backendOf(id)
+  const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮同步；speedgrid 真舞台用）
   // 盘口点击：快投模式 → 立即发单键；注单模式 → 进 slip
   const cellClick = (q) => (mode === 'quick' ? onQuickBet : onAddBet)(id, q.key, q.label, oddsStr(id, q.key))
   // 快投按钮态 → 底/边/透明度 + 飞行 loading 点
@@ -135,7 +138,32 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
         </div>
       ) : (
         <>
-          {/* 迷你舞台：三相位 + 等待 定高 150px（相位切换零跳动，两行开奖副行也包在内不撑高） */}
+          {id === 'SpeedGrid' ? (
+            /* 舞台上桌试点：SpeedGridStage 真舞台铺满 150px（场馆皮自带）；倒计时/封盘/结算叠显上层，信息不丢 */
+            <div style={{ flex: '0 0 auto', height: 150, position: 'relative', overflow: 'hidden', background: M.panel }}>
+              <SpeedGridStage phase={room.phase} roundNo={room.roundNo} drawResult={room.drawResult} muted={muted} height={150} />
+              <span style={{ position: 'absolute', top: 4, left: 8, color: M.txtMute, fontSize: 9, fontWeight: 700, textShadow: '0 1px 3px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>{venueOf(id)}</span>
+              {(room.phase === 'betting' || room.phase === 'idle') && !room.drawResult && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, pointerEvents: 'none' }}>
+                  <span style={{ color: room.countdownMs <= 5000 ? M.danger : M.betting, fontSize: 58, fontWeight: 900, lineHeight: 1, fontVariantNumeric: 'tabular-nums', textShadow: '0 2px 10px rgba(0,0,0,0.75)' }}>{cd}</span>
+                  <span style={{ color: M.txt, fontSize: 11, fontWeight: 700, textShadow: '0 1px 4px rgba(0,0,0,0.85)' }}>上期 {lastTxt}</span>
+                </div>
+              )}
+              {room.phase === 'locked' && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                  <span style={{ color: M.locked, fontSize: 58, fontWeight: 900, textShadow: '0 2px 10px rgba(0,0,0,0.75)' }}>封盘</span>
+                </div>
+              )}
+              {room.settleInfo && room.settleInfo.roundNo === room.roundNo && (
+                <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', pointerEvents: 'none' }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: Number(room.settleInfo.totalPayout) > 0 ? M.betting : M.txt, textShadow: '0 1px 4px rgba(0,0,0,0.85)' }}>
+                    {Number(room.settleInfo.totalPayout) > 0 ? `本期 中 $${Number(room.settleInfo.totalPayout).toFixed(2)}` : '本期 未中'}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+          /* 迷你舞台：三相位 + 等待 定高 150px（相位切换零跳动，两行开奖副行也包在内不撑高） */
           <div style={{
             flex: '0 0 auto', height: 150, overflow: 'hidden',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -178,6 +206,7 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
               </>
             )}
           </div>
+          )}
 
           {/* 盘口分组手风琴（赔率读 markets） */}
           <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column' }}>
