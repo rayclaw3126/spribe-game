@@ -439,3 +439,13 @@ export const SWITCHER = {
   handle: 'rgba(255,255,255,0.3)', // 抓手条
   btnBg: 'rgba(0,0,0,0.28)',       // 「返回大厅」按钮底
 }
+
+// #41 单12.1：筹码五档色（$1灰白/$5红/$10蓝/$25绿/$50金）。base=盘面主色、edge=边齿/内环亮色。
+// 面额字统一白字带描边（各档通用，不入表）。Chip 取「不超过所在档（向上归档）」：色 = value ≤ v 的最小档。
+export const CHIP_COLORS = [
+  { v: 1,  base: '#dfe4ea', edge: '#ffffff' },   // 灰白
+  { v: 5,  base: '#d84a44', edge: '#ff9d98' },   // 红
+  { v: 10, base: '#2f7fe0', edge: '#8fbcf5' },   // 蓝
+  { v: 25, base: '#2ea862', edge: '#86d6a6' },   // 绿
+  { v: 50, base: '#f2b829', edge: '#ffe08a' },   // 金
+]

@@ -6,6 +6,7 @@ import { MARKET_GROUPS, nameOf, venueOf, backendOf } from './mockData'
 import { oddsStr, beadOf } from './marketsRegistry'
 import { useSfxMuted } from '../shell/bgmManager'
 import { STAGE_BY_ID } from './stageRegistry'
+import Chip from '../shell/Chip'
 
 const NOOP = () => {}   // apiGet 不写余额，setServerBalance 传稳定 noop 保 usePlayerApi memo 不抖
 const BEAD_C = { up: M.beadUp, down: M.beadDown, tie: M.beadTie }   // 路珠三色（tone → tokens 色）
@@ -49,7 +50,7 @@ function useInViewport(ref) {
 
 // 单张桌卡（接活）：room 下发相位/期号/倒计时/开奖；上期+迷你路珠首帧 /round/history 播种、
 // 之后收 drawn 结果滚动追加；盘口赔率读 markets（oddsStr）；下注仍假（onAddBet → 右栏注单）。
-export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, mode, quickState, onAddBet, onQuickBet, onClose, onOpenGame, flash }) {
+export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, stakes, mode, quickState, onAddBet, onQuickBet, onClose, onOpenGame, flash }) {
   const be = backendOf(id)
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮同步；speedgrid 真舞台用）
   // 盘口点击：快投模式 → 立即发单键；注单模式 → 进 slip
@@ -64,6 +65,14 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
       flying: st === 'flying',
     }
   }
+  // 盘口键本期已投 → 键右下叠筹码码（面额=该键累投额，色随档；未投不显；避让左上 loading 点 + 底部赔率）。
+  // 数据只读 stakes（= 桌头同源 submittedRef.byKey，禁另起账）。组头小计仍走文字（下方 groupStake）。
+  const stakeChip = (key) => (stakes && stakes[key] > 0
+    ? <span style={{ position: 'absolute', bottom: 1, right: 1, zIndex: 3, pointerEvents: 'none', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.55))' }}>
+        <Chip value={stakes[key]} size={24} />
+      </span>
+    : null)
+  const groupStake = (grp) => (stakes ? grp.keys.reduce((s, q) => s + (stakes[q.key] || 0), 0) : 0)
   const rootRef = useRef(null)
   const inView = useInViewport(rootRef)
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance: NOOP })
@@ -215,6 +224,7 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
           <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column' }}>
             {(MARKET_GROUPS[id] || []).map((grp, gi) => {
               const isOpen = !!open[gi]
+              const gStake = groupStake(grp)   // 组内本期已投合计
               return (
                 <div key={grp.group} style={{ borderTop: `1px solid ${M.line}` }}>
                   <button type="button" onClick={() => toggle(gi)} style={{
@@ -223,6 +233,10 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
                   }}>
                     <span style={{ color: M.txtMute, fontSize: 11, width: 10 }}>{isOpen ? '▾' : '▸'}</span>
                     <span style={{ flex: 1, color: isOpen ? M.txt : M.txtDim, fontSize: 12, fontWeight: 800 }}>{grp.group}</span>
+                    {/* 收起且组内有注 → 组头附小计（展开则明细在键上，不重复显） */}
+                    {!isOpen && gStake > 0 && (
+                      <span style={{ background: M.bettingTint, color: M.amount, borderRadius: 999, padding: '0 6px', fontSize: 10, fontWeight: 900 }}>${gStake}</span>
+                    )}
                     <span style={{ color: M.txtMute, fontSize: 10, fontWeight: 700 }}>{grp.keys.length}</span>
                   </button>
                   {isOpen && (grp.grid ? (
@@ -232,7 +246,8 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
                           position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center',
                           background: fx.bg, border: `1px solid ${fx.bd}`, borderRadius: 6, padding: '5px 1px', cursor: 'pointer', opacity: fx.op, transition: 'background 0.15s, border-color 0.15s',
                         }}>
-                          {fx.flying && <span style={{ position: 'absolute', top: 2, right: 3, width: 5, height: 5, borderRadius: '50%', background: M.locked }} />}
+                          {fx.flying && <span style={{ position: 'absolute', top: 2, left: 3, width: 5, height: 5, borderRadius: '50%', background: M.locked }} />}
+                          {stakeChip(q.key)}
                           <span style={{ color: M.txt, fontSize: 11, fontWeight: 800, lineHeight: 1.1 }}>{q.label}</span>
                           <span style={{ color: M.amount, fontSize: 8, fontWeight: 700 }}>{oddsStr(id, q.key)}</span>
                         </button>
@@ -246,7 +261,8 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
                           position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
                           background: fx.bg, border: `1px solid ${fx.bd}`, borderRadius: 8, padding: '6px 2px', cursor: 'pointer', opacity: fx.op, transition: 'background 0.15s, border-color 0.15s',
                         }}>
-                          {fx.flying && <span style={{ position: 'absolute', top: 2, right: 3, width: 5, height: 5, borderRadius: '50%', background: M.locked }} />}
+                          {fx.flying && <span style={{ position: 'absolute', top: 2, left: 3, width: 5, height: 5, borderRadius: '50%', background: M.locked }} />}
+                          {stakeChip(q.key)}
                           <span style={{ color: M.txt, fontSize: 12, fontWeight: 800 }}>{q.label}</span>
                           <span style={{ color: M.amount, fontSize: 10, fontWeight: 700 }}>{oddsStr(id, q.key)}</span>
                         </button>

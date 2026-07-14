@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { MULTI_DARK as M } from '../shell/tokens'
+import Chip from '../shell/Chip'
 
 // 右栏 190px 注单：顶「本轮注单·N」/ 注单行（游戏·盘口 / @赔率 / 可点改金额 / ×撤 / 失败标红）
 // / 底部合计 + 一键确认（提交中禁重入）。数据/逻辑由上层 MultiTablePage 持有。
@@ -41,6 +42,7 @@ export default function BetSlip({ items, mode, quickLog = [], confirming, onRemo
                   <div style={{ color: M.txt, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.gameName}·{it.market}</div>
                   <div style={{ color: M.txtMute, fontSize: 10, marginTop: 1 }}>@{it.odds} · 已发</div>
                 </div>
+                <span style={{ flex: '0 0 auto', lineHeight: 0 }}><Chip value={it.amount} size={18} /></span>
                 <span style={{ flex: '0 0 auto', color: M.amount, fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>${it.amount}</span>
               </div>
             ))}
@@ -98,10 +100,13 @@ export default function BetSlip({ items, mode, quickLog = [], confirming, onRemo
                   fontSize: 12, fontWeight: 800, padding: '2px 4px',
                 }} />
             ) : (
-              <span onClick={() => startEdit(it)} title="点击改金额" style={{
-                flex: '0 0 auto', color: M.amount, fontSize: 12, fontWeight: 800, cursor: 'pointer',
-                fontVariantNumeric: 'tabular-nums', textDecoration: 'underline', textDecorationStyle: 'dotted',
-              }}>${it.amount}</span>
+              <>
+                <span style={{ flex: '0 0 auto', lineHeight: 0 }}><Chip value={it.amount} size={18} /></span>
+                <span onClick={() => startEdit(it)} title="点击改金额" style={{
+                  flex: '0 0 auto', color: M.amount, fontSize: 12, fontWeight: 800, cursor: 'pointer',
+                  fontVariantNumeric: 'tabular-nums', textDecoration: 'underline', textDecorationStyle: 'dotted',
+                }}>${it.amount}</span>
+              </>
             )}
             <button type="button" onClick={() => onRemove(it.id)} aria-label="撤销" style={{
               flex: '0 0 auto', width: 18, height: 18, borderRadius: 5, cursor: 'pointer',

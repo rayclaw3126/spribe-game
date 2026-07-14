@@ -1,17 +1,14 @@
-import { useState } from 'react'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { COLORS, LOBBY_DARK } from './shell/tokens'
 import { useBgm } from './shell/bgmManager'
-import BillDrawer from './BillDrawer'
 
-export default function Header({ balance, onHome, onLogout, playerToken }) {
+// #41 单13：账单抽屉提至 App 单实例，Header 不再自挂 BillDrawer；账单钮改调 onOpenBill（大厅入口不回退）。
+export default function Header({ balance, onHome, onLogout, onOpenBill }) {
   const isMobile = useMediaQuery('(max-width: 900px)')
   // BGM master switch — global singleton state, shared with every game's toggle.
   const [bgmUiOn, toggleBgm] = useBgm()
-  const [billOpen, setBillOpen] = useState(false)
 
   return (
-    <>
     <header style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
       height: '52px',
@@ -79,7 +76,7 @@ export default function Header({ balance, onHome, onLogout, playerToken }) {
 
         <button
           type="button"
-          onClick={() => setBillOpen(true)}
+          onClick={() => onOpenBill?.()}
           aria-label="我的账单"
           title="我的账单"
           style={{
@@ -110,7 +107,5 @@ export default function Header({ balance, onHome, onLogout, playerToken }) {
         }}>登出</button>
       </div>
     </header>
-    <BillDrawer open={billOpen} onClose={() => setBillOpen(false)} playerToken={playerToken} onLogout={onLogout} />
-    </>
   )
 }

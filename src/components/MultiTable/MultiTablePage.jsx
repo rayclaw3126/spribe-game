@@ -11,6 +11,7 @@ import { useAllRooms } from './useAllRooms'
 import { mapBetError } from './betErrors'
 import { useSfxMuted } from '../shell/bgmManager'
 import { SpeakerIcon } from '../shell/AudioIcons'
+import Chip from '../shell/Chip'
 import { DEFAULT_TABLES, CHIP_VALUES, ONLINE_COUNT, ALL_TABLE_IDS, nameOf, backendOf, venueOf, coverOf } from './mockData'
 
 // 用户名脱敏（与 BetFeed/后端同规则）：首 + *** + 末；≤2 字仅首 + ***
@@ -31,7 +32,7 @@ function loadTables() {
 }
 function loadChip() { const n = Number(localStorage.getItem(LS_CHIP)); return CHIP_VALUES.includes(n) ? n : CHIP_VALUES[0] }
 
-export default function MultiTablePage({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack, onOpenGame }) {
+export default function MultiTablePage({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack, onOpenGame, onOpenBill }) {
   const isDesk = useMediaQuery('(min-width: 1024px)')
   const playerName = (typeof localStorage !== 'undefined' && localStorage.getItem('spribe_player_username')) || ''  // 战绩卡脱敏用
   const [sfxMuted, toggleSfxMuted] = useSfxMuted()       // 全局音效静音（单例，切了单游戏页同步生效）
@@ -103,12 +104,18 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
     setSlip(prev => prev.map(it => (it.id === rowId ? { ...it, amount: v, error: null } : it)))
   }
 
-  // 本期已投累加（快投逐笔加；roundNo 换即重置）
-  function recordSubmitted(gid, roundNo, add) {
+  // 本期已投累加（快投逐笔 / 注单整单，均走此一份账；roundNo 换即重置）。
+  // deltas = { key: 注额 }：累加 total 与 byKey[key]（同键多笔叠加，供盘口键徽标 + 组头小计读）。
+  function addStakes(gid, roundNo, deltas) {
     setSubmitted(prev => {
-      const cur = prev[gid]
-      const total = cur && cur.roundNo === roundNo ? cur.total + add : add
-      return { ...prev, [gid]: { roundNo, total: Number(total.toFixed(2)) } }
+      const cur = prev[gid] && prev[gid].roundNo === roundNo ? prev[gid] : { roundNo, total: 0, byKey: {} }
+      const byKey = { ...cur.byKey }
+      let total = cur.total
+      for (const [k, amt] of Object.entries(deltas)) {
+        byKey[k] = Number(((byKey[k] || 0) + Number(amt)).toFixed(2))
+        total = Number((total + Number(amt)).toFixed(2))
+      }
+      return { ...prev, [gid]: { roundNo, total, byKey } }
     })
   }
   const clearCell = (ck) => setQuickState(s => { const n = { ...s }; delete n[ck]; return n })
@@ -129,7 +136,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
       const res = await api.apiPlay(backendOf(gameId), { bets: { [key]: chip } })   // ★唯一钱路径·单键
       setQuickState(s => ({ ...s, [ck]: 'ok' }))
       setTimeout(() => clearCell(ck), 700)
-      recordSubmitted(gameId, res.roundNo, chip)
+      addStakes(gameId, res.roundNo, { [key]: chip })
       quickSeq.current += 1
       setQuickLog(l => [{ id: quickSeq.current, gameName: nameOf(gameId), market: label, odds, amount: chip, roundNo: res.roundNo }, ...l])
     } catch (e) {
@@ -163,7 +170,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
     setConfirming(true)
     const succeededRowIds = new Set()
     const failedMsg = {}      // gid -> 中文错误
-    const newSubmitted = {}
+    const okGids = []
     for (const gid of sendable) {
       const rows = byGame[gid]
       const bets = {}   // 同 key 聚合注额
@@ -171,8 +178,8 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
       try {
         const res = await api.apiPlay(backendOf(gid), { bets })   // ★唯一钱路径：POST /round/<be>/play
         rows.forEach(it => succeededRowIds.add(it.id))
-        const total = rows.reduce((s, it) => s + Number(it.amount), 0)
-        newSubmitted[gid] = { roundNo: res.roundNo, total: Number(total.toFixed(2)) }
+        addStakes(gid, res.roundNo, bets)   // 累计本期已投（total + byKey，与快投同一份账）
+        okGids.push(gid)
       } catch (e) {
         failedMsg[gid] = mapBetError(e)
       }
@@ -186,8 +193,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
         if (failedMsg[it.gameId]) return { ...it, error: failedMsg[it.gameId] }
         return { ...it, error: null }
       }))
-    if (Object.keys(newSubmitted).length) setSubmitted(prev => ({ ...prev, ...newSubmitted }))
-    const okN = Object.keys(newSubmitted).length
+    const okN = okGids.length
     const badN = Object.keys(failedMsg).length + (lockedRowIds.size ? 1 : 0)
     pushToast(badN ? `已提交 ${okN} 款 · ${badN > 0 ? '部分未成' : ''}`.trim() : `已提交 ${okN} 款`)
     setConfirming(false)
@@ -295,11 +301,13 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
           {CHIP_VALUES.map(v => {
             const on = v === chip
             return (
-              <button key={v} type="button" onClick={() => setChip(v)} style={{
-                minWidth: 30, padding: '4px 9px', borderRadius: 999, cursor: 'pointer',
-                background: on ? M.amount : M.card, color: on ? M.accentInk : M.txtDim,
-                border: `1px solid ${on ? M.amount : M.line}`, fontSize: 12, fontWeight: 900,
-              }}>{v}</button>
+              <button key={v} type="button" onClick={() => setChip(v)} aria-label={`筹码 ${v}`} title={`筹码 ${v}`} style={{
+                padding: 0, borderRadius: '50%', cursor: 'pointer', lineHeight: 0,
+                background: 'transparent', border: `2px solid ${on ? M.accent : 'transparent'}`,   // 选中态加环
+                boxShadow: on ? `0 0 0 2px ${M.bettingTint}` : 'none', opacity: on ? 1 : 0.72,
+              }}>
+                <Chip value={v} size={30} />
+              </button>
             )
           })}
         </div>
@@ -324,6 +332,12 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
         }}>
           <SpeakerIcon on={!sfxMuted} />
         </button>
+        {/* 账单钮：开 App 层单实例 BillDrawer（与静音钮并列） */}
+        <button type="button" onClick={() => onOpenBill?.()} aria-label="我的账单" title="我的账单" style={{
+          flex: '0 0 auto', width: 30, height: 30, borderRadius: 999, cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: M.card, border: `1px solid ${M.line}`, color: M.txtDim, fontSize: 15,
+        }}>🧾</button>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: M.txtDim, fontSize: 12, fontWeight: 700 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: M.betting }} />
           {ONLINE_COUNT} 在线
@@ -363,10 +377,12 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
           ) : tables.map(id => {
             const room = rooms[id]
             const sub = submitted[id]
-            const stakedAmt = sub && room?.roundNo === sub.roundNo ? sub.total : null   // 本期已投（roundNo 匹配才显）
+            const matched = sub && room?.roundNo === sub.roundNo   // roundNo 匹配才显（开奖进下期即清零）
+            const stakedAmt = matched ? sub.total : null            // 本期已投总额（桌头）
+            const stakes = matched ? sub.byKey : null               // 本期各盘口键已投（键徽标 + 组头小计）
             return (
               <TableCard key={id} id={id} room={room} playerToken={playerToken} onLogout={onLogout}
-                stakedAmt={stakedAmt} mode={mode} quickState={quickState}
+                stakedAmt={stakedAmt} stakes={stakes} mode={mode} quickState={quickState}
                 onAddBet={addBet} onQuickBet={quickBet} onToast={pushToast} onClose={closeTable}
                 onOpenGame={onOpenGame} flash={flashId === id} />
             )

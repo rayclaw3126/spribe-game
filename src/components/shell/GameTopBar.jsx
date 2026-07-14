@@ -1,4 +1,5 @@
-import { createContext, useContext, useState } from 'react'
+import { useContext, useState } from 'react'
+import { GameNavContext, BillNavContext } from './navContexts'
 import { COLORS, RADIUS, DERBY, LAYOUT } from './tokens'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { useBgm, useSfxMuted } from './bgmManager'
@@ -13,9 +14,7 @@ const VENUE_TO_NAME = Object.fromEntries(
   GAME_REGISTRY.filter(g => g.venue).map(g => [g.venue, g.displayName])
 )
 
-// App 通过此 Context 下发 setActiveGame(id|null)——GameSwitcher 切换游戏走它，
-// 无需改 21 款游戏文件（它们只透传 GameTopBar，Context 隐形穿透）。
-export const GameNavContext = createContext(null)
+// GameNavContext / BillNavContext 已挪至 ./navContexts（App→组件注入，零改 21 款游戏；见该文件）。
 
 // 游戏顶栏共享件：
 //   移动（<1024）两行 —— 上行 = ← 大厅 钮 + 右侧 ?/音乐/音效；
@@ -36,6 +35,7 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
   const [muted, toggleMuted] = useSfxMuted()
   // 游戏内切换（仅移动端）：从 Context 拿 setActiveGame；当前款由 venue 反查（venue??displayName 全站唯一）。
   const switchGame = useContext(GameNavContext)
+  const openBill = useContext(BillNavContext)   // #41 单13：账单入口（App 下发；null 即不显，死钮铁律）
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)   // 手机 ⋯ 溢出菜单
   const curGame = venue ? GAME_REGISTRY.find(g => (g.venue ?? g.displayName) === venue) : null
@@ -127,7 +127,8 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
         borderRadius: 10, padding: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
         display: 'flex', flexDirection: 'column', gap: 1,
       }}>
-        {onHistory && menuItem('📜', '账单', () => { setMenuOpen(false); onHistory() })}
+        {openBill && menuItem('🧾', '账单', () => { setMenuOpen(false); openBill() })}
+        {onHistory && menuItem('📜', '开奖历史', () => { setMenuOpen(false); onHistory() })}
         {onFairness && menuItem('⚖', '公平性', () => { setMenuOpen(false); onFairness() })}
         {onHowTo && menuItem('?', '玩法说明', () => { setMenuOpen(false); onHowTo() })}
         {menuItem(soundOn ? '♪' : '🔇', '音效开关', () => toggleSound(), soundOn ? '开' : '关')}
@@ -139,6 +140,15 @@ export default function GameTopBar({ venue, roundId, phaseChip, subRow, onHowTo,
     <>
       {balanceBits}
       {rightExtra}
+      {/* 🧾 我的账单圆钮：仅当 App 下发 openBill 才渲染（死钮铁律，账单入口全站化） */}
+      {openBill && (
+        <button type="button" onClick={() => openBill()} title="我的账单" style={{
+          width: 28, height: 28, borderRadius: RADIUS.pill, flex: '0 0 auto',
+          background: 'rgba(0,0,0,0.3)', color: COLORS.textMuted, border: '1px solid rgba(255,255,255,0.25)',
+          fontSize: 13, fontWeight: 900, cursor: 'pointer', lineHeight: 1,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}>🧾</button>
+      )}
       {/* 📜 开奖历史圆钮：仅当传入 onHistory 才渲染（照 ⚖/? 条件钮同款，轮次彩专用） */}
       {onHistory && (
         <button type="button" onClick={() => onHistory()} title="开奖历史" style={{

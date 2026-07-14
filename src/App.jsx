@@ -2,8 +2,9 @@ import { useState, useEffect, lazy, Suspense } from 'react'
 import Lobby from './components/Lobby'
 import Header from './components/Header'
 import GameLogin from './pages/GameLogin'
+import BillDrawer from './components/BillDrawer'
 import { COLORS } from './components/shell/tokens'
-import { GameNavContext } from './components/shell/GameTopBar'
+import { GameNavContext, BillNavContext } from './components/shell/navContexts'
 // 单2改：前台反馈钮暂隐藏（挪去代理后台）。组件文件保留，需要时取消注释即可恢复。
 // import FeedbackWidget from './components/feedback/FeedbackWidget'
 // 每款游戏按需加载（lazy）：进哪款才拉该款 chunk，大厅首屏不含任何游戏 JS/资产。
@@ -63,6 +64,8 @@ export default function App() {
   const [serverBalance, setServerBalance] = useState(null)
   const [caps, setCaps] = useState(null)   // 后端下发的全量风控 caps { [game]: { maxBet, maxPayout } }；旧后端未下发时保持 null，各游戏 fallback 兜底
   const [playerToken, setPlayerToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '')
+  const [billOpen, setBillOpen] = useState(false)     // #41 单13：账单抽屉 App 层单实例（大厅/游戏/多桌三态共用）
+  const openBill = () => setBillOpen(true)
 
   const GameComponent = activeGame ? GAMES[activeGame] : null
 
@@ -114,9 +117,11 @@ export default function App() {
   // const username = localStorage.getItem(NAME_KEY) || ''
   // const feedback = <FeedbackWidget activeGame={activeGame} username={username} />
 
-  // 已登录且进了多桌专区：全屏渲染（结构照 activeGame 分支），页面自绘暗黑底，onBack 清回大厅。
+  // 三态视图择一（body）；BillDrawer 提 App 层单实例，包在 BillNavContext 外壳里 overlay 三态。
+  let body
   if (activeView === 'multi') {
-    return (
+    // 多桌专区：全屏渲染，页面自绘暗黑底，onBack 清回大厅。
+    body = (
       <Suspense fallback={<GameLoading />}>
         <MultiTablePage
           serverBalance={serverBalance}
@@ -126,17 +131,14 @@ export default function App() {
           onLogout={handlePlayerLogout}
           onBack={() => setActiveView(null)}
           onOpenGame={(id) => { setGameFrom('multi'); setActiveView(null); setActiveGame(id) }}
+          onOpenBill={openBill}
         />
       </Suspense>
     )
-  }
-
-  // 已登录且选了游戏：全屏铺满，不挂 Header，也不留顶部留白。
-  if (GameComponent) {
-    return (
+  } else if (GameComponent) {
+    // 选了游戏：全屏铺满，不挂 Header。Context 下发 setActiveGame（切款不过大厅，游戏文件零改）。
+    body = (
       <div style={{ minHeight: '100vh', background: '#0e1520' }}>
-        {/* Context 下发 setActiveGame(id|null)：GameTopBar 内的 GameSwitcher 切换游戏走它，
-            切款=直接换 activeGame 不过大厅；游戏文件零改（Context 隐形穿透）。 */}
         <GameNavContext.Provider value={setActiveGame}>
           <Suspense fallback={<GameLoading />}>
             <GameComponent
@@ -152,21 +154,30 @@ export default function App() {
         {/* {feedback} */}
       </div>
     )
+  } else {
+    // 未进游戏：Header + 大厅。大厅账单入口不回退（改调 App 单实例 openBill）。
+    body = (
+      <div style={{ minHeight: '100vh', background: '#0e1520' }}>
+        <Header
+          balance={serverBalance ?? 0}
+          onHome={() => setActiveGame(null)}
+          onLogout={handlePlayerLogout}
+          playerToken={playerToken}
+          onOpenBill={openBill}
+        />
+        <main style={{ paddingTop: '52px' }}>
+          <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} onOpenMulti={() => setActiveView('multi')} />
+        </main>
+        {/* {feedback} */}
+      </div>
+    )
   }
 
-  // 已登录、未进游戏：Header + 大厅。
+  // BillNavContext 下发 openBill 给 GameTopBar（21 games 零改）；BillDrawer 单实例 overlay 三态。
   return (
-    <div style={{ minHeight: '100vh', background: '#0e1520' }}>
-      <Header
-        balance={serverBalance ?? 0}
-        onHome={() => setActiveGame(null)}
-        onLogout={handlePlayerLogout}
-        playerToken={playerToken}
-      />
-      <main style={{ paddingTop: '52px' }}>
-        <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} onOpenMulti={() => setActiveView('multi')} />
-      </main>
-      {/* {feedback} */}
-    </div>
+    <BillNavContext.Provider value={openBill}>
+      {body}
+      <BillDrawer open={billOpen} onClose={() => setBillOpen(false)} playerToken={playerToken} onLogout={handlePlayerLogout} />
+    </BillNavContext.Provider>
   )
 }
