@@ -5,7 +5,7 @@ import { formatDraw, shortRoundNo } from '../drawFormatters'
 import { MARKET_GROUPS, nameOf, venueOf, backendOf } from './mockData'
 import { oddsStr, beadOf } from './marketsRegistry'
 import { useSfxMuted } from '../shell/bgmManager'
-import SpeedGridStage from '../../games/stages/SpeedGridStage'
+import { STAGE_BY_ID } from './stageRegistry'
 
 const NOOP = () => {}   // apiGet 不写余额，setServerBalance 传稳定 noop 保 usePlayerApi memo 不抖
 const BEAD_C = { up: M.beadUp, down: M.beadDown, tie: M.beadTie }   // 路珠三色（tone → tokens 色）
@@ -138,10 +138,11 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
         </div>
       ) : (
         <>
-          {id === 'SpeedGrid' ? (
-            /* 舞台上桌试点：SpeedGridStage 真舞台铺满 150px（场馆皮自带）；倒计时/封盘/结算叠显上层，信息不丢 */
+          {STAGE_BY_ID[id] ? (
+            /* 真舞台上桌：抽件 Stage 铺满 150px（场馆皮自带）；倒计时/封盘/结算叠显上层，信息不丢 */
+            (() => { const StageComp = STAGE_BY_ID[id]; return (
             <div style={{ flex: '0 0 auto', height: 150, position: 'relative', overflow: 'hidden', background: M.panel }}>
-              <SpeedGridStage phase={room.phase} roundNo={room.roundNo} drawResult={room.drawResult} muted={muted} height={150} />
+              <StageComp phase={room.phase} roundNo={room.roundNo} drawResult={room.drawResult} muted={muted} height={150} />
               <span style={{ position: 'absolute', top: 4, left: 8, color: M.txtMute, fontSize: 9, fontWeight: 700, textShadow: '0 1px 3px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>{venueOf(id)}</span>
               {(room.phase === 'betting' || room.phase === 'idle') && !room.drawResult && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, pointerEvents: 'none' }}>
@@ -162,6 +163,7 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
                 </div>
               )}
             </div>
+            )})()
           ) : (
           /* 迷你舞台：三相位 + 等待 定高 150px（相位切换零跳动，两行开奖副行也包在内不撑高） */
           <div style={{
