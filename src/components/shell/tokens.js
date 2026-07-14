@@ -41,6 +41,8 @@ export const MULTI_DARK = {
   drawingTint: 'rgba(59,158,255,0.16)',
   // —— 金额金（注单额 / 合计 / 赔率字）——
   amount: '#ffd54f',
+  // —— 危险红：倒计时最后 5 秒（≤5000ms）巨型倒计时 + 左栏倒计时转红 ——
+  danger: '#f04438',
   // —— 迷你路珠三向色（大/红/主 ← up；小/黑/客 ← down；和/豹 ← tie）——
   beadUp: '#e2564a',
   beadDown: '#2f6fe0',
