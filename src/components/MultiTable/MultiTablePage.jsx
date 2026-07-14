@@ -11,7 +11,11 @@ import { useAllRooms } from './useAllRooms'
 import { mapBetError } from './betErrors'
 import { useSfxMuted } from '../shell/bgmManager'
 import { SpeakerIcon } from '../shell/AudioIcons'
-import { DEFAULT_TABLES, CHIP_VALUES, ONLINE_COUNT, ALL_TABLE_IDS, nameOf, backendOf } from './mockData'
+import { DEFAULT_TABLES, CHIP_VALUES, ONLINE_COUNT, ALL_TABLE_IDS, nameOf, backendOf, venueOf, coverOf } from './mockData'
+
+// 用户名脱敏（与 BetFeed/后端同规则）：首 + *** + 末；≤2 字仅首 + ***
+const maskName = (s) => { const n = (s || '').trim(); return !n ? '玩家' : n.length <= 2 ? `${n[0]}***` : `${n[0]}***${n[n.length - 1]}` }
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 
 // #41 多桌专区（单4 接真下注）。
 // 钱路径唯一 = playerApi.apiPlay（每款一次 POST /round/<be>/play，自动幂等键 + balanceAfter 回写）；
@@ -19,6 +23,7 @@ import { DEFAULT_TABLES, CHIP_VALUES, ONLINE_COUNT, ALL_TABLE_IDS, nameOf, backe
 // 两栏：左列 200(GameRail + BetSlip) / 中 2 列网格竖滚。仅 PC ≥1024。
 export default function MultiTablePage({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack }) {
   const isDesk = useMediaQuery('(min-width: 1024px)')
+  const playerName = (typeof localStorage !== 'undefined' && localStorage.getItem('spribe_player_username')) || ''  // 战绩卡脱敏用
   const [sfxMuted, toggleSfxMuted] = useSfxMuted()       // 全局音效静音（单例，切了单游戏页同步生效）
   const rooms = useAllRooms(isDesk ? playerToken : '')   // 9 条 WS 常驻
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // apiPlay 自动回写 balanceAfter
@@ -193,12 +198,22 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
         if (pay <= 0) return
         const sub = submittedRef.current[id]
         const stake = sub && sub.roundNo === si.roundNo ? sub.total : 0   // 本地已投本期总注额
-        const { tier } = tierOf({ payout: pay, stake })
+        const { tier, mult } = tierOf({ payout: pay, stake })
         const winKeys = (si.yourResult || []).filter(r => Number(r.payout) > 0).map(r => r.key)
         const el = document.querySelector(`[data-table-id="${id}"]`)
         const rc = el?.getBoundingClientRect()
         const inView = !!rc && rc.bottom > 0 && rc.top < window.innerHeight && rc.right > 0 && rc.left < window.innerWidth
-        winFxRef.current?.fire({ tier, payout: pay, name: nameOf(id), tableEl: el, inView, winKeys })
+        // 战绩卡分享数据（大中/爆中才带；纯前端出图，取当刻 settle 上下文）。
+        // 出图数据构建异常绝不可阻断庆祝：try 包裹，失败则 share=null（照常放特效，仅无分享卡）。
+        let share = null
+        try {
+          if (tier === 'big' || tier === 'mega') share = {
+            cover: coverOf(id), gameName: nameOf(id), venue: venueOf(id), color: '#243447',
+            payout: pay, mult: stake > 0 ? mult : null,
+            name: maskName(playerName), roundNo: si.roundNo, date: todayStr(),
+          }
+        } catch { share = null }
+        winFxRef.current?.fire({ tier, payout: pay, name: nameOf(id), tableEl: el, inView, winKeys, share })
       })
     })
   }, [settleSig])   // eslint-disable-line react-hooks/exhaustive-deps

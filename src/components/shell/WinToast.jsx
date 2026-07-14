@@ -22,15 +22,26 @@ export default function WinToast({ toasts }) {
       `}</style>
       {toasts.map(t => (
         <div key={t.id} style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8,
           padding: '6px 16px',
           borderRadius: RADIUS.pill,
           background: COLORS.toastBg,
           border: `1px solid ${COLORS.toastBorder}`,
           color: COLORS.greenSoft,
           fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap',
-          animation: 'shellToastIn 200ms ease-out, shellToastOut 300ms ease-in 2.5s forwards',
+          animation: t.onShare
+            ? 'shellToastIn 200ms ease-out, shellToastOut 300ms ease-in 4.5s forwards'
+            : 'shellToastIn 200ms ease-out, shellToastOut 300ms ease-in 2.5s forwards',
         }}>
-          {t.label ?? `已兑现 ${t.mult.toFixed(2)}×`} <span style={{ color: COLORS.green, fontWeight: 900 }}>+${t.win.toFixed(2)}</span>
+          <span>{t.label ?? `已兑现 ${t.mult.toFixed(2)}×`} <span style={{ color: COLORS.green, fontWeight: 900 }}>+${t.win.toFixed(2)}</span></span>
+          {t.onShare && (
+            <button type="button" onClick={t.onShare} aria-label="分享战绩" title="分享战绩" style={{
+              pointerEvents: 'auto', cursor: 'pointer', width: 22, height: 22, borderRadius: 6,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(255,213,79,0.16)', border: '1px solid #ffd54f', color: '#ffd54f',
+              fontSize: 13, fontWeight: 900, lineHeight: 1,
+            }}>⤴</button>
+          )}
         </div>
       ))}
     </div>
