@@ -2,12 +2,14 @@ import { useState, useRef, useEffect } from 'react'
 import { MULTI_DARK as M } from '../shell/tokens'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { usePlayerApi } from '../../lib/playerApi'
-import WinToast from '../shell/WinToast'
+import { WinFxHost, tierOf } from '../shell/WinFx'
 import GameRail from './GameRail'
 import TableCard from './TableCard'
 import BetSlip from './BetSlip'
 import { useAllRooms } from './useAllRooms'
 import { mapBetError } from './betErrors'
+import { useSfxMuted } from '../shell/bgmManager'
+import { SpeakerIcon } from '../shell/AudioIcons'
 import { DEFAULT_TABLES, CHIP_VALUES, ONLINE_COUNT, ALL_TABLE_IDS, nameOf, backendOf } from './mockData'
 
 // #41 多桌专区（单4 接真下注）。
@@ -16,6 +18,7 @@ import { DEFAULT_TABLES, CHIP_VALUES, ONLINE_COUNT, ALL_TABLE_IDS, nameOf, backe
 // 两栏：左列 200(GameRail + BetSlip) / 中 2 列网格竖滚。仅 PC ≥1024。
 export default function MultiTablePage({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack }) {
   const isDesk = useMediaQuery('(min-width: 1024px)')
+  const [sfxMuted, toggleSfxMuted] = useSfxMuted()       // 全局音效静音（单例，切了单游戏页同步生效）
   const rooms = useAllRooms(isDesk ? playerToken : '')   // 9 条 WS 常驻
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // apiPlay 自动回写 balanceAfter
 
@@ -25,14 +28,15 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   const [submitted, setSubmitted] = useState({})       // {gameId:{roundNo,total}} 本期已投（roundNo 不匹配即隐）
   const [confirming, setConfirming] = useState(false)  // 确认中：禁重入
   const [toasts, setToasts] = useState([])             // 瞬时提示（已封盘/触顶/错误）
-  const [winToasts, setWinToasts] = useState([])       // 中奖 WinToast
   const [flashId, setFlashId] = useState(null)
+  const winFxRef = useRef(null)                        // 中奖庆祝三档宿主（命令式 fire）
+  const submittedRef = useRef({})                      // submitted 镜像：结算 effect 只读本地已投算档位（免闭包过期）
+  submittedRef.current = submitted
   const [mode, setMode] = useState('slip')             // 'slip' 注单模式(默认) | 'quick' 快投
   const [quickState, setQuickState] = useState({})     // {`gid:key`: 'flying'|'ok'|'err'} 快投按钮态
   const [quickLog, setQuickLog] = useState([])         // 已发快投明细（只读不可撤）
   const slipSeq = useRef(0)
   const toastSeq = useRef(0)
-  const winSeq = useRef(0)
   const quickSeq = useRef(0)
   const flashTimer = useRef(null)
   const seenSettleRef = useRef(new Set())
@@ -171,8 +175,9 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
     setConfirming(false)
   }
 
-  // 结算：各房 settleInfo 到达（新 roundId）→ 余额认 balanceAfter + 单期派彩>0 弹 WinToast。
-  // 异步 .then 里 setState（非 effect 同步体，合规）。
+  // 结算：各房 settleInfo 到达（新 roundId）→ 余额认 balanceAfter + 单期派彩>0 触发中奖庆祝三档。
+  // 档位 = totalPayout / 该款本期总注额（stake 只读本地已投 submittedRef，roundNo 匹配才计）。
+  // 在屏与否 + 中奖盘口键交给 WinFxHost（离屏只走 toast）。异步 .then 里 setState（合规）。
   const settleSig = ALL_TABLE_IDS.map(id => rooms[id]?.settleInfo?.roundId || '').join('|')
   useEffect(() => {
     ALL_TABLE_IDS.forEach(id => {
@@ -182,12 +187,15 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
       Promise.resolve().then(() => {
         if (si.balanceAfter != null) setServerBalance(Number(si.balanceAfter))
         const pay = Number(si.totalPayout || 0)
-        if (pay > 0) {
-          winSeq.current += 1
-          const tid = winSeq.current
-          setWinToasts(w => [...w, { id: tid, label: `${nameOf(id)} 本期派彩`, win: pay }])
-          setTimeout(() => setWinToasts(w => w.filter(t => t.id !== tid)), 3000)
-        }
+        if (pay <= 0) return
+        const sub = submittedRef.current[id]
+        const stake = sub && sub.roundNo === si.roundNo ? sub.total : 0   // 本地已投本期总注额
+        const { tier } = tierOf({ payout: pay, stake })
+        const winKeys = (si.yourResult || []).filter(r => Number(r.payout) > 0).map(r => r.key)
+        const el = document.querySelector(`[data-table-id="${id}"]`)
+        const rc = el?.getBoundingClientRect()
+        const inView = !!rc && rc.bottom > 0 && rc.top < window.innerHeight && rc.right > 0 && rc.left < window.innerWidth
+        winFxRef.current?.fire({ tier, payout: pay, name: nameOf(id), tableEl: el, inView, winKeys })
       })
     })
   }, [settleSig])   // eslint-disable-line react-hooks/exhaustive-deps
@@ -210,10 +218,8 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
 
   return (
     <div style={{ minHeight: '100vh', background: M.bg }}>
-      {/* 中奖 WinToast + 瞬时 toast 叠层（fixed 顶部居中） */}
-      <div style={{ position: 'fixed', top: 8, left: 0, right: 0, zIndex: 60, pointerEvents: 'none' }}>
-        <WinToast toasts={winToasts} />
-      </div>
+      {/* 中奖庆祝三档宿主（共享 canvas + WinToast 并入 + 全屏彩带）+ 瞬时 toast 叠层 */}
+      <WinFxHost ref={winFxRef} />
       {toasts.length > 0 && (
         <div style={{ position: 'fixed', top: 56, left: 0, right: 0, zIndex: 60, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
           {toasts.map(t => (
@@ -267,12 +273,19 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
             )
           })}
         </div>
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, color: M.txtDim, fontSize: 12, fontWeight: 700 }}>
+        <button type="button" onClick={toggleSfxMuted} aria-label={sfxMuted ? '取消静音' : '静音'} title={sfxMuted ? '取消静音' : '静音'} style={{
+          marginLeft: 'auto', flex: '0 0 auto', width: 30, height: 30, borderRadius: 999, cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: M.card, border: `1px solid ${sfxMuted ? M.line : M.betting}`, color: sfxMuted ? M.txtMute : M.betting,
+        }}>
+          <SpeakerIcon on={!sfxMuted} />
+        </button>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: M.txtDim, fontSize: 12, fontWeight: 700 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: M.betting }} />
           {ONLINE_COUNT} 在线
         </span>
         <span style={{ color: M.txtMute, fontSize: 12, fontWeight: 700 }}>
-          余额 <span style={{ color: M.amount, fontWeight: 900 }}>${Number(serverBalance ?? 0).toFixed(2)}</span>
+          余额 <span data-winfx-balance style={{ color: M.amount, fontWeight: 900, display: 'inline-block', padding: '0 2px', borderRadius: 6 }}>${Number(serverBalance ?? 0).toFixed(2)}</span>
         </span>
       </header>
 
