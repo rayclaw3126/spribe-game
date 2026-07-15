@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 // 游戏数据 + 分类导航全部读单一数据源 gameRegistry
 import { GAME_REGISTRY as GAMES, TOP_IDS, HOT_IDS, NEW_IDS, NAV_CATS } from '../gameRegistry'
-import { LOBBY_DARK as D } from './shell/tokens'
+import { LOBBY_DARK as D, MULTI_DARK } from './shell/tokens'
 
 // 热门/新游 —— 并入分类行末尾做两个特殊 pill，走现有 HOT_IDS/NEW_IDS curation，功能不丢。
 const SPECIAL = [
@@ -173,7 +173,7 @@ function FavRow({ count, active, onClick }) {
     }}>
       {active && <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 2, borderRadius: 2, background: D.accent }} />}
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ color: '#ffd54f' }}>★</span> 我的最爱
+        <span style={{ color: MULTI_DARK.amount }}>★</span> 我的最爱
       </span>
       <span style={{ color: active ? D.accent : D.txtMute, fontSize: 12, fontWeight: 700 }}>{count}</span>
     </button>
@@ -189,7 +189,7 @@ function FavPill({ count, active, onClick }) {
       border: `1px solid ${active ? D.accent : D.line}`,
       borderRadius: 999, padding: '7px 14px', fontSize: 13, fontWeight: 800, cursor: 'pointer',
     }}>
-      <span style={{ color: active ? D.accentInk : '#ffd54f' }}>★</span>我的最爱
+      <span style={{ color: active ? D.accentInk : MULTI_DARK.amount }}>★</span>我的最爱
       <span style={{ opacity: 0.7, fontWeight: 700, fontSize: 12 }}>{count}</span>
     </button>
   )
@@ -261,7 +261,7 @@ function GameCard({ game, index, onSelect, isDesk, fav, onToggleFav }) {
             width: 26, height: 26, borderRadius: '50%',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             background: 'rgba(10,12,16,0.6)', border: '1px solid rgba(255,255,255,0.16)',
-            color: fav ? '#ffd54f' : '#aab1bb', fontSize: 15, lineHeight: 1, cursor: 'pointer',
+            color: fav ? MULTI_DARK.amount : D.txtDim, fontSize: 15, lineHeight: 1, cursor: 'pointer',
           }}
         >{fav ? '★' : '☆'}</span>
       )}
