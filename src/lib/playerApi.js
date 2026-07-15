@@ -81,7 +81,17 @@ export function createPlayerApi({ playerToken, onLogout, setServerBalance }) {
     return `${proto}://${window.location.host}/ws/${backendId}?token=${encodeURIComponent(token)}`
   }
 
-  return { apiPost, apiGet, apiPlay, genIdemKey, wsUrl }
+  // #44 我的最爱：收藏读/写（存取都用 backendId）。走既有 apiGet/apiPost（同鉴权/401/错误约定）。
+  // getFavorites → { favorites:['dice',...] }；toggleFavorite(backendId) 翻转后回 { favorites:[...] }。
+  function getFavorites() {
+    return apiGet('/player/favorites')
+  }
+  function toggleFavorite(backendId) {
+    // 收藏非资金操作，无 balanceAfter：关掉自动余额回写，避免误触 setServerBalance。
+    return apiPost('/player/favorites/toggle', { game: backendId }, { autoBalance: false })
+  }
+
+  return { apiPost, apiGet, apiPlay, genIdemKey, wsUrl, getFavorites, toggleFavorite }
 }
 
 export function usePlayerApi({ playerToken, onLogout, setServerBalance }) {

@@ -3,7 +3,7 @@
 // 盘口赔率走 markets/<be>.js（见 marketsRegistry）。本文件只留：
 //   · 结构：分组/收藏/目录/默认桌/名字场馆映射（读 GAME_REGISTRY）
 //   · 盘口「组名 + 键名 + 中文 label」（label 映射留 UI 层；odds 不在此，改读 MARKETS）
-//   · 纯假值：FAV_IDS（收藏占位）/ CHIP_VALUES（筹码档）/ ONLINE_COUNT（在线数）
+//   · 纯假值：CHIP_VALUES（筹码档）/ ONLINE_COUNT（在线数）
 import { GAME_BY_ID } from '../../gameRegistry'
 
 // —— 左栏分组（款序照 #41 指定：竞速PK 2 + 轮次彩 5 + 对决 2 = 9 款；不含 RollingBall）——
@@ -13,9 +13,8 @@ export const RAIL_GROUPS = [
   { key: 'duel',  label: '对决',   ids: ['DerbyDay', 'DominoDuel'] },
 ]
 
-// 「我的最爱」：#44 接大厅真收藏后恢复（届时改从收藏源派生）。当前清空——
-// 占位假收藏撤下，收藏组空则整组不渲染（见 GameRail）。
-export const FAV_IDS = []
+// 「我的最爱」：#44 已接大厅真收藏——收藏源由 App 的 favIds 经 props 下发（前端 id），
+// GameRail 内取 favIds ∩ ALL_TABLE_IDS 渲染（街机收藏不在多桌 9 款内自动滤掉）；本文件不再存占位。
 
 export const ALL_TABLE_IDS = RAIL_GROUPS.flatMap(g => g.ids)     // 9 款全集
 export const CATALOG = ALL_TABLE_IDS                             // 目录 = 9 款

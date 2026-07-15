@@ -30,9 +30,22 @@ function loadTables() {
   try { const s = JSON.parse(localStorage.getItem(LS_TABLES)); if (Array.isArray(s) && s.length && s.every(id => ALL_TABLE_IDS.includes(id))) return s } catch { /* ignore */ }
   return DEFAULT_TABLES
 }
+// #44 收藏优先占前排（仅初始开桌用；会话中点☆不重排已开的桌 —— 靠 useState 初始器只跑一次保证）。
+// 合成序：[收藏 ∩ 多桌 9 款，按左栏组序(=ALL_TABLE_IDS 顺序)] + [localStorage 恢复的桌，去已含]
+//        + [CATALOG(=ALL_TABLE_IDS)原序补位，去已含]，取前 4。
+// 0 收藏：早返回原 loadTables()，与改动前逐字节一致。
+function computeInitialTables(favIds) {
+  const favTables = favIds ? ALL_TABLE_IDS.filter(id => favIds.has(id)) : []
+  if (favTables.length === 0) return loadTables()   // 无收藏：原逻辑原样
+  const merged = []
+  for (const id of [...favTables, ...loadTables(), ...ALL_TABLE_IDS]) {
+    if (!merged.includes(id)) merged.push(id)
+  }
+  return merged.slice(0, 4)
+}
 function loadChip() { const n = Number(localStorage.getItem(LS_CHIP)); return CHIP_VALUES.includes(n) ? n : CHIP_VALUES[0] }
 
-export default function MultiTablePage({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack, onOpenGame, onOpenBill }) {
+export default function MultiTablePage({ serverBalance, setServerBalance, caps, playerToken, onLogout, onBack, onOpenGame, onOpenBill, favIds }) {
   const isDesk = useMediaQuery('(min-width: 1024px)')
   const playerName = (typeof localStorage !== 'undefined' && localStorage.getItem('spribe_player_username')) || ''  // 战绩卡脱敏用
   const [sfxMuted, toggleSfxMuted] = useSfxMuted()       // 全局音效静音（单例，切了单游戏页同步生效）
@@ -40,7 +53,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // apiPlay 自动回写 balanceAfter
   const apiRef = useRef(api); apiRef.current = api                         // 广播轮询用稳定引用，免 effect 抖动
 
-  const [tables, setTables] = useState(loadTables)   // 上桌列表：localStorage 恢复
+  const [tables, setTables] = useState(() => computeInitialTables(favIds))   // 上桌列表：收藏优先 + localStorage 恢复（初始器只跑一次，会话中点☆不重排）
   const [chip, setChip] = useState(loadChip)          // 选中筹码：localStorage 恢复
   const [slip, setSlip] = useState([])                 // [{id, gameId, gameName, key, market, odds, amount, error}]
   const [submitted, setSubmitted] = useState({})       // {gameId:{roundNo,total}} 本期已投（roundNo 不匹配即隐）
@@ -356,7 +369,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
           position: 'sticky', top: 65, alignSelf: 'flex-start', height: 'calc(100vh - 77px)',
           flex: '0 0 200px', width: 200, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0,
         }}>
-          <GameRail tables={tables} onSelect={selectGame} rooms={rooms} top={bigwins.top} />
+          <GameRail tables={tables} onSelect={selectGame} rooms={rooms} top={bigwins.top} favIds={favIds} />
           <BetSlip items={slip} mode={mode} quickLog={quickLog} confirming={confirming} onRemove={removeBet} onEditAmount={editAmount} onConfirm={confirmBets} />
         </div>
 

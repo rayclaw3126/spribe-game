@@ -5,6 +5,9 @@ import GameLogin from './pages/GameLogin'
 import BillDrawer from './components/BillDrawer'
 import { COLORS } from './components/shell/tokens'
 import { GameNavContext, BillNavContext } from './components/shell/navContexts'
+import { usePlayerApi } from './lib/playerApi'
+// #44 我的最爱：前端 id ↔ backendId 反查单一数据源（禁手抄第二份映射）。
+import { GAME_BY_ID, GAME_BY_BACKEND_ID } from './gameRegistry'
 // 单2改：前台反馈钮暂隐藏（挪去代理后台）。组件文件保留，需要时取消注释即可恢复。
 // import FeedbackWidget from './components/feedback/FeedbackWidget'
 // 每款游戏按需加载（lazy）：进哪款才拉该款 chunk，大厅首屏不含任何游戏 JS/资产。
@@ -66,8 +69,39 @@ export default function App() {
   const [playerToken, setPlayerToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '')
   const [billOpen, setBillOpen] = useState(false)     // #41 单13：账单抽屉 App 层单实例（大厅/游戏/多桌三态共用）
   const openBill = () => setBillOpen(true)
+  // #44 我的最爱：收藏集，存前端 id（Set）。登录/刷新拉真源，点☆乐观翻转+回写。
+  const [favIds, setFavIds] = useState(() => new Set())
 
   const GameComponent = activeGame ? GAMES[activeGame] : null
+
+  // 收藏读/写收口到 playerApi（同鉴权/401 约定）；余额回写此处不需要，传现成 setter 满足签名即可。
+  const playerApi = usePlayerApi({ playerToken, onLogout: handlePlayerLogout, setServerBalance })
+
+  // #44 收藏切换：乐观翻转本地 → POST（发 backendId）→ 以后端返回全量为准回写；失败回滚 + console.warn。
+  function toggleFav(frontId) {
+    const entry = GAME_BY_ID[frontId]
+    if (!entry) return
+    const had = favIds.has(frontId)
+    setFavIds((prev) => {
+      const next = new Set(prev)
+      if (had) next.delete(frontId); else next.add(frontId)
+      return next
+    })
+    playerApi.toggleFavorite(entry.backendId)
+      .then((data) => {
+        // 后端返回 backendId 列表 → 反查回前端 id（未知/非多桌款一并保留，滤空）。
+        const ids = (data?.favorites || []).map((be) => GAME_BY_BACKEND_ID[be]?.id).filter(Boolean)
+        setFavIds(new Set(ids))
+      })
+      .catch((err) => {
+        setFavIds((prev) => {
+          const next = new Set(prev)
+          if (had) next.add(frontId); else next.delete(frontId)   // 回滚到点击前
+          return next
+        })
+        console.warn('收藏切换失败，已回滚：', err)
+      })
+  }
 
   function handlePlayerLogin({ token, username, balance }) {
     localStorage.setItem(TOKEN_KEY, token)
@@ -83,6 +117,7 @@ export default function App() {
     localStorage.removeItem(NAME_KEY)
     setPlayerToken('')
     setServerBalance(null)
+    setFavIds(new Set())   // #44 登出清收藏，避免残留串号到下一位登录者
     // 不清 activeGame 的话，重新登录会直接弹回上一局的游戏里。
     setActiveGame(null)
     setActiveView(null)
@@ -103,7 +138,18 @@ export default function App() {
         if (!cancelled && data.caps) setCaps(data.caps)
       })
       .catch(() => {})
+    // #44 顺拉收藏（独立接口，与 /me 并行）：backendId → 前端 id 反查后落 favIds。
+    playerApi.getFavorites()
+      .then((data) => {
+        if (cancelled) return
+        const ids = (data?.favorites || []).map((be) => GAME_BY_BACKEND_ID[be]?.id).filter(Boolean)
+        setFavIds(new Set(ids))
+      })
+      .catch(() => {})
     return () => { cancelled = true }
+    // playerApi 每渲染重建（依赖不稳定的 handlePlayerLogout），刻意不列入 deps：
+    // 只想在 token 变化时拉一次，列入会导致每渲染重拉 /me+/favorites。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playerToken])
 
   // 强制登录：没有 token 一律只给登录页，进不了大厅，也进不了任何游戏。
@@ -132,6 +178,7 @@ export default function App() {
           onBack={() => setActiveView(null)}
           onOpenGame={(id) => { setGameFrom('multi'); setActiveView(null); setActiveGame(id) }}
           onOpenBill={openBill}
+          favIds={favIds}
         />
       </Suspense>
     )
@@ -166,7 +213,7 @@ export default function App() {
           onOpenBill={openBill}
         />
         <main style={{ paddingTop: '52px' }}>
-          <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} onOpenMulti={() => setActiveView('multi')} />
+          <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} onOpenMulti={() => setActiveView('multi')} favIds={favIds} onToggleFav={toggleFav} />
         </main>
         {/* {feedback} */}
       </div>

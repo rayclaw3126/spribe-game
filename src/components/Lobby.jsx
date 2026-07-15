@@ -10,27 +10,35 @@ const SPECIAL = [
   { key: 'new', label: '新游' },
 ]
 
-// 款数一律派生（禁手写数字）
-function catCount(key) {
+// 款数一律派生（禁手写数字）。fav 分支：收藏集大小（#44）。
+function catCount(key, favIds) {
   if (key === 'all') return GAMES.length
   if (key === 'hot') return HOT_IDS.length
   if (key === 'new') return NEW_IDS.length
+  if (key === 'fav') return favIds ? favIds.size : 0
   return GAMES.filter(g => g.navCat === key).length
 }
 
-// 切分类纯前端 filter，零请求
-function filterGames(key) {
+// 切分类纯前端 filter，零请求。fav 分支：只留收藏款（#44，按注册表顺序）。
+function filterGames(key, favIds) {
   if (key === 'all') return [...TOP_IDS.map(id => GAMES.find(g => g.id === id)), ...GAMES.filter(g => !TOP_IDS.includes(g.id))]
   if (key === 'hot') return GAMES.filter(g => HOT_IDS.includes(g.id))
   if (key === 'new') return GAMES.filter(g => NEW_IDS.includes(g.id))
+  if (key === 'fav') return GAMES.filter(g => favIds && favIds.has(g.id))
   return GAMES.filter(g => g.navCat === key)
 }
 
-export default function Lobby({ onSelect, onOpenMulti }) {
+export default function Lobby({ onSelect, onOpenMulti, favIds, onToggleFav }) {
   const isDesk = useMediaQuery('(min-width: 1024px)')   // PC ≥1024 左侧栏 / 手机 <1024 顶部横滑
   const [cat, setCat] = useState('all')                 // 默认激活「全部」
-  const shown = filterGames(cat)
   const TABS = [...NAV_CATS, ...SPECIAL]                 // 6 分类 + 热门/新游
+  // #44 收藏浮顶：各分类页里已收藏的排最前，命中组/未命中组内部各自保持原序（稳定排序，
+  // ES2019 起 Array.sort 稳定）。「我的最爱」页本身全是收藏、无需再排。
+  const base = filterGames(cat, favIds)
+  const shown = cat === 'fav'
+    ? base
+    : [...base].sort((a, b) => Number(!!(favIds && favIds.has(b.id))) - Number(!!(favIds && favIds.has(a.id))))
+  const favEmpty = cat === 'fav' && shown.length === 0  // #44 我的最爱空态（居中两行）
 
   return (
     <div style={{ background: D.bg, minHeight: 'calc(100vh - 52px)' }}>
@@ -59,8 +67,11 @@ export default function Lobby({ onSelect, onOpenMulti }) {
             }}>
               {/* 多桌专区正式入口：融入侧栏体系（accent 底强调=导航非筛选；PC ≥1024 专属，手机分支不显） */}
               {onOpenMulti && <MultiRow onClick={onOpenMulti} />}
+              {/* #44 我的最爱：金★ 筛选行（版式抄 SideRow），下接 1px 分线再列常规分类 */}
+              <FavRow count={catCount('fav', favIds)} active={cat === 'fav'} onClick={() => setCat('fav')} />
+              <div style={{ height: 1, background: D.line, margin: '6px 6px 8px' }} />
               {TABS.map(t => (
-                <SideRow key={t.key} label={t.label} count={catCount(t.key)}
+                <SideRow key={t.key} label={t.label} count={catCount(t.key, favIds)}
                   active={cat === t.key} onClick={() => setCat(t.key)} />
               ))}
             </aside>
@@ -70,8 +81,10 @@ export default function Lobby({ onSelect, onOpenMulti }) {
               display: 'flex', gap: 8, overflowX: 'auto', WebkitOverflowScrolling: 'touch',
               scrollbarWidth: 'none', msOverflowStyle: 'none', padding: '2px 0 12px',
             }}>
+              {/* #44 我的最爱：金★ pill 置于横滑首位 */}
+              <FavPill count={catCount('fav', favIds)} active={cat === 'fav'} onClick={() => setCat('fav')} />
               {TABS.map(t => (
-                <MobilePill key={t.key} label={t.label} count={catCount(t.key)}
+                <MobilePill key={t.key} label={t.label} count={catCount(t.key, favIds)}
                   active={cat === t.key} onClick={() => setCat(t.key)} />
               ))}
             </div>
@@ -79,15 +92,27 @@ export default function Lobby({ onSelect, onOpenMulti }) {
 
           {/* ---- 卡片网格（现有卡片组件保留，仅卡底/边线换 LOBBY_DARK，封面原样） ---- */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: isDesk ? 'repeat(auto-fill, minmax(240px, 1fr))' : 'repeat(2, minmax(0, 1fr))',
-              gap: isDesk ? 16 : 10,
-            }}>
-              {shown.map((g, i) => (
-                <GameCard key={g.id} game={g} index={i} onSelect={onSelect} isDesk={isDesk} />
-              ))}
-            </div>
+            {favEmpty ? (
+              /* #44 我的最爱空态：居中两行提示（无收藏时） */
+              <div style={{
+                minHeight: 240, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center',
+              }}>
+                <div style={{ color: D.txt, fontSize: 16, fontWeight: 700 }}>还没有收藏的游戏</div>
+                <div style={{ color: D.txtMute, fontSize: 13 }}>点游戏卡右上角 ☆ 加入我的最爱</div>
+              </div>
+            ) : (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: isDesk ? 'repeat(auto-fill, minmax(240px, 1fr))' : 'repeat(2, minmax(0, 1fr))',
+                gap: isDesk ? 16 : 10,
+              }}>
+                {shown.map((g, i) => (
+                  <GameCard key={g.id} game={g} index={i} onSelect={onSelect} isDesk={isDesk}
+                    fav={!!(favIds && favIds.has(g.id))} onToggleFav={onToggleFav} />
+                ))}
+              </div>
+            )}
             <p style={{ textAlign: 'center', color: D.txtMute, fontSize: 13, marginTop: 42 }}>
               所有游戏均为虚拟余额——理性游戏，享受乐趣！
             </p>
@@ -134,6 +159,42 @@ function SideRow({ label, count, active, onClick }) {
   )
 }
 
+// #44 PC 侧栏「我的最爱」行：版式抄 SideRow，加金★前缀。激活态同 SideRow（左绿条+cardHi 底+绿字）；
+// 未激活时标签用金★区分于普通分类。count = 收藏数，实时随 favIds 变。
+function FavRow({ count, active, onClick }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      position: 'relative', width: '100%',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      background: active ? D.cardHi : 'transparent', border: 'none',
+      borderRadius: 8, padding: '10px 12px', margin: '2px 0', cursor: 'pointer',
+      color: active ? D.accent : D.txtDim, fontSize: 14, fontWeight: active ? 800 : 600,
+      transition: 'background 0.15s, color 0.15s', textAlign: 'left',
+    }}>
+      {active && <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 2, borderRadius: 2, background: D.accent }} />}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ color: '#ffd54f' }}>★</span> 我的最爱
+      </span>
+      <span style={{ color: active ? D.accent : D.txtMute, fontSize: 12, fontWeight: 700 }}>{count}</span>
+    </button>
+  )
+}
+
+// #44 手机横滑「我的最爱」pill：版式抄 MobilePill，加金★前缀。激活 = 绿底 + 墨绿字。
+function FavPill({ count, active, onClick }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      flex: '0 0 auto', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 5,
+      background: active ? D.accent : D.card, color: active ? D.accentInk : D.txtDim,
+      border: `1px solid ${active ? D.accent : D.line}`,
+      borderRadius: 999, padding: '7px 14px', fontSize: 13, fontWeight: 800, cursor: 'pointer',
+    }}>
+      <span style={{ color: active ? D.accentInk : '#ffd54f' }}>★</span>我的最爱
+      <span style={{ opacity: 0.7, fontWeight: 700, fontSize: 12 }}>{count}</span>
+    </button>
+  )
+}
+
 // 手机横滑 pill：激活 = 绿底 + 墨绿字。
 function MobilePill({ label, count, active, onClick }) {
   return (
@@ -148,7 +209,7 @@ function MobilePill({ label, count, active, onClick }) {
   )
 }
 
-function GameCard({ game, index, onSelect, isDesk }) {
+function GameCard({ game, index, onSelect, isDesk, fav, onToggleFav }) {
   // 角标：命中 HOT_IDS 显「热门」（绿底墨绿字），否则命中 NEW_IDS 显「新游」（#1f242b 底白字）；
   // 双标（既热门又新游）只显热门（HOT 先判）。
   const badge = HOT_IDS.includes(game.id) ? { label: '热门', bg: D.accent, ink: D.accentInk }
@@ -187,6 +248,23 @@ function GameCard({ game, index, onSelect, isDesk }) {
         position: 'absolute', inset: 0, pointerEvents: 'none',
         background: `linear-gradient(transparent 45%, ${D.scrim})`,
       }} />
+
+      {/* #44 右上角 收藏☆钮（恒显，方案A）：用 span 避免 button 套 button 非法嵌套；
+          点击必 stopPropagation 防冒泡触发整卡 onSelect（不进游戏）。左上角标在对角不遮。 */}
+      {onToggleFav && (
+        <span
+          role="button"
+          aria-label={fav ? '取消收藏' : '加入我的最爱'}
+          onClick={(e) => { e.stopPropagation(); onToggleFav(game.id) }}
+          style={{
+            position: 'absolute', top: 8, right: 8, zIndex: 3,
+            width: 26, height: 26, borderRadius: '50%',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(10,12,16,0.6)', border: '1px solid rgba(255,255,255,0.16)',
+            color: fav ? '#ffd54f' : '#aab1bb', fontSize: 15, lineHeight: 1, cursor: 'pointer',
+          }}
+        >{fav ? '★' : '☆'}</span>
+      )}
 
       {/* 左上角 热门/新游 角标（浮图上；游戏名在左下，二者不重叠） */}
       {badge && (

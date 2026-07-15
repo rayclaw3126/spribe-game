@@ -1,5 +1,5 @@
 import { MULTI_DARK as M, COLORS } from '../shell/tokens'
-import { RAIL_GROUPS, FAV_IDS, nameOf, nameOfBackend } from './mockData'
+import { RAIL_GROUPS, ALL_TABLE_IDS, nameOf, nameOfBackend } from './mockData'
 
 // 今日大奖榜块（只读 /player/bigwins.top）：Top5 行 名/游戏/金额；空态由父级 top.length 决定不挂载。
 // 自己上榜(mine)高亮金。挂在左栏「对决」组之下。
@@ -71,22 +71,24 @@ function RailRow({ id, room, active, star, onSelect }) {
   )
 }
 
-// 左列上半·可滚游戏栏：顶「我的最爱」占位 + 三分组（竞速PK/轮次彩/对决）。相位点+倒计时全接活。
-export default function GameRail({ tables, onSelect, rooms, top }) {
+// 左列上半·可滚游戏栏：顶「我的最爱」（#44 真收藏 ∩ 多桌 9 款）+ 三分组（竞速PK/轮次彩/对决）。相位点+倒计时全接活。
+export default function GameRail({ tables, onSelect, rooms, top, favIds }) {
   const onTable = new Set(tables)
+  // #44 收藏组 = favIds ∩ ALL_TABLE_IDS：只留在多桌 9 款内的收藏（街机款收藏自动滤掉），按注册顺序。
+  const favTableIds = ALL_TABLE_IDS.filter(id => favIds && favIds.has(id))
   return (
     <aside style={{
       flex: '1 1 auto', width: '100%', minHeight: 0,
       background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 6, overflowY: 'auto',
     }}>
-      {/* 收藏组空则整组不渲染（#44 接大厅真收藏时恢复标题+行） */}
-      {FAV_IDS.length > 0 && (
+      {/* 收藏组空则整组不渲染（#44 真收藏 ∩ 多桌 9 款） */}
+      {favTableIds.length > 0 && (
         <div style={{ marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '6px 8px 4px' }}>
             <span style={{ color: M.txtMute, fontSize: 10, fontWeight: 800, letterSpacing: 0.5 }}>我的最爱</span>
             <span style={{ color: M.txtMute, fontSize: 9, fontWeight: 600, opacity: 0.7 }}>大厅 ☆ 收藏</span>
           </div>
-          {FAV_IDS.map(id => (
+          {favTableIds.map(id => (
             <RailRow key={`fav-${id}`} id={id} room={rooms?.[id]} star active={onTable.has(id)} onSelect={onSelect} />
           ))}
         </div>

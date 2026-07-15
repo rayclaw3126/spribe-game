@@ -1,7 +1,9 @@
-// 玩家自助只读接口
+// 玩家自助接口（只读 + 收藏写，非资金）
 // 说明：GET /me 返回钱包余额；GET /ledger 资金流水、GET /bets 投注记录（玩家自查账单）。
-// 全部纯只读 SELECT，不碰任何资金写路径；playerId 只从 token（req.user.sub）取，绝不收
+// 账单相关全部纯只读 SELECT，不碰任何资金写路径；playerId 只从 token（req.user.sub）取，绝不收
 // query 参数，杜绝越权查他人数据。分页用 keyset cursor（id < cursor），比 OFFSET 稳。
+// 例外：/favorites*（#44 我的最爱）有写——但只写 player_favorites 一张非资金表（玩家自己的
+// 收藏偏好），与钱包/ledger 完全隔离，不进任何资金路径。
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireType } from '../middleware/auth.js';
@@ -213,6 +215,54 @@ router.get('/bigwins', requireAuth, requireType('player'), async (req, res, next
       mine: String(r.player_id) === me,
     }));
     return res.json({ marquee, top });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// —— #44 我的最爱 —— 玩家收藏（存取都用 backendId；白名单复用上方 GAME_WHITELIST 的 21 款）。
+// 非资金写：只碰 player_favorites 表，playerId 只从 token 取，杜绝越权。
+
+// GET /player/favorites —— 玩家自己的收藏列表 { favorites:['dice',...] }（按收藏时间正序）
+router.get('/favorites', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const result = await query(
+      'SELECT game FROM player_favorites WHERE player_id = $1 ORDER BY created_at',
+      [playerId],
+    );
+    return res.json({ favorites: result.rows.map((r) => r.game) });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// POST /player/favorites/toggle { game } —— 有则删、无则插（幂等 toggle），返回翻转后的全量 { favorites:[...] }。
+// game 必须 ∈ GAME_WHITELIST（risk.js perGame 的 21 款 backendId），非法返 400 invalid_game。
+router.post('/favorites/toggle', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const game = req.body?.game;
+    if (typeof game !== 'string' || !GAME_WHITELIST.has(game)) {
+      return res.status(400).json({ error: 'invalid_game' });
+    }
+    // 先尝试删除；命中（rowCount>0）即「取消收藏」；未命中则插入（ON CONFLICT 免费保险防并发重插）。
+    const del = await query(
+      'DELETE FROM player_favorites WHERE player_id = $1 AND game = $2',
+      [playerId, game],
+    );
+    if (del.rowCount === 0) {
+      await query(
+        'INSERT INTO player_favorites (player_id, game) VALUES ($1, $2) ON CONFLICT (player_id, game) DO NOTHING',
+        [playerId, game],
+      );
+    }
+    // 翻转后回读全量，前端直接以此为准（无需本地推算）。
+    const result = await query(
+      'SELECT game FROM player_favorites WHERE player_id = $1 ORDER BY created_at',
+      [playerId],
+    );
+    return res.json({ favorites: result.rows.map((r) => r.game) });
   } catch (err) {
     return next(err);
   }
