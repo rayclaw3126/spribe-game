@@ -12,6 +12,7 @@ import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
+import { ROLLINGBALL_LABEL as RL } from '../lib/betKeyLabels'   // #S3 档位中文名单一出处（搬家回引，视觉零变）
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
 // X2：连开 3 球引擎 + 剩余池动态赔率 + 逐球结算状态机（前 19 卡无此结构）。
@@ -161,25 +162,25 @@ const SEED_ROAD = [
 
 // 盘面玩法元数据（名/区间/底色；赔率运行时动态取）
 const MAIN = [
-  { slot: 'big', name: '大', range: '38-75', bg: DERBY.grey },
-  { slot: 'small', name: '小', range: '1-37', bg: DERBY.grey },
+  { slot: 'big', name: RL.big, range: '38-75', bg: DERBY.grey },
+  { slot: 'small', name: RL.small, range: '1-37', bg: DERBY.grey },
 ]
 const OE = [
-  { slot: 'odd', name: '单', range: '球号单', bg: DERBY.grey },
-  { slot: 'even', name: '双', range: '球号双', bg: DERBY.grey },
+  { slot: 'odd', name: RL.odd, range: '球号单', bg: DERBY.grey },
+  { slot: 'even', name: RL.even, range: '球号双', bg: DERBY.grey },
 ]
 const RB = [
-  { slot: 'red', name: '红', range: '38 红号', bg: DERBY.away },
-  { slot: 'blue', name: '蓝', range: '37 蓝号', bg: DERBY.home },
+  { slot: 'red', name: RL.red, range: '38 红号', bg: DERBY.away },
+  { slot: 'blue', name: RL.blue, range: '37 蓝号', bg: DERBY.home },
 ]
 const COMBO_META = [
-  { slot: 'big-odd', name: '大单' }, { slot: 'small-odd', name: '小单' },
-  { slot: 'big-even', name: '大双' }, { slot: 'small-even', name: '小双' },
+  { slot: 'big-odd', name: RL['big-odd'] }, { slot: 'small-odd', name: RL['small-odd'] },
+  { slot: 'big-even', name: RL['big-even'] }, { slot: 'small-even', name: RL['small-even'] },
 ]
 const ROWS = [
-  { slot: 'row-t1', name: '>1行', range: '15行×5号' },
-  { slot: 'row-t3', name: '>3行', range: '5行×15号' },
-  { slot: 'row-t5', name: '>5行', range: '3行×25号' },
+  { slot: 'row-t1', name: RL['row-t1'], range: '15行×5号' },
+  { slot: 'row-t3', name: RL['row-t3'], range: '5行×15号' },
+  { slot: 'row-t5', name: RL['row-t5'], range: '3行×25号' },
 ]
 
 // ---------- 滚球舞台（draw 相位；目标已锁于 pendingRef，动画只读）----------
@@ -870,7 +871,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       <div style={secHead}>列注 · 1-75 按 5 分列（各 15 号）</div>
       {/* 列注五键：grid 等宽竖排堆叠（列N / 赔率），照 Wu Xing 五行横排先例 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: isMobile ? 4 : 8 }}>
-        {[1, 2, 3, 4, 5].map(c => stackCell(`col-${c}`, `列${c}`, ''))}
+        {[1, 2, 3, 4, 5].map(c => stackCell(`col-${c}`, RL[`col-${c}`], ''))}
       </div>
     </div>
   )

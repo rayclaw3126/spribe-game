@@ -4,6 +4,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlayerApi } from '../lib/playerApi'
 import { GAME_BY_BACKEND_ID, GAME_BY_ID, GAME_REGISTRY } from '../gameRegistry'
 import { MARKET_GROUPS } from './MultiTable/mockData'   // #S2 档位中文 label 单一出处（禁手抄第二份）
+import { extraLabelOf } from '../lib/betKeyLabels'      // #S3 roulette/rollingball 档位中文名（只 import 本模块，禁 import src/games/*，保 code-split）
 
 // 账单抽屉：右侧滑入，两 tab —— 资金流水(/player/ledger) / 投注记录(/player/bets)。
 // keyset 分页（nextCursor），只读 GET 走 playerApi.apiGet。色值全走 tokens。
@@ -56,7 +57,8 @@ const LABEL_BY_BE_KEY = (() => {
   }
   return m
 })()
-const labelOf = (be, key) => LABEL_BY_BE_KEY[`${be}:${key}`] ?? key
+// #S3 并入 roulette/rollingball（走共享 betKeyLabels）：先查 S2 排期器平表，再查这两款，末回落原 key
+const labelOf = (be, key) => LABEL_BY_BE_KEY[`${be}:${key}`] ?? extraLabelOf(be, key) ?? key
 
 // #S2 三态标记：hit→✓ / lose→✗ / push→退（色走 tokens）
 const MARK = {

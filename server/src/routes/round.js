@@ -910,11 +910,16 @@ router.post('/roulette/play', requireAuth, requireType('player'), async (req, re
           }
         }
 
-        // 5. 建 bet
+        // 5. 建 bet（#S3：追记 selections + 注级三态明细 settle_detail，值全从现成 perKeyPayout 派生，不新算钱）
+        const selections = Object.fromEntries(entries.map(([k, a]) => [k, Number(a)]));
+        const settleDetail = entries.map(([key]) => {
+          const p = perKeyPayout[key] || 0;
+          return { key, outcome: p > 0 ? 'hit' : 'lose', payout: p };
+        });
         await client.query(
-          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome)
-           VALUES ($1, $2, $3::numeric, $4, $5)`,
-          [roundId, playerId, totalStr, idempotencyKey, win ? 'win' : 'lose']
+          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome, selections, settle_detail)
+           VALUES ($1, $2, $3::numeric, $4, $5, $6::jsonb, $7::jsonb)`,
+          [roundId, playerId, totalStr, idempotencyKey, win ? 'win' : 'lose', JSON.stringify(selections), JSON.stringify(settleDetail)]
         );
 
         return { n, bets: Object.fromEntries(entries.map(([k, a]) => [k, Number(a)])), perKeyPayout, totalPayout, balanceAfter, clientSeed, nonce, serverSeedHash, roundId };
@@ -1505,10 +1510,16 @@ router.post('/rollingball/play', requireAuth, requireType('player'), async (req,
           if (agentId) await distributeLoss(client, { playerId, agentId, roundId: rid, lossAmount: totalStr });
         }
         // 每球一条 bet（idempotency_key = 本球键）
+        // #S3：追记本球 selections + 注级三态明细 settle_detail（值全从现成 perKeyOutcome 派生，不新算钱）
+        const selections = Object.fromEntries(betEntries.map(([k, a]) => [k, Number(a)]));
+        const settleDetail = betEntries.map(([key]) => {
+          const o = perKeyOutcome[key];
+          return { key, outcome: o.outcome, payout: o.payout };
+        });
         await client.query(
-          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome)
-           VALUES ($1, $2, $3::numeric, $4, $5)`,
-          [rid, playerId, totalStr, idempotencyKey, win ? 'win' : 'lose']
+          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome, selections, settle_detail)
+           VALUES ($1, $2, $3::numeric, $4, $5, $6::jsonb, $7::jsonb)`,
+          [rid, playerId, totalStr, idempotencyKey, win ? 'win' : 'lose', JSON.stringify(selections), JSON.stringify(settleDetail)]
         );
 
         return {

@@ -12,6 +12,7 @@ import SeedFairness from '../components/shell/SeedFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
+import { ROULETTE_LABEL } from '../lib/betKeyLabels'   // #S3 档位中文名单一出处（搬家回引，视觉零变）
 
 const G = GAME_BY_ID['MiniRoulette']
 
@@ -29,12 +30,12 @@ const RED_SET = new Set([1, 3, 5, 8, 10, 12])
 const ROW_EVEN = [2, 4, 6, 8, 10, 12]
 const ROW_ODD = [1, 3, 5, 7, 9, 11]
 const OUTSIDE = [
-  { key: 'low', label: '1-6' },
-  { key: 'even', label: '双' },
-  { key: 'black', label: '黑' },
-  { key: 'red', label: '红' },
-  { key: 'odd', label: '单' },
-  { key: 'high', label: '7-12' },
+  { key: 'low', label: ROULETTE_LABEL.low },
+  { key: 'even', label: ROULETTE_LABEL.even },
+  { key: 'black', label: ROULETTE_LABEL.black },
+  { key: 'red', label: ROULETTE_LABEL.red },
+  { key: 'odd', label: ROULETTE_LABEL.odd },
+  { key: 'high', label: ROULETTE_LABEL.high },
 ]
 const CHIPS = [
   { label: '1', value: 1, color: ROULETTE.chipGrey },
