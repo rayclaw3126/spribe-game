@@ -369,8 +369,16 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
           position: 'sticky', top: 65, alignSelf: 'flex-start', height: 'calc(100vh - 77px)',
           flex: '0 0 200px', width: 200, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0,
         }}>
+          {/* #P1 快投汇总条挪左栏顶部 sticky 常驻（GameRail 之上/我的最爱组之上）；注单模式仍挂底部（不碰本轮注单面板） */}
+          {mode === 'quick' && (
+            <div style={{ position: 'sticky', top: 0, zIndex: 1, flex: '0 0 auto' }}>
+              <BetSlip items={slip} mode={mode} quickLog={quickLog} confirming={confirming} onRemove={removeBet} onEditAmount={editAmount} onConfirm={confirmBets} />
+            </div>
+          )}
           <GameRail tables={tables} onSelect={selectGame} rooms={rooms} top={bigwins.top} favIds={favIds} />
-          <BetSlip items={slip} mode={mode} quickLog={quickLog} confirming={confirming} onRemove={removeBet} onEditAmount={editAmount} onConfirm={confirmBets} />
+          {mode === 'slip' && (
+            <BetSlip items={slip} mode={mode} quickLog={quickLog} confirming={confirming} onRemove={removeBet} onEditAmount={editAmount} onConfirm={confirmBets} />
+          )}
         </div>
 
         <div style={{
