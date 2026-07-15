@@ -56,7 +56,7 @@ export const MARKET_GROUPS = {
   SpeedGrid: [
     { group: '大小单双红黑', cols: 2, keys: [k('big', '大'), k('small', '小'), k('odd', '单'), k('even', '双'), k('red', '红'), k('black', '黑')] },
     { group: '三段', cols: 3, keys: [k('grid-front', '头排'), k('grid-mid', '中段'), k('grid-rear', '尾排')] },
-    { group: '车队', cols: 2, keys: seqn(1, 4).map(t => k(`team-${t}`, `${['一', '二', '三', '四'][t - 1]}队`)) },
+    { group: '车队', cols: 2, keys: seqn(1, 4).map(t => k(`team-${t}`, `${['蓝', '红', '金', '黑'][t - 1]}队`)) },
     { group: '车号直选', grid: true, keys: seqn(1, 24).map(n => k(`car-${n}`, `${n}`)) },
   ],
   HalfTime: [
@@ -66,7 +66,7 @@ export const MARKET_GROUPS = {
     { group: '半场', cols: 3, keys: [k('h1', '上半'), k('draw', '半场平'), k('h2', '下半')] },
   ],
   NumberUp: [
-    { group: '大小单双高低', cols: 2, keys: [k('s-high', '高'), k('s-low', '低'), k('s-odd', '单'), k('s-even', '双')] },
+    { group: '大小单双', cols: 2, keys: [k('s-high', '大'), k('s-low', '小'), k('s-odd', '单'), k('s-even', '双')] },
     { group: '首位', cols: 3, keys: seqn(0, 4).map(d => k(`fd-${d}`, `首${d}`)) },
     { group: '尾位', grid: true, keys: seqn(0, 9).map(d => k(`ld-${d}`, `尾${d}`)) },
     { group: '直选', grid: true, keys: seqn(0, 49).map(n => k(`n-${pad2(n)}`, pad2(n))) },
@@ -86,7 +86,7 @@ export const MARKET_GROUPS = {
   ],
   LineUp: [
     { group: '总盘·大小单双', cols: 2, keys: [k('big', '大'), k('small', '小'), k('odd', '单'), k('even', '双')] },
-    { group: '红黄·高低', cols: 2, keys: [k('home-more', '红牌多'), k('away-more', '黄牌多'), k('high', '高'), k('low', '低')] },
+    { group: '红黄·高低', cols: 2, keys: [k('home-more', '黄牌多'), k('away-more', '红牌多'), k('high', '高'), k('low', '低')] },
     { group: '段位', cols: 2, keys: [k('zone-releg', '降级区'), k('zone-champ', '夺冠'), k('zone-mid', '中游'), k('zone-euro', '欧战区')] },
     { group: '行式盘', grid: true, keys: seqn(1, 5).flatMap(i => LU_ROW.map(([sfx, lab]) => k(`L${i}-${sfx}`, `L${i}${lab}`))) },
   ],
@@ -101,6 +101,6 @@ export const MARKET_GROUPS = {
     { group: '总进球', cols: 2, keys: [k('g-big', '进球大'), k('g-small', '进球小'), k('g-odd', '进球单'), k('g-even', '进球双')] },
     { group: '主队总分', cols: 2, keys: [k('h-big', '主大'), k('h-small', '主小'), k('h-odd', '主单'), k('h-even', '主双')] },
     { group: '客队总分', cols: 2, keys: [k('a-big', '客大'), k('a-small', '客小'), k('a-odd', '客单'), k('a-even', '客双')] },
-    { group: '正确比分·波胆', grid: true, keys: CS_SCORES.map(sc => k(`cs-${sc}`, sc)) },
+    { group: '正确比分·波胆', grid: true, keys: CS_SCORES.map(sc => k(`cs-${sc}`, sc.replace('-', ':'))) },
   ],
 }

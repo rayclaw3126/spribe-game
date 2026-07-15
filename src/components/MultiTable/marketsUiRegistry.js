@@ -30,6 +30,22 @@ import HalfTimeRoad from '../../games/markets-ui/HalfTimeRoad'
 import HalfTimePodium from '../../games/markets-ui/HalfTimePodium'
 import { RULES as HALFTIME_RULES } from '../../games/markets-ui/halftimeRules'
 import { hitsOf as hitsOfHalfTime, deriveRound, halfOf } from '../../games/markets/halftime'
+import WuXingMarkets from '../../games/markets-ui/WuXingMarkets'
+import WuXingRoad from '../../games/markets-ui/WuXingRoad'
+import { RULES as WUXING_RULES } from '../../games/markets-ui/wuxingRules'
+import { hitsOf as hitsOfWuXing, deriveRound as deriveRoundWuXing } from '../../games/markets/wuxing'
+import LineUpMarkets from '../../games/markets-ui/LineUpMarkets'
+import LineUpRoad from '../../games/markets-ui/LineUpRoad'
+import { RULES as LINEUP_RULES } from '../../games/markets-ui/lineupRules'
+import { hitsOf as hitsOfLineUp, deriveRound as deriveRoundLineUp } from '../../games/markets/lineup'
+import DominoDuelMarkets from '../../games/markets-ui/DominoDuelMarkets'
+import DominoDuelRoad from '../../games/markets-ui/DominoDuelRoad'
+import { RULES as DOMINODUEL_RULES } from '../../games/markets-ui/dominoduelRules'
+import { hitsOf as hitsOfDomino, deriveRound as deriveRoundDomino } from '../../games/markets/dominoduel'
+import DerbyDayMarkets from '../../games/markets-ui/DerbyDayMarkets'
+import DerbyDayRoad from '../../games/markets-ui/DerbyDayRoad'
+import { RULES as DERBYDAY_RULES } from '../../games/markets-ui/derbydayRules'
+import { hitsOf as hitsOfDerby, deriveMatch as deriveMatchDerby } from '../../games/markets/derbyday'
 
 export const MARKETS_UI = {
   GoldenBoot: {
@@ -96,5 +112,50 @@ export const MARKETS_UI = {
     roadItem: (dr) => { if (!Array.isArray(dr?.balls)) return null; const r = deriveRound(dr.balls); return { sum: r.sum, half: halfOf(r) } },
     podiumValue: (dr) => (Array.isArray(dr?.balls) ? { balls: dr.balls, sum: deriveRound(dr.balls).sum } : null),
     podiumProps: (v) => ({ lastDraw: v, inline: true }),
+  },
+  WuXing: {
+    Markets: WuXingMarkets,     // 含 isDesk（多桌传 false，窄卡单列）
+    Road: WuXingRoad,
+    Podium: null,               // 无独立信息条（上局在舞台内）
+    rules: WUXING_RULES,
+    roadTab0: 'bs',
+    roadCols: 12,
+    // drawResult.balls = 上局 20 球；命中键 = hitsOf(deriveRound(balls))；珠盘存整值总和 sum
+    hitsOf: (dr) => (Array.isArray(dr?.balls) ? hitsOfWuXing(deriveRoundWuXing(dr.balls)) : undefined),
+    roadItem: (dr) => (Array.isArray(dr?.balls) ? deriveRoundWuXing(dr.balls).sum : null),
+  },
+  LineUp: {
+    Markets: LineUpMarkets,     // 无折叠组（内建 A/B 视图 + dim）；openMode/isDesk 传了被忽略
+    Road: LineUpRoad,
+    Podium: null,               // 无独立信息条（上局在舞台内）
+    rules: LINEUP_RULES,
+    roadTab0: 'bs',
+    roadCols: 12,
+    // drawResult.grid = 上局 25 格数字；命中键 = hitsOf(deriveRound(grid))；珠盘存整局 total
+    hitsOf: (dr) => (Array.isArray(dr?.grid) && dr.grid.length === 25 ? hitsOfLineUp(deriveRoundLineUp(dr.grid)) : undefined),
+    roadItem: (dr) => (Array.isArray(dr?.grid) && dr.grid.length === 25 ? deriveRoundLineUp(dr.grid).total : null),
+  },
+  DominoDuel: {
+    Markets: DominoDuelMarkets,   // 多桌 isMobile & 无 section → 4 组手风琴，波胆 cs-* 默认收
+    Road: DominoDuelRoad,
+    Podium: null,                 // 无独立信息条（对决区在页内，不碰舞台）
+    rules: DOMINODUEL_RULES,
+    roadTab0: 'H/A',
+    roadCols: 12,
+    // drawResult.tiles = 上局 4 骨牌对；命中键 = hitsOf(deriveRound(tiles))；珠盘存整局 [hs,as]
+    hitsOf: (dr) => (Array.isArray(dr?.tiles) && dr.tiles.length === 4 ? hitsOfDomino(deriveRoundDomino(dr.tiles)) : undefined),
+    roadItem: (dr) => { if (!Array.isArray(dr?.tiles) || dr.tiles.length !== 4) return null; const r = deriveRoundDomino(dr.tiles); return [r.hs, r.as] },
+  },
+  DerbyDay: {
+    Markets: DerbyDayMarkets,   // 多桌 isMobile & 无 section → 3 组手风琴（半场/全场/半全场）
+    Road: DerbyDayRoad,
+    Podium: null,               // 无独立信息条（全场·上局在舞台内）
+    rules: DERBYDAY_RULES,
+    roadTab0: 'HT-H/A',
+    roadCols: 12,
+    // drawResult.home20/away20 = 上局两队 20 球；命中键 = hitsOf(deriveMatch({home20,away20}))
+    hitsOf: (dr) => (Array.isArray(dr?.home20) && Array.isArray(dr?.away20) ? hitsOfDerby(deriveMatchDerby({ home20: dr.home20, away20: dr.away20 })) : undefined),
+    // 珠盘存整局 [htHome,htAway,ftHome,ftAway]（beadFor 解构用）
+    roadItem: (dr) => { if (!Array.isArray(dr?.home20) || !Array.isArray(dr?.away20)) return null; const m = deriveMatchDerby({ home20: dr.home20, away20: dr.away20 }); return [m.htHome, m.htAway, m.ftHome, m.ftAway] },
   },
 }

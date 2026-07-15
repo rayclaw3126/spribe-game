@@ -15,6 +15,10 @@ import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import WuXingStage from './stages/WuXingStage'
+import WuXingMarkets from './markets-ui/WuXingMarkets'   // #41 单16：盘口区切件（视觉原样）
+import WuXingRoad from './markets-ui/WuXingRoad'         // #41 单16：珠盘路墙（判定走引擎）
+import { RULES } from './markets-ui/wuxingRules'         // #41 单16：玩法说明内容（共享）
+import { WUXING, ROAD_VIEWS } from './markets-ui/wuxingShared'   // #41 单16：五行五段/珠盘视角（原页 mobile 段 + 切件同源）
 
 // 五行 WuXing — KENO 20 球快开五项皮（80 池无放回抽 20 比总和），第 19 卡。
 // X2：结算引擎 + 轮次状态机 + 赔率定稿（官方原生赔率 14 键出带 → 单据逐档调价，
@@ -42,55 +46,17 @@ export { drawKeno, deriveRound, ODDS, MARKETS, hitsOf }
 // 相位/期号/倒计时全走服务器排期器（useRoundRoom）；本地只保留开奖舞台动画时长。
 const DRAW_ANIM_MS = 4500   // 收到 drawn → 开奖舞台演完 → 结算回写；须 < 服务器 wuxing idle(5500ms)
 const ROAD_CAP = 120
-// 舞台时间轴（rAF 内使用，毫秒）：乱序亮球 → 总和砸出 → 五行段预亮
-const WX_BOUNDS = [695, 763, 855, 923]   // 五行段分界（±30 慢放判定）
 
 // ---------- 静态种子数据（纯展示，零随机数）----------
 const G = GAME_BY_ID['WuXing']
 
-// 玩法说明文案（中文；盘口数字照实）
-const RULES = [
-  {
-    icon: '🎯', title: '怎么玩',
-    body: '每期从 1–80 号池中抽 20 个球，20 球号码相加得到总和（范围 210–1410）。各盘口按这个总和以及派生数值判定。开球前下注，开奖后命中的盘口按赔率赔付。',
-  },
-  {
-    icon: '📊', title: '盘口与赔率',
-    body: '· 大 / 小：以 810 为界，大[≥811]约 1.95 倍 / 小[≤810]约 1.92 倍。\n· 单 / 双：按总和判定，约 1.95 倍。\n· 龙 / 虎 / 和：比较总和的十位数与个位数。十位大押龙约 2.13 倍，个位大押虎约 9.55 倍，相等押和约 9.55 倍。\n· 上 / 下 / 和：数落在 1–40 区间的球有多少个，超过 10 个押上约 2.4 倍，少于 10 个押下约 2.4 倍，恰好 10 个押和约 4.7 倍。\n· 过关：大小和单双的组合（大单 / 小单 / 大双 / 小双），约 3.82 倍。\n· 五行：按总和落在五个区间分金木水火土 —— 金[≤695] / 木[696-763] / 水[764-855] / 火[856-923] / 土[≥924]，赔率约 2.46 至 9.35 倍不等，越窄的区间赔越高。',
-  },
-  {
-    icon: '🎬', title: '开奖与结算',
-    body: '20 球开出后计算总和及派生数值，命中的盘口立即结算，赔付直接入余额。龙虎、上下的胜负盘遇「和」按输处理（不退本金）。每期独立。',
-  },
-  {
-    icon: '🎰', title: '如何下注',
-    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
-  },
-  {
-    icon: '💡', title: '小技巧',
-    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押龙虎和、五行金土。\n· 龙虎、上下的胜负盘遇「和」算输，若担心可加押「和」对冲。\n· 本游戏理论返还率约 95–96%，属娱乐性质，理性游戏。',
-  },
-]
+// 玩法说明文案(RULES)已切至 ./markets-ui/wuxingRules（原页/多桌共享）。
 // 种子上局 = 规则页官方示例局：总和 693 → 小/单/龙9虎3(龙)/上13下7(上)/小单/金
 // （真开奖逐期顶掉）
 const SEED_LAST = deriveRound([1, 4, 5, 10, 11, 13, 20, 27, 30, 32, 33, 36, 40, 47, 54, 59, 61, 64, 67, 79])
 
-// 五行五段（格底统一普通盘键色 DERBY.grey，与大小/单双一致；五行字/赔率保留）
-const WUXING = [
-  { key: 'wx-gold', name: '金', range: '210-695', odds: '9.35' },
-  { key: 'wx-wood', name: '木', range: '696-763', odds: '4.72' },
-  { key: 'wx-water', name: '水', range: '764-855', odds: '2.46' },
-  { key: 'wx-fire', name: '火', range: '856-923', odds: '4.72' },
-  { key: 'wx-earth', name: '土', range: '924-1410', odds: '9.10' },
-]
-
-// 珠盘路 3 视角（road 现存整局 sum，从 sum 派生）。段判定走引擎 WX_BOUNDS + WUXING（禁手写第二份表）。
-const WX_ROAD_C = [DERBY.gold, DERBY.sel, DERBY.home, DERBY.away, '#c8873a']   // 金木水火土 珠色（仅显示，非判定）
-const ROAD_VIEWS = [
-  { key: 'bs', label: '大小', judge: n => n >= 811 ? { t: '大', c: DERBY.away } : { t: '小', c: DERBY.home } },
-  { key: 'oe', label: '单双', judge: n => n % 2 ? { t: '单', c: DERBY.away } : { t: '双', c: DERBY.home } },
-  { key: 'wx', label: '五行段', judge: n => { const i = WX_BOUNDS.filter(b => n > b).length; return { t: WUXING[i].name, c: WX_ROAD_C[i] } } },
-]
+// 五行五段(WUXING) 与珠盘路 3 视角(ROAD_VIEWS) 已切至 ./markets-ui/wuxingShared
+// （原页 mobile 段 + 切件 WuXingMarkets/WuXingRoad 单一出处；段判定走引擎 WX_BOUNDS + WUXING，禁二份表）。
 
 // 40 期假珠盘（大小单轨，旧→新；引擎单换真历史滚动）
 // 珠盘路种子：整局总和 sum 形态（210-1410，跨五行五段/大小/单双分布，首屏各视角有料）。
@@ -316,7 +282,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
   const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
   const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
-  const secHead = { color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
+  // secHead 已随桌面盘口区切至 WuXingMarkets（组头折叠钮内建）；mobile 段用手风琴自带标题。
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
@@ -386,119 +352,10 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       style={{ flex: '0 0 auto', zIndex: 1, margin: isMobile ? '8px 12px 0' : '6px 18px 0', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }} />
   )
 
-  // ---- ② 盘区：主盘 / 龙虎·上下 / 过关四组合 / 五行五段 ----
-  const mainBoard = (
-    <div style={secBox}>
-      <div style={secHead}>主盘 · 总和</div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
-        {rowCell('big', '大', '811-1410', '1.95')}
-        {rowCell('small', '小', '210-810', '1.92')}
-      </div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
-        {rowCell('odd', '单', '总和单', '1.95')}
-        {rowCell('even', '双', '总和双', '1.95')}
-      </div>
-    </div>
-  )
-  const dtudBoard = (
-    <div style={secBox}>
-      <div style={secHead}>龙虎（和值十位/末位）｜ 上下（1-40/41-80 计数）</div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
-        {rowCell('dragon', '龙', '十位', '2.13')}
-        {rowCell('dt-tie', '龙虎和', '', '9.55')}
-        {rowCell('tiger', '虎', '末位', '2.13')}
-      </div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
-        {rowCell('up', '上', '≥11 个', '2.40')}
-        {rowCell('ud-tie', '上下和', '10-10', '4.70')}
-        {rowCell('down', '下', '≥11 个', '2.40')}
-      </div>
-    </div>
-  )
-  const parlayBoard = (
-    <div style={secBox}>
-      <div style={secHead}>过关四组合</div>
-      <div style={{
-        display: isMobile ? 'grid' : 'flex',
-        gridTemplateColumns: isMobile ? '1fr 1fr' : undefined,
-        gap: isMobile ? 5 : 8,
-      }}>
-        {rowCell('big-odd', '大单', '', '3.82')}
-        {rowCell('small-odd', '小单', '', '3.82')}
-        {rowCell('big-even', '大双', '', '3.82')}
-        {rowCell('small-even', '小双', '', '3.82')}
-      </div>
-    </div>
-  )
-  // 五行五段：双端横排 5 列 grid（金→土），格内竖排 字大/区间小/赔率；
-  // 430 区间小字降到 8px 保全字（禁截断禁溢出）
-  const wuxingBoard = (
-    <div style={secBox}>
-      <div style={secHead}>五行 · 总和五段</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: isMobile ? 4 : 8 }}>
-        {WUXING.map(w => (
-          <button key={w.key} type="button" className="wxCell" data-key={w.key} disabled={!betting} onClick={() => toggleSel(w.key)}
-            style={{ ...cellBase(w.key, DERBY.grey), padding: isMobile ? '5px 2px' : '6px 4px' }}>
-            <span style={{ ...cellName, fontSize: isMobile ? 14 : 16 }}>{w.name}</span>
-            <span style={{ ...cellRange, fontSize: isMobile ? 8 : 9.5 }}>{w.range}</span>
-            <span style={cellOdds}>{w.odds}</span>
-            {stakeChip(w.key)}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-
-  // ---- ③ 珠盘路（大小单轨，样式抄 Line Up）----
+  // ---- ② 盘区（主盘/龙虎上下/过关/五行）：已切至 ./markets-ui/WuXingMarkets（键区单一出处），下方 JSX 直接组装。----
+  // ---- ③ 珠盘路：桌面切件 ./markets-ui/WuXingRoad（页签/判定单一出处，history=road 整值派生）；mobile 段 2 行走自身内联（ROAD_VIEWS 复用）。----
   const ROAD_COLS = 20
-  const roadBead = isMobile ? 18 : 14
   const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 路珠视角（手机/桌面共用 roadView，切了两端一致）
-  const beadRoad = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '0 12px 8px' : '0 18px 8px',
-    }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
-        {ROAD_VIEWS.map(v => {
-          const on = roadView === v.key
-          return (
-            <button key={v.key} type="button" onClick={() => setRoadView(v.key)} style={{
-              padding: '3px 12px', borderRadius: RADIUS.pill,
-              background: on ? DERBY.sel : 'rgba(0,0,0,0.35)', color: on ? '#083a1b' : DERBY.dim,
-              border: `1px solid ${on ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
-              fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer', whiteSpace: 'nowrap',
-            }}>{v.label}</button>
-          )
-        })}
-      </div>
-      <div style={{
-        overflowX: 'auto', borderRadius: 10,
-        background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
-      }}>
-        <div style={{
-          display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: `repeat(6, ${roadBead}px)`, gridTemplateColumns: `repeat(${ROAD_COLS}, ${roadBead}px)`,
-          gap: 2, width: 'max-content',
-        }}>
-          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            // road 存整局 sum；按当前视角 curView.judge 派生（同一份函数，桌面/手机共用，禁复制第二份）
-            const n = road.slice(-ROAD_CAP)[i]
-            const d = n != null ? curView.judge(n) : null
-            return (
-              <span key={i} style={{
-                width: roadBead, height: roadBead, borderRadius: '50%',
-                background: d ? d.c : 'rgba(255,255,255,0.05)',
-                border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: COLORS.white, fontSize: roadBead / 2, fontWeight: 900,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                boxSizing: 'border-box',
-              }}>{d ? d.t : ''}</span>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
 
   const gameCard = (
     <Panel style={{
@@ -524,20 +381,17 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         gap: 4, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
-        <div style={{ display: 'flex', flexDirection: isDesk ? 'row' : 'column', gap: isDesk ? 8 : 4, alignItems: isDesk ? 'stretch' : undefined }}>
-          <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{mainBoard}</div>
-          <div style={isDesk ? { flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{dtudBoard}</div>
-        </div>
-        {/* 过关一行；五行 desk 独占整行（并排时五键各 ~104px 键内溢出实测，全宽后 ~190px） */}
-        {parlayBoard}
-        {wuxingBoard}
+        {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
+        <WuXingMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
+          selected={picks} hits={result?.hits ?? preHits} isMobile={isMobile} isDesk={isDesk} />
       </div>
 
       {/* 弹性垫片：把珠盘路推向底部贴注栏 */}
       <div style={{ flex: '1 0 auto' }} />
 
-      {/* ③ 珠盘路 */}
-      {beadRoad}
+      {/* ③ 珠盘路（切件）：history=road 整值 → 组件内 roadView 派生 大小/单双/五行段（判定走引擎） */}
+      <WuXingRoad history={road} tab={roadView} onTab={setRoadView} isMobile={isMobile}
+        style={{ margin: isMobile ? '0 12px 8px' : '0 18px 8px' }} />
 
       {/* ---- ④ bottom bet band — pinned，grid 4列×2行（照 Line Up 定案）---- */}
       <div style={{

@@ -15,6 +15,10 @@ import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import { DrawStage } from './stages/DerbyDayStage'
+import DerbyDayMarkets from './markets-ui/DerbyDayMarkets'   // #41 单16：盘口区切件（半场/全场两组 + 半全场）
+import DerbyDayRoad from './markets-ui/DerbyDayRoad'         // #41 单16：珠盘路墙（六页签 + 占比条）
+import { GROUPS } from './markets-ui/derbydayMarketsData'    // #41 单16：盘面数据（手机手风琴 accSection 标题用，单一出处）
+import { RULES } from './markets-ui/derbydayRules'           // #41 单16：玩法说明内容（共享）
 import trophyImg from '../assets/shared/trophy.png'
 
 // Derby Day — 主客对抗 Keno（主队 10 珠 vs 客队 10 珠比和值），第 16 卡。
@@ -26,7 +30,7 @@ import trophyImg from '../assets/shared/trophy.png'
 // H/A 盘平局退回本金，不算赢不算输，WinToast 用「平局退注」区分文案）。
 
 // —— 引擎常量块已剪切到 ./markets/derbyday（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
-import { deriveMatch, ODDS, MARKETS, hitsOf, pushesOf, round2, HT_BIG, FT_BIG, drawMatch } from './markets/derbyday'
+import { deriveMatch, ODDS, MARKETS, hitsOf, pushesOf, round2, drawMatch } from './markets/derbyday'
 export { drawMatch, deriveMatch, ODDS, MARKETS, hitsOf, pushesOf }
 
 // ---------- 开奖动画分段时长（#43单3：服务器排期器驱动，本地不再有相位 setInterval）----------
@@ -37,29 +41,7 @@ const FT_DRAW_MS = 8000    // 全场 20 珠（同构）
 const DRAW_ANIM_MS = HT_DRAW_MS + HT_SHOWN_MS + FT_DRAW_MS   // 22000
 const G = GAME_BY_ID['DerbyDay']
 
-// 玩法说明文案（中文；盘口数字照实）
-const RULES = [
-  {
-    icon: '🎯', title: '怎么玩',
-    body: '主队和客队各自从 1–80 号池中抽 20 个球。前 10 球算半场（HT）比分，20 球累计算全场（FT）比分。两队比分高低决定胜负，你可以押半场或全场的多种盘口。下注在开球前截止，之后分半场、全场两阶段揭示。',
-  },
-  {
-    icon: '📊', title: '盘口与赔率',
-    body: '· 胜负：半场/全场分别押主队胜或客队胜，约 1.95 倍。若该阶段两队打平，退回本金（不算输赢）。\n· 大 / 小：半场以 810、全场以 1620 为界，大约 1.95 倍 / 小约 1.92 倍。\n· 单 / 双：按该阶段两队总分判定，约 1.95 倍。\n· 半全场：押半场和全场的胜方组合（主主 / 主客 / 客主 / 客客）。同向（主主、客客）约 2.65 倍，反转（主客、客主）约 7.1 倍。半场或全场任一打平则退本金。',
-  },
-  {
-    icon: '🎬', title: '开奖与结算',
-    body: '先揭示半场（前 10 球），再揭示全场（累计 20 球）。所有盘口在开球前已锁定，两阶段揭示只是展示过程，命中的盘口按锁定赔率结算。打平的胜负盘、半全场盘退回本金。每期独立。',
-  },
-  {
-    icon: '🎰', title: '如何下注',
-    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
-  },
-  {
-    icon: '💡', title: '小技巧',
-    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押半全场反转。\n· 胜负盘和半全场盘遇平局退本金，降低了风险。\n· 本游戏理论返还率约 96%，属娱乐性质，理性游戏。',
-  },
-]
+// 玩法说明文案（RULES）已切至 ./markets-ui/derbydayRules（原名 import 回用，单一出处）。
 const ROAD_CAP = 120
 
 // 种子上局（确定性脚本预生成后硬编码；真开奖逐期顶掉）
@@ -77,28 +59,7 @@ const SEED_ROUNDS = [
   [358, 415, 789, 875], [416, 434, 759, 905], [343, 366, 741, 817], [376, 459, 741, 910], [391, 394, 722, 772], [436, 454, 885, 934],
 ]
 
-// ---------- 珠盘路（六页签）----------
-const ROAD_TABS = ['HT-H/A', 'HT-O/U', 'HT-O/E', 'FT-H/A', 'FT-O/U', 'FT-O/E']
-// 页签中文显示标签（key = 内部值不碰，仅译显示层）
-const ROAD_TAB_LABELS = {
-  'HT-H/A': '半场胜负', 'HT-O/U': '半场大小', 'HT-O/E': '半场单双',
-  'FT-H/A': '全场胜负', 'FT-O/U': '全场大小', 'FT-O/E': '全场单双',
-}
-function beadFor(tab, r) {
-  const [hh, ha, fh, fa] = r
-  const half = tab.startsWith('HT')
-  const home = half ? hh : fh
-  const away = half ? ha : fa
-  const total = home + away
-  if (tab.endsWith('H/A')) {
-    if (home === away) return { t: 'D', c: 'rgba(255,255,255,0.3)' }
-    return home > away ? { t: 'H', c: DERBY.home } : { t: 'A', c: DERBY.away }
-  }
-  if (tab.endsWith('O/U')) {
-    return total >= (half ? HT_BIG : FT_BIG) ? { t: 'O', c: DERBY.away } : { t: 'U', c: DERBY.home }
-  }
-  return total % 2 ? { t: 'O', c: DERBY.away } : { t: 'E', c: DERBY.home }   // O/E 单双
-}
+// ---------- 珠盘路（六页签 ROAD_TABS/ROAD_TAB_LABELS/beadFor）已切至 ./markets-ui/DerbyDayRoad（页签/判定单一出处）。----------
 
 // 号码珠（主蓝/客红/灰 0 态）
 function NumBead({ n, color, size = 24, blank = false }) {
@@ -368,13 +329,10 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const htVisible = cur && (gamePhase === 'ht_shown' || gamePhase === 'ft_draw' || gamePhase === 'settled')
   const ftVisible = cur && gamePhase === 'settled'
 
-  // ---- 样式件（选中=金框；命中=绿框绿晕；push=灰金框）----
-  // 三件套之三 · 胜侧泛光（settled，FT 平局整套不出）：胜方 H/A 键队色呼吸光、
-  // 败方压暗；灯色由 DERBY.home/away 现组 hexA 派生，键集仅四个 H/A 键
-  const hexA = (hex, a) => {
-    const n = parseInt(hex.slice(1), 16)
-    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
-  }
+  // ---- 样式件（cellBase/cellName/cellRange/cellOdds/secHead/stakeChip/hexA + ddWinBreath<style>）已切至
+  //      ./markets-ui/DerbyDayMarkets（键区单一出处）。secBox 仍留本页（手机手风琴 accSection 外框复用）。----
+  // 三件套之三 · 胜侧泛光（settled，FT 平局整套不出）：胜方 H/A 键队色呼吸光、败方压暗；
+  //   键集仅四个 H/A 键 —— 本页派生 sideWins 对象后传入盘口件（切件内 cellBase 消费）。
   const ftWinner = cur && cur.ftHome !== cur.ftAway ? (cur.ftHome > cur.ftAway ? 'home' : 'away') : null
   const sideWins = result && cur && ftWinner
     ? {
@@ -384,47 +342,18 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         'ft-home': ftWinner === 'home', 'ft-away': ftWinner === 'away',
       }
     : null
-  const cellBase = (key, bg) => {
-    const sel = picks.has(key)
-    const hit = (result?.hits ?? preHits)?.has(key)   // 结算后 result，FT 定格先预亮
-    const pushed = result?.pushes?.has(key) && betsPlaced.has(key)
-    const placed = betsPlaced.has(key)
-    const sideWin = sideWins && Object.prototype.hasOwnProperty.call(sideWins, key) ? sideWins[key] : undefined
-    return {
-      flex: 1, minWidth: 0, padding: isMobile ? '6px 2px' : isDesk ? '5px 4px' : '6px 4px',
-      borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
-      background: bg,
-      border: `1.5px solid ${hit ? DERBY.sel : pushed ? 'rgba(255,255,255,0.6)' : sel || placed ? DERBY.gold : 'rgba(255,255,255,0.16)'}`,
-      boxShadow: hit
-        ? '0 0 12px rgba(53,208,127,0.6)'
-        : sel ? '0 0 10px rgba(255,213,79,0.45)' : 'inset 0 1px 0 rgba(255,255,255,0.08)',
-      opacity: betting || hit || pushed || placed ? 1 : 0.75,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-      transition: 'filter 0.12s, border-color 0.12s, box-shadow 0.15s',
-      boxSizing: 'border-box', position: 'relative',
-      // 胜侧呼吸光 / 败侧压暗（覆盖在基础分层之上）
-      ...(sideWin === true
-        ? { animation: `${key.endsWith('home') ? 'ddWinBreathH' : 'ddWinBreathA'} 1.3s ease-in-out infinite` }
-        : sideWin === false ? { opacity: 0.45 } : {}),
-    }
-  }
-  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
-  const secHead = { color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
     boxSizing: 'border-box',
   }
-  const stakeChip = key => betsPlaced.has(key) && (
-    <span style={{
-      position: 'absolute', top: 2, right: 3,
-      padding: '1px 5px', borderRadius: RADIUS.pill,
-      background: DERBY.sel, color: '#083a1b',
-      fontSize: 8, fontWeight: 900,
-    }}>${betsPlaced.get(key)}</span>
-  )
+  // 盘口区切件（视觉原样）props：点击/态由本页 state 传入，键区单一出处。
+  //   desktop 一整块（无 section），mobile 手风琴逐段（section='ht'|'ft'|'htft'）。
+  const marketsProps = {
+    onPick: toggleSel, stakes: betsPlaced, disabled: !betting,
+    selected: picks, hits: result?.hits ?? preHits, pushes: result?.pushes,
+    sideWins, isMobile,
+  }
 
   // ---- 场馆头行（desk 走骨架 34px 历史行位）----
   const connecting = !room.connected && !room.roundNo
@@ -577,144 +506,13 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
     </div>
   )
 
-  // ---- ② 盘区两组（队色语义格） ----
-  const GROUPS = [
-    { key: 'ht', label: '实况 · 半场', big: '811–960', small: '661–810' },
-    { key: 'ft', label: '实况 · 全场', big: '1621–1920', small: '1322–1620' },
-  ]
-  const marketGroup = g => (
-    <div key={g.key} style={{ ...secBox, ...(isDesk ? { flex: '1 1 0', minWidth: 0 } : {}) }}>
-      <div style={secHead}>{g.label}</div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 6 }}>
-        <button type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-home`)}
-          style={cellBase(`${g.key}-home`, DERBY.home)}>
-          <span style={cellName}>主队</span>
-          <span style={cellOdds}>{ODDS.main.toFixed(2)}</span>
-          {stakeChip(`${g.key}-home`)}
-        </button>
-        <button type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-away`)}
-          style={cellBase(`${g.key}-away`, DERBY.away)}>
-          <span style={cellName}>客队</span>
-          <span style={cellOdds}>{ODDS.main.toFixed(2)}</span>
-          {stakeChip(`${g.key}-away`)}
-        </button>
-      </div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
-        {[
-          { k: 'big', name: '大', range: g.big },
-          { k: 'small', name: '小', range: g.small },
-          { k: 'odd', name: '单', range: '和值单' },
-          { k: 'even', name: '双', range: '和值双' },
-        ].map(m => (
-          <button key={m.k} type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-${m.k}`)}
-            style={cellBase(`${g.key}-${m.k}`, DERBY.grey)}>
-            <span style={cellName}>{m.name}</span>
-            <span style={cellRange}>{m.range}</span>
-            <span style={cellOdds}>{MARKETS[`${g.key}-${m.k}`].odds.toFixed(2)}</span>
-            {stakeChip(`${g.key}-${m.k}`)}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
+  // ---- ② 盘区两组 + ②b 半全场组合盘 已切至 ./markets-ui/DerbyDayMarkets（GROUPS/HTFT/marketGroup/
+  //      marketBody/htftCell/htftGroup/htftBody + cellBase 全在切件内；本页只传 marketsProps）。----
 
-  // ---- ②b 半全场组合盘（D3 已定价接结算：走 MARKETS 既有 hit/push 路径）----
-  const HTFT = [
-    { key: 'ht-ft-hh', a: '主', b: '主' },
-    { key: 'ht-ft-ha', a: '主', b: '客' },
-    { key: 'ht-ft-ah', a: '客', b: '主' },
-    { key: 'ht-ft-aa', a: '客', b: '客' },
-  ]
-  const htftCell = m => (
-    <button key={m.key} type="button" className="ddCell" data-key={m.key} disabled={!betting}
-      onClick={() => toggleSel(m.key)} style={cellBase(m.key, DERBY.grey)}>
-      <span style={cellName}>
-        <span style={{ color: m.a === '主' ? DERBY.home : DERBY.away }}>{m.a}</span>
-        <span style={{ color: DERBY.dim, padding: '0 3px' }}>/</span>
-        <span style={{ color: m.b === '主' ? DERBY.home : DERBY.away }}>{m.b}</span>
-      </span>
-      <span style={cellOdds}>{MARKETS[m.key].odds.toFixed(2)}</span>
-      {stakeChip(m.key)}
-    </button>
-  )
-  const htftGroup = (
-    <div style={secBox}>
-      <div style={secHead}>半全场 · 半场胜方 / 全场胜方</div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 6 }}>
-        {HTFT.slice(0, 2).map(htftCell)}
-      </div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
-        {HTFT.slice(2).map(htftCell)}
-      </div>
-    </div>
-  )
-
-  // ---- ③ 珠盘路（六页签 + 占比条按近 30 期重算 + 6×20 真历史） ----
-  const ROAD_COLS = 20
-  const roadBead = isMobile ? 16 : 14   // 移动端珠子大一档（横滚可辨），桌面压一档保总高
-  const roadItems = history.slice(-ROAD_CAP)
-  const beads = roadItems.map(r => beadFor(roadTab, r))
-  // 占比条：近 30 期按当前页签所属盘（HT/FT）的 H/A 重算
-  const ratioSrc = history.slice(-30)
-  const ratioHalf = roadTab.startsWith('HT')
-  let hw = 0, dw = 0, aw = 0
-  ratioSrc.forEach(([hh, ha, fh, fa]) => {
-    const home = ratioHalf ? hh : fh, away = ratioHalf ? ha : fa
-    if (home > away) hw++; else if (home === away) dw++; else aw++
-  })
-  const pct = n => Math.round((n / Math.max(1, ratioSrc.length)) * 100)
+  // ---- ③ 珠盘路（切件；六页签 + 占比条 + 真历史滚动，容量 6×20）——判定/页签单一出处 ----
   const beadRoad = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '0 12px 8px' : '0 18px 8px',
-    }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-        {ROAD_TABS.map(t => (
-          <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
-            padding: '3px 9px', borderRadius: RADIUS.pill,
-            background: roadTab === t ? DERBY.sel : 'rgba(0,0,0,0.35)',
-            color: roadTab === t ? '#083a1b' : DERBY.dim,
-            border: `1px solid ${roadTab === t ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
-            fontSize: 9.5, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer', whiteSpace: 'nowrap',
-          }}>{ROAD_TAB_LABELS[t]}</button>
-        ))}
-      </div>
-      {/* 占比条：近 30 期 H/A 分布（随页签 HT/FT 切换重算） */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <span style={{ color: DERBY.home, fontSize: 9.5, fontWeight: 900, whiteSpace: 'nowrap' }}>主队 {pct(hw)}%</span>
-        <div style={{ flex: 1, height: 6, borderRadius: 3, overflow: 'hidden', display: 'flex', background: 'rgba(0,0,0,0.35)' }}>
-          <span style={{ width: `${pct(hw)}%`, background: DERBY.home }} />
-          <span style={{ width: `${pct(dw)}%`, background: 'rgba(255,255,255,0.4)' }} />
-          <span style={{ width: `${pct(aw)}%`, background: DERBY.away }} />
-        </div>
-        <span style={{ color: DERBY.dim, fontSize: 9.5, fontWeight: 800, whiteSpace: 'nowrap' }}>和 {pct(dw)}%</span>
-        <span style={{ color: DERBY.away, fontSize: 9.5, fontWeight: 900, whiteSpace: 'nowrap' }}>客队 {pct(aw)}%</span>
-      </div>
-      <div style={{
-        overflowX: 'auto', borderRadius: 10,
-        background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 5,
-      }}>
-        <div style={{
-          display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: `repeat(6, ${roadBead}px)`, gridTemplateColumns: `repeat(${ROAD_COLS}, ${roadBead}px)`,
-          gap: 2, width: 'max-content',
-        }}>
-          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const b = beads[i]
-            return (
-              <span key={i} style={{
-                width: roadBead, height: roadBead, borderRadius: '50%',
-                background: b ? b.c : 'rgba(255,255,255,0.05)',
-                border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: COLORS.white, fontSize: 8.5, fontWeight: 900,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                boxSizing: 'border-box',
-              }}>{b ? b.t : ''}</span>
-            )
-          })}
-        </div>
-      </div>
-    </div>
+    <DerbyDayRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+      style={{ margin: isMobile ? '0 12px 8px' : '0 18px 8px' }} />
   )
 
   const gameCard = (
@@ -725,17 +523,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       display: 'flex', flexDirection: 'column',
       ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
     }}>
-      <style>{`
-        .ddCell:hover:not(:disabled) { filter: brightness(1.2); }
-        @keyframes ddWinBreathH {
-          0%, 100% { box-shadow: 0 0 8px ${hexA(DERBY.home, 0.45)}; }
-          50% { box-shadow: 0 0 18px ${hexA(DERBY.home, 0.8)}, 0 0 30px ${hexA(DERBY.home, 0.4)}; }
-        }
-        @keyframes ddWinBreathA {
-          0%, 100% { box-shadow: 0 0 8px ${hexA(DERBY.away, 0.45)}; }
-          50% { box-shadow: 0 0 18px ${hexA(DERBY.away, 0.8)}, 0 0 30px ${hexA(DERBY.away, 0.4)}; }
-        }
-      `}</style>
+      {/* .ddCell hover / ddWinBreath 呼吸 / .ddayWin 脉冲样式已随盘口区切至 DerbyDayMarkets（组件内 <style> 挂） */}
 
       {/* ---- top bar（共享件：名 pill 下拉 + 场馆/期号/相位 + ?/音频钮）---- */}
       {topBar}
@@ -751,10 +539,8 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         gap: 4, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
-        <div style={{ display: 'flex', flexDirection: isDesk ? 'row' : 'column', gap: isDesk ? 8 : 4, alignItems: isDesk ? 'stretch' : undefined }}>
-          {GROUPS.map(marketGroup)}
-        </div>
-        {htftGroup}
+        {/* 盘口区切件（两组并排 + 半全场组，视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
+        <DerbyDayMarkets {...marketsProps} isDesk={isDesk} />
       </div>
 
       {/* 弹性垫片：把珠盘路推向底部贴注栏 */}
@@ -880,48 +666,14 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       </div>
     )
   }
-  // 盘区体（去 secBox/secHead，供折叠体；桌面仍走 marketGroup/htftGroup 原 const，零改）
-  const marketBody = g => (
-    <>
-      <div style={{ display: 'flex', gap: 5, marginBottom: 5 }}>
-        <button type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-home`)} style={cellBase(`${g.key}-home`, DERBY.home)}>
-          <span style={cellName}>主队</span><span style={cellOdds}>{ODDS.main.toFixed(2)}</span>{stakeChip(`${g.key}-home`)}
-        </button>
-        <button type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-away`)} style={cellBase(`${g.key}-away`, DERBY.away)}>
-          <span style={cellName}>客队</span><span style={cellOdds}>{ODDS.main.toFixed(2)}</span>{stakeChip(`${g.key}-away`)}
-        </button>
-      </div>
-      <div style={{ display: 'flex', gap: 5 }}>
-        {[
-          { k: 'big', name: '大', range: g.big },
-          { k: 'small', name: '小', range: g.small },
-          { k: 'odd', name: '单', range: '和值单' },
-          { k: 'even', name: '双', range: '和值双' },
-        ].map(m => (
-          <button key={m.k} type="button" className="ddCell" disabled={!betting} onClick={() => toggleSel(`${g.key}-${m.k}`)} style={cellBase(`${g.key}-${m.k}`, DERBY.grey)}>
-            <span style={cellName}>{m.name}</span><span style={cellRange}>{m.range}</span><span style={cellOdds}>{MARKETS[`${g.key}-${m.k}`].odds.toFixed(2)}</span>{stakeChip(`${g.key}-${m.k}`)}
-          </button>
-        ))}
-      </div>
-    </>
-  )
-  const htftBody = (
-    <>
-      <div style={{ display: 'flex', gap: 5, marginBottom: 5 }}>{HTFT.slice(0, 2).map(htftCell)}</div>
-      <div style={{ display: 'flex', gap: 5 }}>{HTFT.slice(2).map(htftCell)}</div>
-    </>
-  )
+  // 盘区体（marketBody/htftBody 紧凑段）已随盘口区切至 ./markets-ui/DerbyDayMarkets（section='ht'|'ft'|'htft' 逐段渲染）。
   const mobileCard = (
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${DERBY.bgCenter}, ${DERBY.bgOuter})`,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
       display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
     }}>
-      <style>{`
-        .ddCell:hover:not(:disabled) { filter: brightness(1.2); }
-        @keyframes ddWinBreathH { 0%, 100% { box-shadow: 0 0 8px ${hexA(DERBY.home, 0.45)}; } 50% { box-shadow: 0 0 18px ${hexA(DERBY.home, 0.8)}, 0 0 30px ${hexA(DERBY.home, 0.4)}; } }
-        @keyframes ddWinBreathA { 0%, 100% { box-shadow: 0 0 8px ${hexA(DERBY.away, 0.45)}; } 50% { box-shadow: 0 0 18px ${hexA(DERBY.away, 0.8)}, 0 0 30px ${hexA(DERBY.away, 0.4)}; } }
-      `}</style>
+      {/* .ddCell hover / ddWinBreath 呼吸 / .ddayWin 脉冲样式随盘口区切件内建（各 section body 挂 <style>） */}
 
       {/* ① 锁顶：GameTopBar + 双舞台 drawZone（canvas 常驻挂载，禁折叠禁卸载） */}
       <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column' }}>
@@ -932,50 +684,15 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       {/* ② 中滚：三盘区手风琴（HT 开 / FT 开 / 半全场 收；结算相位全展开） */}
       <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '4px 12px', position: 'relative', zIndex: 1 }}>
         <WinToast toasts={toasts} />
-        {accSection('ht', GROUPS[0].label, marketBody(GROUPS[0]))}
-        {accSection('ft', GROUPS[1].label, marketBody(GROUPS[1]))}
-        {accSection('htft', '半全场 · 半场胜方 / 全场胜方', htftBody)}
+        {accSection('ht', GROUPS[0].label, <DerbyDayMarkets {...marketsProps} section="ht" />)}
+        {accSection('ft', GROUPS[1].label, <DerbyDayMarkets {...marketsProps} section="ft" />)}
+        {accSection('htft', '半全场 · 半场胜方 / 全场胜方', <DerbyDayMarkets {...marketsProps} section="htft" />)}
       </div>
 
       {/* ③ 锁底：珠盘路(6视角 pill 原样 + 珠压 2 行 + 占比细条 ~110px) + 注栏 */}
       <div style={{ flex: '0 0 auto' }}>
-        <div style={{ padding: '4px 12px 0', position: 'relative', zIndex: 1 }}>
-          <div style={{ display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none', marginBottom: 3 }}>
-            {ROAD_TABS.map(t => (
-              <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
-                flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 9px', borderRadius: RADIUS.pill,
-                background: roadTab === t ? DERBY.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : DERBY.dim,
-                border: `1px solid ${roadTab === t ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
-                fontSize: 9.5, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
-              }}>{ROAD_TAB_LABELS[t]}</button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-            <span style={{ color: DERBY.home, fontSize: 8.5, fontWeight: 900, whiteSpace: 'nowrap' }}>主 {pct(hw)}%</span>
-            <div style={{ flex: 1, height: 4, borderRadius: 2, overflow: 'hidden', display: 'flex', background: 'rgba(0,0,0,0.35)' }}>
-              <span style={{ width: `${pct(hw)}%`, background: DERBY.home }} />
-              <span style={{ width: `${pct(dw)}%`, background: 'rgba(255,255,255,0.4)' }} />
-              <span style={{ width: `${pct(aw)}%`, background: DERBY.away }} />
-            </div>
-            <span style={{ color: DERBY.away, fontSize: 8.5, fontWeight: 900, whiteSpace: 'nowrap' }}>客 {pct(aw)}%</span>
-          </div>
-          <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
-            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
-              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
-                const b = beads[i]
-                return (
-                  <span key={i} style={{
-                    width: 15, height: 15, borderRadius: '50%',
-                    background: b ? b.c : 'rgba(255,255,255,0.05)',
-                    border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                    color: COLORS.white, fontSize: 7.5, fontWeight: 900,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
-                  }}>{b ? b.t : ''}</span>
-                )
-              })}
-            </div>
-          </div>
-        </div>
+        {/* 珠盘路切件（紧凑变体：页签横滚 + 细占比条 + 2 行 15px 珠矩阵，视觉原样） */}
+        <DerbyDayRoad history={history} tab={roadTab} onTab={setRoadTab} compact style={{ padding: '4px 12px 0' }} />
         <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{
             display: 'grid',
