@@ -1,0 +1,177 @@
+// #P0 补派脚本：排期器同轮多注单结算回滚遗留的卡单（outcome='pending' AND rounds.status='settled'）补派。
+//
+// 复算铁律：判定必走服务端权威引擎 helper（server/src/game/*），从 rounds.result 的原始 draw 字段
+//   re-derive → hitsOf/pushesOf → 逐 key 三态 → 注行级钳制（与 settleRound 同一 SQL LEAST 公式），
+//   禁手写第二份赔率/规则。settled 轮缺 result 即停手上报该行，禁默认 0。
+//
+// 硬闸（--execute 前强制）：每款先取 ≥2 条【已正常结算】真实行（≥1 win，优先单行局），用本脚本同一套
+//   re-derive 复算，断言 payout == ledger 实付分毫不差；S2 后有 settle_detail 的行连明细数组一起对拍。
+//   9 款全等才准 --execute；任一款不等 → 停手，禁调 adapter 硬凑。
+//
+// 双模式：默认/--dry-run 只打表不动钱；--execute 才补派（每行单事务 credit 键 repair-${bet.id}）。
+// 用法：node scripts/repair_stuck_bets.mjs [--dry-run|--execute]
+import { query, pool, withTransaction } from '../src/db.js';
+import { credit } from '../src/lib/wallet.js';
+import { maxPayoutFor } from '../src/lib/risk.js';
+import * as speedGrid from '../src/game/speedGrid.js';
+import * as numberUp from '../src/game/numberUp.js';
+import * as hatTrick from '../src/game/hatTrick.js';
+import * as halfTime from '../src/game/halfTime.js';
+import * as wuXing from '../src/game/wuXing.js';
+import * as lineUp from '../src/game/lineUp.js';
+import * as derbyDay from '../src/game/derbyDay.js';
+import * as goldenBoot from '../src/game/goldenBoot.js';
+import * as dominoDuel from '../src/game/dominoDuel.js';
+
+const round2 = (x) => Math.round(x * 100) / 100;
+const EXECUTE = process.argv.includes('--execute');
+const MODE = EXECUTE ? 'EXECUTE（动钱）' : 'DRY-RUN（只读）';
+
+// gameName(DB 小写) → { e:引擎, hp:(drawResult)=>{hits,pushes} 用引擎 deriveX re-derive }
+const ENGINES = {
+  speedgrid: { e: speedGrid, hp: (d) => ({ hits: speedGrid.hitsOf(d.n), pushes: new Set() }) },
+  numberup: { e: numberUp, hp: (d) => ({ hits: numberUp.hitsOf(numberUp.deriveNum(d.num)), pushes: new Set() }) },
+  hattrick: { e: hatTrick, hp: (d) => ({ hits: hatTrick.hitsOf(hatTrick.deriveRoll(d.dice)), pushes: new Set() }) },
+  halftime: { e: halfTime, hp: (d) => ({ hits: halfTime.hitsOf(halfTime.deriveRound(d.balls)), pushes: new Set() }) },
+  wuxing: { e: wuXing, hp: (d) => ({ hits: wuXing.hitsOf(wuXing.deriveRound(d.balls)), pushes: new Set() }) },
+  lineup: { e: lineUp, hp: (d) => ({ hits: lineUp.hitsOf(lineUp.deriveRound(d.grid)), pushes: new Set() }) },
+  derbyday: { e: derbyDay, hp: (d) => { const r = derbyDay.deriveMatch({ home20: d.home20, away20: d.away20 }); return { hits: derbyDay.hitsOf(r), pushes: derbyDay.pushesOf(r) }; } },
+  goldenboot: { e: goldenBoot, hp: (d) => ({ hits: goldenBoot.hitsOf(goldenBoot.deriveRace(d.ranking)), pushes: new Set() }) },
+  dominoduel: { e: dominoDuel, hp: (d) => { const r = dominoDuel.deriveRound(d.tiles); return { hits: dominoDuel.hitsOf(r), pushes: dominoDuel.pushesOf(r) }; } },
+};
+const GAMES = Object.keys(ENGINES);
+
+// 逐 key 三态复算（与 settleRound 341-354 逐字节同口径）：返回 { yourResult, rawTotalPayout }
+function computeDetail(gameName, selections, drawResult) {
+  const { e, hp } = ENGINES[gameName];
+  const { hits, pushes } = hp(drawResult);
+  const yourResult = [];
+  let raw = 0;
+  for (const [key, amt] of Object.entries(selections || {})) {
+    const a = Number(amt);
+    if (!e.isValidMarketKey(key)) continue;
+    if (hits.has(key)) { const p = round2(a * e.MARKETS[key].odds); yourResult.push({ key, outcome: 'hit', payout: p }); raw += p; }
+    else if (e.HAS_PUSH && pushes.has(key)) { yourResult.push({ key, outcome: 'push', payout: a }); raw += a; }
+    else { yourResult.push({ key, outcome: 'lose', payout: 0 }); }
+  }
+  return { yourResult, rawTotalPayout: raw };
+}
+// 钳制：与 settleRound 同一 SQL LEAST(round(raw,2), maxPayout)，保分毫一致
+async function capPayout(gameName, raw) {
+  const maxP = String(maxPayoutFor(gameName));
+  const r = await query('SELECT LEAST(round($1::numeric, 2), $2::numeric) AS payout', [String(raw), maxP]);
+  return r.rows[0].payout; // string
+}
+// settled 轮取 result.drawResult；缺失即抛（禁默认 0）
+function drawOf(round) {
+  const res = round.result;
+  if (!res || !res.drawResult) { const err = new Error(`round ${round.id} settled 但 result/drawResult 缺失`); err.stuck = true; throw err; }
+  return res.drawResult;
+}
+// 明细数组对拍（key→{outcome,payout} 归一）
+function detailEq(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  const norm = arr => Object.fromEntries(arr.map(x => [x.key, `${x.outcome}:${round2(Number(x.payout))}`]));
+  const na = norm(a), nb = norm(b);
+  const keys = new Set([...Object.keys(na), ...Object.keys(nb)]);
+  for (const k of keys) if (na[k] !== nb[k]) return false;
+  return true;
+}
+
+// ============ 硬闸：9 款对拍已正常结算行 ============
+async function calibrationGate() {
+  console.log('\n========== 硬闸对拍（9 款已结算行 re-derive vs ledger 实付）==========');
+  let allPass = true;
+  for (const game of GAMES) {
+    // 取该款【单行局】已结算行（一 round 一 player 一 bet），≥1 win 优先；带 result
+    const rows = (await query(`
+      SELECT b.id, b.player_id, b.round_id, b.amount, b.outcome, b.selections, b.settle_detail, r.result
+      FROM bets b JOIN rounds r ON r.id = b.round_id
+      WHERE r.game = $1 AND r.status = 'settled' AND r.result IS NOT NULL AND b.outcome IN ('win','lose')
+        AND b.selections IS NOT NULL   -- 只对排期器格式(selections {key:amt})对拍；排除排期器上线前的老式 per-player 局(selections NULL，另一套结算路径，非本补派 population)
+        AND b.round_id IN (SELECT round_id FROM bets GROUP BY round_id, player_id HAVING count(*) = 1)
+      ORDER BY (b.outcome='win') DESC, b.id DESC LIMIT 4
+    `, [game])).rows;
+    if (rows.length < 2 || !rows.some(r => r.outcome === 'win')) {
+      console.log(`  ⚠ ${game}: 可对拍样本不足（${rows.length} 行, win=${rows.filter(r => r.outcome === 'win').length}）—— 硬闸不放行`);
+      allPass = false; continue;
+    }
+    let gamePass = true;
+    for (const b of rows.slice(0, 2).concat(rows.filter(r => r.outcome === 'win').slice(0, 1))) {
+      let recomputed, capped;
+      try {
+        const draw = drawOf({ id: b.round_id, result: b.result });
+        recomputed = computeDetail(game, b.selections, draw);
+        capped = await capPayout(game, recomputed.rawTotalPayout);
+      } catch (err) { console.log(`  ❌ ${game} bet#${b.id}: 复算异常 ${err.message}`); gamePass = false; allPass = false; continue; }
+      const led = (await query(`SELECT COALESCE(SUM(amount),0) AS p FROM ledger WHERE player_id=$1 AND round_id=$2 AND type=$3`, [b.player_id, b.round_id, `${game}_payout`])).rows[0].p;
+      const payMatch = round2(Number(capped)) === round2(Number(led));
+      const detMatch = b.settle_detail == null ? '(无detail跳过)' : (detailEq(recomputed.yourResult, b.settle_detail) ? '明细全等' : '明细★不等★');
+      if (!payMatch || detMatch === '明细★不等★') { gamePass = false; allPass = false; }
+      console.log(`  ${payMatch && detMatch !== '明细★不等★' ? '✅' : '❌'} ${game} bet#${b.id} ${b.outcome}: 复算payout=${round2(Number(capped))} vs ledger实付=${round2(Number(led))} ${payMatch ? '全等' : '★不等★'}; ${detMatch}`);
+    }
+    if (gamePass) console.log(`  —— ${game} 对拍通过`);
+  }
+  console.log(`\n硬闸结论：${allPass ? '✅ 9 款全等，放行' : '❌ 有款不等/样本不足，阻断 --execute'}`);
+  return allPass;
+}
+
+// ============ 卡单补派 ============
+async function repairStuck(gatePassed) {
+  console.log('\n========== 卡单清单（outcome=pending AND rounds.status=settled）==========');
+  const stuck = (await query(`
+    SELECT b.id, b.player_id, p.username, b.round_id, r.game, r.round_no, b.amount, b.selections, r.result, b.settle_detail
+    FROM bets b JOIN rounds r ON r.id = b.round_id JOIN players p ON p.id = b.player_id
+    WHERE b.outcome = 'pending' AND r.status = 'settled' AND r.game = ANY($1)
+      AND b.selections IS NOT NULL   -- 防御护栏：只补排期器格式局；老式 per-player(selections NULL) 不在本 population，单列不动
+    ORDER BY r.game, b.round_id, b.id
+  `, [GAMES])).rows;
+  // 老式 NULL-selections 的卡单单独统计（本脚本不处理，避免误算成 0）
+  const legacyNull = (await query(`SELECT count(*) AS n FROM bets b JOIN rounds r ON r.id=b.round_id WHERE b.outcome='pending' AND r.status='settled' AND r.game = ANY($1) AND b.selections IS NULL`, [GAMES])).rows[0].n;
+  if (Number(legacyNull) > 0) console.log(`  ⚠ 另有 ${legacyNull} 条老式(selections NULL) 卡单不在本补派范围（需人工核，非排期器格式）`);
+  if (stuck.length === 0) { console.log('  （无卡单）'); return; }
+
+  const loseRows = [];
+  let totalCredit = 0, nWin = 0, nLose = 0, nErr = 0;
+  for (const b of stuck) {
+    let draw, det, capped;
+    try {
+      draw = drawOf({ id: b.round_id, result: b.result });
+      det = computeDetail(b.game, b.selections, draw);
+      capped = await capPayout(b.game, det.rawTotalPayout);
+    } catch (err) { console.log(`  ❌ bet#${b.id} ${b.game} ${b.round_no}: ${err.message} —— 停手上报，跳过该行`); nErr++; continue; }
+    const win = Number(capped) > 0;
+    const hitKeys = det.yourResult.filter(x => x.outcome !== 'lose').map(x => `${x.key}(${x.outcome})`).join(',') || '(无)';
+    console.log(`  ${win ? '💰' : '·'} bet#${b.id} ${b.username} ${b.game} ${b.round_no} 注$${b.amount} → 应派$${round2(Number(capped))}  中/退:${hitKeys}`);
+    if (win) {
+      nWin++; totalCredit = round2(totalCredit + Number(capped));
+      if (EXECUTE && gatePassed) {
+        await withTransaction(async (client) => {
+          const flip = await client.query(`UPDATE bets SET outcome='win', settle_detail=$2 WHERE id=$1 AND outcome='pending' RETURNING id`, [b.id, JSON.stringify(det.yourResult)]);
+          if (flip.rowCount === 0) return; // 并发已被结算
+          await credit(client, { playerId: b.player_id, amount: capped, type: `${b.game}_payout`, idempotencyKey: `repair-${b.id}`, roundId: b.round_id });
+        });
+      }
+    } else {
+      nLose++; loseRows.push({ id: b.id, username: b.username, game: b.game, round_no: b.round_no, amount: b.amount });
+      if (EXECUTE && gatePassed) {
+        await withTransaction(async (client) => {
+          await client.query(`UPDATE bets SET outcome='lose', settle_detail=$2 WHERE id=$1 AND outcome='pending'`, [b.id, JSON.stringify(det.yourResult)]);
+        });
+      }
+    }
+  }
+  console.log(`\n卡单汇总：共 ${stuck.length} 行 → win ${nWin}（补派合计 $${totalCredit}）/ lose ${nLose}（仅解卡不补分成）/ 复算异常 ${nErr}`);
+  if (loseRows.length) {
+    console.log('\n【复算=lose 的卡单——代理分成是否后补由 Ray 决定】');
+    loseRows.forEach(r => console.log(`  bet#${r.id} ${r.username} ${r.game} ${r.round_no} 注$${r.amount}`));
+  }
+  if (EXECUTE && !gatePassed) console.log('\n⛔ 硬闸未通过，--execute 被阻断，未动任何钱。');
+  if (!EXECUTE) console.log('\n（DRY-RUN：以上为预演，未动任何钱。加 --execute 且硬闸通过才补派。）');
+}
+
+console.log(`repair_stuck_bets —— 模式：${MODE}`);
+const gatePassed = await calibrationGate();
+if (EXECUTE && !gatePassed) { console.log('\n⛔ 硬闸阻断，退出，未动钱。'); await pool.end(); process.exit(2); }
+await repairStuck(gatePassed);
+await pool.end();

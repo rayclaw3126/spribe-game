@@ -371,11 +371,16 @@ async function settleRound(room, hits, pushes) {
 
         let balanceAfter;
         if (win) {
+          // #P0：派彩幂等键改「每注行」粒度（附 bet.id）。原每(轮,玩家)一键会让同轮玩家第 2+ 个
+          // winning 注行 credit 撞 idx_ledger_idempotency_key → 整事务回滚 → 卡 pending、钱扣未派。
+          // 单行局键值语义等价（历史老键已用不会重试）；多行局各注行独立结算，互不撞键。
+          // ⚠ 钳制(maxPayout)粒度随之从(轮,玩家)变为(注行)：属本设计有意为之——下注前的敞口闸
+          //   已在玩家/轮层兜底封顶，注行级钳制只是各行各自不超单注上限。
           const cr = await credit(client, {
             playerId,
             amount: totalPayout,
             type: `${gameName}_payout`,
-            idempotencyKey: `rgs-${roundId}-${playerId}`,
+            idempotencyKey: `rgs-${roundId}-${playerId}-${bet.id}`,
             roundId,
           });
           balanceAfter = cr.balanceAfter;
@@ -392,7 +397,18 @@ async function settleRound(room, hits, pushes) {
         return { yourResult, totalPayout, balanceAfter };
       });
 
-      if (settled) perPlayer.set(String(playerId), settled);
+      // #P0 广播合并：同玩家同轮多注行——拼接 yourResult、累加 totalPayout（消灭"全押只见最后一行未中"）。
+      // balanceAfter 取本行（最新提交的钱包余额，顺序处理故末行即玩家轮末真余额）。
+      if (settled) {
+        const prev = perPlayer.get(String(playerId));
+        perPlayer.set(String(playerId), prev
+          ? {
+            yourResult: [...prev.yourResult, ...settled.yourResult],
+            totalPayout: round2(Number(prev.totalPayout) + Number(settled.totalPayout)),
+            balanceAfter: settled.balanceAfter,
+          }
+          : settled);
+      }
     } catch (err) {
       console.error(`[roundHub:${gameName}] 结算玩家 ${playerId} 失败（跳过，靠幂等键下次补结）：`, err.message);
     }
