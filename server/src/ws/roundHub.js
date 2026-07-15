@@ -362,9 +362,10 @@ async function settleRound(room, hits, pushes) {
         const win = Number(totalPayout) > 0;
 
         // 守 pending 翻转：只有把本注从 pending 改成终态成功（rowCount=1）的这一次才继续派彩/分成。
+        // #S2：同批追记本行逐 key 三态明细 settle_detail（[{key,outcome,payout}]，纯留痕，不进资金路径）。
         const flip = await client.query(
-          `UPDATE bets SET outcome = $2 WHERE id = $1 AND outcome = 'pending' RETURNING id`,
-          [bet.id, win ? 'win' : 'lose'],
+          `UPDATE bets SET outcome = $2, settle_detail = $3 WHERE id = $1 AND outcome = 'pending' RETURNING id`,
+          [bet.id, win ? 'win' : 'lose', JSON.stringify(yourResult)],
         );
         if (flip.rowCount === 0) return null; // 已被结算过（重试/并发），跳过，绝不重复派彩
 

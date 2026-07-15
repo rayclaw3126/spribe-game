@@ -122,7 +122,7 @@ router.get('/bets', requireAuth, requireType('player'), async (req, res, next) =
     const from = parseDate(req.query.from);
     const to = parseDate(req.query.to);
     const result = await query(
-      `SELECT b.id, b.amount, b.outcome, b.created_at, r.game, b.selections,
+      `SELECT b.id, b.amount, b.outcome, b.created_at, r.game, b.selections, b.settle_detail,
               COALESCE(NULLIF(lp.payout, 0), r.payout, 0) AS payout
        FROM bets b
        JOIN rounds r ON b.round_id = r.id

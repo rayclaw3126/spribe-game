@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { COLORS, RADIUS } from './shell/tokens'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlayerApi } from '../lib/playerApi'
-import { GAME_BY_BACKEND_ID, GAME_REGISTRY } from '../gameRegistry'
+import { GAME_BY_BACKEND_ID, GAME_BY_ID, GAME_REGISTRY } from '../gameRegistry'
+import { MARKET_GROUPS } from './MultiTable/mockData'   // #S2 档位中文 label 单一出处（禁手抄第二份）
 
 // 账单抽屉：右侧滑入，两 tab —— 资金流水(/player/ledger) / 投注记录(/player/bets)。
 // keyset 分页（nextCursor），只读 GET 走 playerApi.apiGet。色值全走 tokens。
@@ -42,6 +43,42 @@ function betSummary(it) {
     return `×${round2(Number(it.payout) / Number(it.amount)).toFixed(2)}` + suffix
   }
   return suffix.trim()   // rollingball/aviator（selections=null 且非四款）：只显标注，提示派彩为本轮合计
+}
+
+// #S2 档位中文名平表：MARKET_GROUPS 键是前端 id → 经 GAME_BY_ID 反查 backendId，预构 `<be>:<key>`→label。
+// 读 MARKET_GROUPS 单一出处，禁手抄。未知 key 回落原 key（老范式/未登记档位不崩）。
+const LABEL_BY_BE_KEY = (() => {
+  const m = {}
+  for (const [fid, groups] of Object.entries(MARKET_GROUPS)) {
+    const be = GAME_BY_ID[fid]?.backendId
+    if (!be || !Array.isArray(groups)) continue
+    for (const grp of groups) for (const { key, label } of (grp.keys || [])) m[`${be}:${key}`] = label
+  }
+  return m
+})()
+const labelOf = (be, key) => LABEL_BY_BE_KEY[`${be}:${key}`] ?? key
+
+// #S2 三态标记：hit→✓ / lose→✗ / push→退（色走 tokens）
+const MARK = {
+  hit: { t: '✓', c: COLORS.green }, lose: { t: '✗', c: COLORS.slate }, push: { t: '退', c: COLORS.amber },
+}
+// #S2 注单明细：settle_detail=[{key,outcome,payout}] 合法非空才走子行；防 null/形状异常/切 tab 脏帧全回落 null。
+// 行头派彩改显 round2(Σ本行 detail 派彩)（与子行永远对齐）；Σ > 本行 payout(轮总聚合,钳制后) → 触顶标记。
+function betDetail(it) {
+  const d = it && it.settle_detail
+  if (!Array.isArray(d) || d.length === 0) return null
+  const rows = d
+    .filter(x => x && typeof x.key === 'string')
+    .map(x => ({
+      label: labelOf(it.game, x.key),
+      stake: Number(it.selections && it.selections[x.key]) || 0,
+      payout: Number(x.payout) || 0,
+      mark: MARK[x.outcome] || MARK.lose,
+    }))
+  if (rows.length === 0) return null
+  const sum = round2(rows.reduce((s, r) => s + r.payout, 0))
+  const capped = sum > Number(it.payout)   // 钳制前 Σ > 钳制后轮总 → 触顶（多行场景 Σ本行<轮总，天然不误报）
+  return { rows, sum, capped }
 }
 
 // ledger.type → { 展示名, up(是否入账), 类型词 }。type 前缀=backendId，去 _bet/_payout 后缀反查 registry。
@@ -239,20 +276,37 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
               const g = GAME_BY_BACKEND_ID[it.game]
               const won = it.outcome === 'win'
               const badge = won ? { t: '赢', c: COLORS.green, bg: COLORS.greenTint } : it.outcome === 'lose' ? { t: '输', c: COLORS.slate, bg: COLORS.slateTint } : { t: '进行中', c: COLORS.amber, bg: COLORS.amberTint }
-              const summary = betSummary(it)
+              const detail = betDetail(it)                          // #S2 有明细→子行；无（老数据/其他范式）→ null 回落
+              const summary = detail ? null : betSummary(it)        // 有明细不显裸 key×n 摘要（子行取代）
+              const headPayout = detail ? detail.sum : Number(it.payout)   // #S2 行头派彩：有明细显 round2(Σ本行detail)
               return (
-                <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 6px', borderBottom: `1px solid ${COLORS.border}` }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>{g ? g.displayName : it.game}</div>
-                    {summary && (
-                      <div style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</div>
-                    )}
-                    <div style={smallMuted}>注 {money(it.amount)} · {fmtTime(it.created_at)}</div>
+                <div key={it.id} style={{ display: 'flex', flexDirection: 'column', padding: '11px 6px', borderBottom: `1px solid ${COLORS.border}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>{g ? g.displayName : it.game}</div>
+                      {summary && (
+                        <div style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</div>
+                      )}
+                      <div style={smallMuted}>注 {money(it.amount)} · {fmtTime(it.created_at)}</div>
+                    </div>
+                    <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
+                      <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: RADIUS.pill, fontSize: 11, fontWeight: 900, color: badge.c, background: badge.bg }}>{badge.t}</span>
+                      <div style={smallMuted}>派彩 {money(headPayout)}{detail && detail.capped && <span style={{ color: COLORS.amber, marginLeft: 4 }}>已触顶钳制</span>}</div>
+                    </div>
                   </div>
-                  <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
-                    <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: RADIUS.pill, fontSize: 11, fontWeight: 900, color: badge.c, background: badge.bg }}>{badge.t}</span>
-                    <div style={smallMuted}>派彩 {money(it.payout)}</div>
-                  </div>
+                  {/* #S2 注级明细子行：档位中文名 $注额 → $派彩 ✓/✗/退 */}
+                  {detail && (
+                    <div style={{ marginTop: 7, paddingLeft: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      {detail.rows.map((r, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: COLORS.textMuted }}>
+                          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label} {money(r.stake)}</span>
+                          <span style={{ flex: '0 0 auto', marginLeft: 8 }}>
+                            → {money(r.payout)} <span style={{ color: r.mark.c, fontWeight: 900 }}>{r.mark.t}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })
