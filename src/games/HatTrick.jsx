@@ -15,6 +15,11 @@ import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import HatTrickStage from './stages/HatTrickStage'
+import HatTrickMarkets, { DieFace } from './markets-ui/HatTrickMarkets'   // #41 单15：盘口区切件（DieFace 随件，舞台/mobile 回用）
+import HatTrickRoad from './markets-ui/HatTrickRoad'                       // #41 单15：珠盘路墙
+import HatTrickPodium from './markets-ui/HatTrickPodium'                   // #41 单15：上局信息条（subRow 槽）
+import { RULES } from './markets-ui/hattrickRules'                         // #41 单15：玩法说明内容（共享）
+import { SIDES, ROAD_TABS, ROAD_TAB_LABELS, beadFor } from './markets-ui/hattrickShared'   // #41 单15：SIDES/珠盘页签/beadFor（mobile 段回用）
 
 // Hat Trick — 快3三骰彩（三骰和值 + 豹子 + 对子），第 15 卡。
 // 引擎：三骰各 1–6 独立均匀；和值/豹子/对子/大小单双全部由骰面派生。
@@ -34,29 +39,7 @@ const DIE_LOCK = [2600, 3500, 4500]   // 各骰定格时刻（第1骰 2.6s / 第
 const DRAW_ANIM_MS = 7000
 const G = GAME_BY_ID['HatTrick']
 
-// 玩法说明文案（中文；盘口数字照实）
-const RULES = [
-  {
-    icon: '🎯', title: '怎么玩',
-    body: '每期掷 3 颗骰子（各 1–6），根据点数和、豹子、对子等结果判定盘口。开球前下注，开奖后命中的盘口按赔率赔付。',
-  },
-  {
-    icon: '📊', title: '盘口与赔率',
-    body: '· 和值：押 3 颗骰子的点数总和（4–17），赔率随难度从约 7.6 倍到 68.76 倍不等，越极端的和值赔越高。\n· 大 / 小 / 单 / 双：大[11-17] / 小[4-10]，按总和判定，约 1.96 倍。注意开出豹子时这四个盘口全输。\n· 任意豹子：3 颗骰子点数全相同（不限哪个点），约 34.38 倍。\n· 指定豹子：押中开出的具体豹子点数（如三个 5），约 206.28 倍。\n· 指定对子：押的点数至少出现两次（含该点豹子），约 12.89 倍。',
-  },
-  {
-    icon: '🎬', title: '开奖与结算',
-    body: '3 颗骰子掷出后计算总和及豹子/对子，命中的盘口立即结算，赔付直接入余额。开豹子时大小单双四个盘口全输（豹子通杀）。每期独立。',
-  },
-  {
-    icon: '🎰', title: '如何下注',
-    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
-  },
-  {
-    icon: '💡', title: '小技巧',
-    body: '· 想稳押大小单双，中奖率约一半，但小心豹子通杀；想搏大赔押指定豹子。\n· 和值押中间值（10、11）比押两端（4、17）容易得多。\n· 本游戏理论返还率约 95.5%，属娱乐性质，理性游戏。',
-  },
-]
+// 玩法说明文案已切至 ./markets-ui/hattrickRules（RULES 共享）。
 const ROAD_CAP = 120
 
 // 种子历史（新→旧；真开奖逐期顶掉。含 2 期豹子：[2,2,2]、[6,6,6]）
@@ -69,59 +52,8 @@ const SEED_LAST = deriveRoll(SEED_ROUNDS[0])
 const SEED_RECENT = SEED_ROUNDS.slice(0, 5).map(sumOf)
 const SEED_HISTORY = [...SEED_ROUNDS].reverse()   // 珠盘路旧→新
 
-const SIDES = [
-  { key: 's-big',   name: '大', range: '11–17' },
-  { key: 's-small', name: '小', range: '4–10' },
-  { key: 's-odd',   name: '单', range: '和值单' },
-  { key: 's-even',  name: '双', range: '和值双' },
-]
-
-// ---------- 骰面（CSS 点阵，size 参数化；禁 emoji 禁图）----------
-// 3×3 宫格索引：0 1 2 / 3 4 5 / 6 7 8
-const PIPS = {
-  1: [4], 2: [0, 8], 3: [0, 4, 8],
-  4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
-}
-function DieFace({ v, size = 18 }) {
-  const dot = Math.max(2.5, size * 0.17)
-  return (
-    <span aria-label={`骰面 ${v}`} style={{
-      width: size, height: size, borderRadius: Math.max(3, size * 0.2),
-      background: HATTRICK.face, border: '1px solid rgba(0,0,0,0.3)',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.35)',
-      display: 'inline-grid',
-      gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(3, 1fr)',
-      padding: Math.max(2, size * 0.14), boxSizing: 'border-box', flex: '0 0 auto',
-    }}>
-      {Array.from({ length: 9 }, (_, i) => (
-        <span key={i} style={{
-          alignSelf: 'center', justifySelf: 'center',
-          width: dot, height: dot, borderRadius: '50%',
-          background: PIPS[v].includes(i) ? HATTRICK.pip : 'transparent',
-        }} />
-      ))}
-    </span>
-  )
-}
-
-// ---------- 珠盘路 ----------
-const ROAD_TABS = ['TOTAL', 'B-S', 'TRIPLE']
-// 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照 Derby/HalfTime 先例分离）
-const ROAD_TAB_LABELS = { TOTAL: '和值', 'B-S': '大小', TRIPLE: '豹子' }
-function beadFor(tab, dice) {
-  const s = sumOf(dice)
-  const triple = dice[0] === dice[1] && dice[1] === dice[2]
-  if (tab === 'TOTAL') return { t: String(s), c: s >= 11 ? HATTRICK.big : HATTRICK.small }
-  if (tab === 'B-S') {
-    if (triple) return { t: 'T', c: HATTRICK.gold, dark: true }   // 豹子通杀期
-    return s >= 11 ? { t: 'B', c: HATTRICK.big } : { t: 'S', c: HATTRICK.small }
-  }
-  // TRIPLE 页：豹子期金珠，其余灰珠
-  return triple
-    ? { t: String(dice[0]), c: HATTRICK.gold, dark: true }
-    : { t: '', c: 'rgba(255,255,255,0.14)' }
-}
-
+// SIDES / DieFace / ROAD_TABS·ROAD_TAB_LABELS·beadFor 已切至 ./markets-ui（hattrickShared + HatTrickMarkets），
+// 原页 mobile 段 + 舞台回显从切件回用（单一出处，禁二份表）。
 
 export default function HatTrick({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
@@ -410,7 +342,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const cellName = { color: HATTRICK.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
   const cellRange = { color: HATTRICK.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
   const cellOdds = { color: HATTRICK.gold, fontSize: isMobile ? 10.5 : 12.5, fontWeight: 900 }
-  const secHead = { color: HATTRICK.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
+  // secHead 已随桌面盘口区切至 HatTrickMarkets（组头折叠钮内建）；mobile 段用手风琴自带标题。
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: 5,
     background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
@@ -497,28 +429,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
     }}>{phaseChip.text}</span>
   )
-  const subRowNode = (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0, flex: '1 1 auto' }}>
-      {/* 上期三骰迷你面（CSS 点阵） */}
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-        {lastRoll.dice.map((v, i) => <DieFace key={i} v={v} size={isMobile ? 16 : 18} />)}
-      </span>
-      {/* 近 5 期和值小串（新→旧） */}
-      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-        {recent.map((s, i) => (
-          <span key={`${s}-${i}`} style={{
-            padding: '1px 7px', borderRadius: RADIUS.pill,
-            background: s >= 11 ? HATTRICK.big : HATTRICK.small, color: COLORS.white,
-            fontSize: 9.5, fontWeight: 900, opacity: i === 0 ? 1 : 0.75,
-          }}>{s}</span>
-        ))}
-      </span>
-      <span style={{
-        marginLeft: 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
-        background: HATTRICK.gold, color: '#3a2c00', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>{lastRoll.isTriple ? `豹子 ${lastRoll.tripleFace}` : `和值 ${lastRoll.total}`}</span>
-    </span>
-  )
+  const subRowNode = <HatTrickPodium lastRoll={lastRoll} recent={recent} isMobile={isMobile} />   // 上局信息条（切件）
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} band={HATTRICK.band} venue={G.venue ?? G.displayName}
@@ -541,51 +452,11 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     </>
   )
 
-  // ---- 珠盘路（真历史滚动，容量 6×20）----
+  // ---- 珠盘路（真历史滚动，容量 6×20）——桌面切件；mobile 段 2 行走自身内联（beads 复用）----
   const ROAD_COLS = 20
   const beads = history.slice(-ROAD_CAP).map(d => beadFor(roadTab, d))
   const beadRoad = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '0 12px 8px' : '0 18px 8px',
-    }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
-        {ROAD_TABS.map(t => (
-          <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
-            padding: '3px 12px', borderRadius: RADIUS.pill,
-            background: roadTab === t ? HATTRICK.sel : 'rgba(0,0,0,0.35)',
-            color: roadTab === t ? '#083a1b' : HATTRICK.dim,
-            border: `1px solid ${roadTab === t ? HATTRICK.sel : 'rgba(255,255,255,0.2)'}`,
-            fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
-          }}>{ROAD_TAB_LABELS[t]}</button>
-        ))}
-      </div>
-      <div style={{
-        overflowX: 'auto', borderRadius: 10,
-        background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 5,
-      }}>
-        <div style={{
-          display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: 'repeat(6, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`,
-          gap: 2, width: 'max-content',
-        }}>
-          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const b = beads[i]
-            return (
-              <span key={i} style={{
-                width: 15, height: 15, borderRadius: '50%',
-                background: b ? b.c : 'rgba(255,255,255,0.05)',
-                border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: b?.dark ? '#3a2c00' : COLORS.white,
-                fontSize: b && b.t.length > 1 ? 6.5 : 8.5, fontWeight: 900,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                boxSizing: 'border-box',
-              }}>{b ? b.t : ''}</span>
-            )
-          })}
-        </div>
-      </div>
-    </div>
+    <HatTrickRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile} />
   )
 
   const gameCard = (
@@ -702,69 +573,13 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         gap: 5, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
-        {/* 行① TOTAL：4–17 十四小格 + 大小单双四大格（豹子通杀） */}
-        <div style={secBox}>
-          <div style={secHead}>和值 4-17</div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: isMobile ? 'repeat(7, 1fr)' : 'repeat(14, 1fr)',
-            gap: isMobile ? 3 : 4, marginBottom: 6,
-          }}>
-            {Array.from({ length: 14 }, (_, i) => totalCell(i + 4))}
-          </div>
-          <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
-            {SIDES.map(m => (
-              <button key={m.key} type="button" className={cellCls(m.key)} disabled={!betting} onClick={() => toggleSel(m.key)} style={cellBtn(m.key, { compact: true })}>
-                <span style={cellName}>{m.name}</span>
-                <span style={cellRange}>{m.range}</span>
-                <span className={fxCls(m.key)} style={{ ...cellOdds, fontSize: isMobile ? 10 : 11.5, whiteSpace: 'nowrap' }}>{betsPlaced.has(m.key) ? winTxt(m.key, MARKETS[m.key].odds) : ODDS.side.toFixed(2)}</span>
-                <span style={{ color: HATTRICK.dim, fontSize: isMobile ? 7.5 : 8.5, fontWeight: 700, whiteSpace: 'nowrap' }}>豹子通杀</span>
-                {stakeChip(m.key)}
-                {nearBadge(m.key)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 行② HAT TRICK：任意豹子 + 指定三同六格 */}
-        <div style={secBox}>
-          <div style={secHead}>豹子</div>
-          <div style={{ display: 'flex', gap: isMobile ? 5 : 8, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
-            <button type="button" className={cellCls('tr-any')} disabled={!betting} onClick={() => toggleSel('tr-any')}
-              style={{ ...cellBtn('tr-any'), ...(isMobile ? { flex: '1 1 100%' } : { flex: 1.6 }) }}>
-              <span style={cellName}>任意豹子</span>
-              <span className={fxCls('tr-any')} style={{ ...cellOdds, whiteSpace: 'nowrap' }}>{betsPlaced.has('tr-any') ? winTxt('tr-any', MARKETS['tr-any'].odds) : ODDS.anyTriple.toFixed(2)}</span>
-              {stakeChip('tr-any')}
-            </button>
-            {Array.from({ length: 6 }, (_, i) => i + 1).map(v => (
-              <button key={v} type="button" className={cellCls(`tr-${v}`)} disabled={!betting} onClick={() => toggleSel(`tr-${v}`)}
-                style={{ ...cellBtn(`tr-${v}`, { compact: true }), ...(isMobile ? { flex: '1 1 30%' } : {}) }}>
-                <span style={{ display: 'flex', gap: 2 }}>
-                  {[v, v, v].map((d, i) => <DieFace key={i} v={d} size={isMobile ? 13 : 15} />)}
-                </span>
-                <span className={fxCls(`tr-${v}`)} style={{ ...cellOdds, fontSize: isMobile ? 9.5 : 11, whiteSpace: 'nowrap' }}>{betsPlaced.has(`tr-${v}`) ? winTxt(`tr-${v}`, MARKETS[`tr-${v}`].odds) : ODDS.triple.toFixed(2)}</span>
-                {stakeChip(`tr-${v}`)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 行③ DOUBLE：指定对子六格（含该面豹子） */}
-        <div style={secBox}>
-          <div style={secHead}>对子</div>
-          <div style={{ display: 'flex', gap: isMobile ? 5 : 8, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
-            {Array.from({ length: 6 }, (_, i) => i + 1).map(v => (
-              <button key={v} type="button" className={cellCls(`d-${v}`)} disabled={!betting} onClick={() => toggleSel(`d-${v}`)}
-                style={{ ...cellBtn(`d-${v}`, { compact: true }), ...(isMobile ? { flex: '1 1 30%' } : {}) }}>
-                <span style={{ display: 'flex', gap: 2 }}>
-                  {[v, v].map((d, i) => <DieFace key={i} v={d} size={isMobile ? 14 : 16} />)}
-                </span>
-                <span className={fxCls(`d-${v}`)} style={{ ...cellOdds, fontSize: isMobile ? 9.5 : 11, whiteSpace: 'nowrap' }}>{betsPlaced.has(`d-${v}`) ? winTxt(`d-${v}`, MARKETS[`d-${v}`].odds) : ODDS.double.toFixed(2)}</span>
-                {stakeChip(`d-${v}`)}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处。
+            富演出层(结算飞金/碎裂·就差1点·悬念脉冲)经 settleHits/settleFx/nearMiss/suspense 传入，原页分毫不变；
+            richFx 抑制 GoldenBoot 口径的 .htWin 金脉冲（本页已有 htWinFly 接管，免重复）。 */}
+        <HatTrickMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
+          selected={picks} hits={result?.hits ?? preHits}
+          settleHits={result?.hits} settleFx={settleFx} nearMiss={nearMiss} suspense={suspense}
+          isMobile={isMobile} richFx />
       </div>
 
       {/* ③ 珠盘路（底部，三页签） */}

@@ -15,6 +15,10 @@ import CommitRevealFairness from '../components/CommitRevealFairness'
 import BetButton from '../components/shell/BetButton'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
+import NumberUpMarkets from './markets-ui/NumberUpMarkets'         // #41 单15：盘口区切件（桌面组装 + 多桌复用）
+import NumberUpRoad from './markets-ui/NumberUpRoad'              // #41 单15：珠盘路墙（桌面组装 + 多桌复用）
+import NumberUpPodium, { NumberCard } from './markets-ui/NumberUpPodium'   // #41 单15：上局信息条（NumberCard 随件，stageZone import 回用）
+import { RULES } from './markets-ui/numberupRules'               // #41 单15：玩法说明内容（共享）
 
 // Number Up — 两位数球衣号码彩（00–49）。
 // 引擎：0–49 均匀抽一个；头位/尾位/大小单双全部由 num 派生。
@@ -30,29 +34,7 @@ export { drawNumber, deriveNum, ODDS, MARKETS, hitsOf }
 const DRAW_ANIM_MS = 6500
 const G = GAME_BY_ID['NumberUp']
 
-// 玩法说明文案（中文；盘口数字照实）
-const RULES = [
-  {
-    icon: '🎯', title: '怎么玩',
-    body: '每期开出一个 00–49 的号码。你在下注截止前选号下注，开奖后按押中的盘口赔付。',
-  },
-  {
-    icon: '📊', title: '盘口与赔率',
-    body: '· 直选：押中开出的整个两位数，约 47.5 倍。\n· 首位：押中十位数（0–4），约 4.75 倍。\n· 尾数：押中个位数（0–9），约 9.5 倍。\n· 大 / 小：大[25–49] / 小[00–24]，约 1.91 倍。\n· 单 / 双：按开出号码判定，约 1.91 倍。',
-  },
-  {
-    icon: '🎬', title: '开奖与结算',
-    body: '换人牌翻出十位与个位组成本期号码，命中的盘口高亮并即时结算，赔付直接入余额。每期独立，上期不影响下期。',
-  },
-  {
-    icon: '🎰', title: '如何下注',
-    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
-  },
-  {
-    icon: '💡', title: '小技巧',
-    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押直选。\n· 首位和尾数是中等赔率，比直选好中。\n· 本游戏理论返还率约 95%，属娱乐性质，理性游戏。',
-  },
-]
+// 玩法说明文案已切至 ./markets-ui/numberupRules（RULES，原页 + 多桌卡共享，单一出处）。
 const ROAD_CAP = 120
 
 // 种子上期 + 种子历史（值域 0–49，真开奖逐期顶掉）
@@ -80,24 +62,7 @@ function beadFor(tab, n) {
   return n >= 25 ? { t: 'H', c: NUMBERUP.hi } : { t: 'L', c: NUMBERUP.lo }
 }
 
-// 球衣号码小卡 — 白底圆角卡 + HiLo 同款球衣轮廓 + 两位数号码
-const JERSEY_PATH = 'M35 6 L20 14 L6 30 L16 42 L26 34 L26 84 L74 84 L74 34 L84 42 L94 30 L80 14 L65 6 C 55 16, 45 16, 35 6 Z'
-function NumberCard({ num, w = 26 }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      width: w, height: w * 1.18, borderRadius: Math.max(4, w * 0.16),
-      background: '#ffffff', border: '1px solid rgba(0,0,0,0.25)',
-      boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
-    }}>
-      <svg width={w * 0.8} height={w * 0.72} viewBox="0 0 100 90" style={{ display: 'block' }} aria-hidden="true">
-        <path d={JERSEY_PATH} fill={NUMBERUP.jersey} stroke="rgba(0,0,0,0.3)" strokeWidth="2" strokeLinejoin="round" />
-        <text x="50" y="66" textAnchor="middle" fontSize="36" fontWeight="900"
-          fill="#ffffff" fontFamily="'Space Grotesk', sans-serif">{pad2(num)}</text>
-      </svg>
-    </span>
-  )
-}
+// NumberCard（球衣号码小卡）已随上局信息条切至 ./markets-ui/NumberUpPodium；此处 import 回用于 stageZone 待命大卡。
 
 
 export default function NumberUp({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
@@ -351,25 +316,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
     }}>{phaseChip.text}</span>
   )
-  const subRowNode = (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0, flex: '1 1 auto' }}>
-      <NumberCard num={lastNum.num} w={isMobile ? 22 : 24} />
-      {/* 近 5 期小号串（新→旧） */}
-      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-        {recent.map((n, i) => (
-          <span key={`${n}-${i}`} style={{
-            padding: '1px 7px', borderRadius: RADIUS.pill,
-            background: n >= 25 ? NUMBERUP.hi : NUMBERUP.lo, color: COLORS.white,
-            fontSize: 9.5, fontWeight: 900, opacity: i === 0 ? 1 : 0.75,
-          }}>{pad2(n)}</span>
-        ))}
-      </span>
-      <span style={{
-        marginLeft: 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
-        background: NUMBERUP.gold, color: '#3a2c00', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>号码 {pad2(lastNum.num)}</span>
-    </span>
-  )
+  const subRowNode = <NumberUpPodium last={lastNum.num} recent={recent} isMobile={isMobile} />   // 上局信息条（切件）
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} band={NUMBERUP.band} venue={G.venue ?? G.displayName}
@@ -397,47 +344,10 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   const ROAD_COLS = 20
   const roadItems = history.slice(-ROAD_CAP)
   const beads = roadItems.map(n => beadFor(roadTab, n))
+  // ---- 珠盘路（切件；桌面 6×20；手机三段版另有 2 行内联）----
   const beadRoad = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '0 12px 10px' : '0 18px 10px',
-    }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
-        {ROAD_TABS.map(t => (
-          <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
-            padding: '3px 12px', borderRadius: RADIUS.pill,
-            background: roadTab === t ? NUMBERUP.sel : 'rgba(0,0,0,0.35)',
-            color: roadTab === t ? '#083a1b' : NUMBERUP.dim,
-            border: `1px solid ${roadTab === t ? NUMBERUP.sel : 'rgba(255,255,255,0.2)'}`,
-            fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
-          }}>{ROAD_TAB_LABELS[t]}</button>
-        ))}
-      </div>
-      <div style={{
-        overflowX: 'auto', borderRadius: 10,
-        background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
-      }}>
-        <div style={{
-          display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`,
-          gap: 2, width: 'max-content',
-        }}>
-          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const b = beads[i]
-            return (
-              <span key={i} style={{
-                width: 18, height: 18, borderRadius: '50%',
-                background: b ? b.c : 'rgba(255,255,255,0.05)',
-                border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: COLORS.white, fontSize: b && b.t.length > 1 ? 7 : 9, fontWeight: 900,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                boxSizing: 'border-box',
-              }}>{b ? b.t : ''}</span>
-            )
-          })}
-        </div>
-      </div>
-    </div>
+    <NumberUpRoad history={history} tab={roadTab} onTab={setRoadTab} cols={ROAD_COLS} rows={6}
+      style={{ margin: isMobile ? '0 12px 10px' : '0 18px 10px' }} />
   )
 
   // ---- 开奖区（常驻顶部）：REVEAL/SETTLED 换人牌舞台 / BETTING 上期开奖静态待命 ----
@@ -493,65 +403,9 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
         gap: 8, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
-        {/* 行① PICK 00–49 网格（flex 可收缩 + 内部纵滚兜底） */}
-        <div style={{
-          flex: '0 1 auto', minHeight: 130, overflowY: 'auto',
-          borderRadius: 12, padding: isMobile ? 6 : 8,
-          background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)',
-          boxSizing: 'border-box',
-        }}>
-          <div style={secHead}>直选 · 赔率 {ODDS.pick.toFixed(2)}</div>
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)',
-            gap: isMobile ? 3 : 3,
-          }}>
-            {Array.from({ length: 50 }, (_, i) => gridCell(i))}
-          </div>
-        </div>
-
-        {/* 行② FIRST / LAST DIGIT（desk 并列，mobile 堆叠） */}
-        <div style={{
-          flex: '0 0 auto',
-          borderRadius: 12, padding: isMobile ? 6 : 8,
-          background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)',
-          display: 'flex', gap: isMobile ? 8 : 14,
-          flexDirection: isMobile ? 'column' : 'row',
-        }}>
-          {[
-            { pre: 'fd', label: `首位 · ${ODDS.firstDigit.toFixed(2)}`, count: 5 },
-            { pre: 'ld', label: `尾数 · ${ODDS.lastDigit.toFixed(2)}`, count: 10 },
-          ].map(g => (
-            <div key={g.pre} style={{ flex: 1, minWidth: 0 }}>
-              <div style={secHead}>{g.label}</div>
-              <div style={{ display: 'flex', gap: isMobile ? 3 : 4 }}>
-                {Array.from({ length: g.count }, (_, d) => (
-                  <button key={d} type="button" className="nuCell" disabled={!betting} onClick={() => toggleSel(`${g.pre}-${d}`)}
-                    style={{ ...cellBtn(`${g.pre}-${d}`, { compact: true }), padding: '4px 0' }}>
-                    <span style={{ ...cellName, fontSize: isMobile ? 11 : 12 }}>{d}</span>
-                    {stakeChip(`${g.pre}-${d}`)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* 行③ HIGH / LOW / ODD / EVEN */}
-        <div style={{
-          flex: '0 0 auto',
-          borderRadius: 12, padding: isMobile ? 6 : 8,
-          background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)',
-          display: 'flex', gap: isMobile ? 5 : 8,
-        }}>
-          {SIDES.map(m => (
-            <button key={m.key} type="button" className="nuCell" disabled={!betting} onClick={() => toggleSel(m.key)} style={cellBtn(m.key, { compact: true })}>
-              <span style={cellName}>{m.name}</span>
-              <span style={cellRange}>{m.range}</span>
-              <span style={{ ...cellOdds, fontSize: isMobile ? 10 : 11.5 }}>{ODDS.side.toFixed(2)}</span>
-              {stakeChip(m.key)}
-            </button>
-          ))}
-        </div>
+        {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处（多桌卡同 import） */}
+        <NumberUpMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
+          selected={picks} hits={result?.hits ?? preHits} isMobile={isMobile} />
       </div>
 
       <div style={{ flex: '1 0 auto' }} />

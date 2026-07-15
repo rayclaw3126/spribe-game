@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Panel } from '../components/GameLayout'
-import { COLORS, RADIUS, LAYOUT, DERBY, ROULETTE } from '../components/shell/tokens'
+import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
 import BetButton from '../components/shell/BetButton'
@@ -15,6 +15,10 @@ import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import SpeedGridStage from './stages/SpeedGridStage'
+import SpeedGridMarkets from './markets-ui/SpeedGridMarkets'   // #41 单15：盘口区切件（视觉原样）
+import SpeedGridRoad from './markets-ui/SpeedGridRoad'         // #41 单15：珠盘路墙（判定走引擎）
+import { RULES } from './markets-ui/speedgridRules'            // #41 单15：玩法说明内容（共享）
+import { TEAMS, teamOf } from './markets-ui/speedgridTeams'    // #41 单15：4 队涂装（开奖区/盘口区同源）
 
 // Speed Grid — DD24 结构 F1 皮（1-24 均匀抽 1 开冠军车号），第 18 卡。
 // #43 单2：轮次节奏改「服务器排期器统一开奖」——相位/期号/倒计时/开奖/结算全读 useRoundRoom（/ws/rounds）。
@@ -36,41 +40,12 @@ export { RED, drawCar, ODDS, MARKETS, hitsOf }
 const DRAW_ANIM_MS = 4600
 const G = GAME_BY_ID['SpeedGrid']
 
-// 玩法说明文案（中文；盘口数字/车号照实）
-const RULES = [
-  {
-    icon: '🎯', title: '怎么玩',
-    body: '每期开出 1 辆冠军车，车号 1–24。你在开赛前对多个盘口下注，冲线揭晓冠军车号后，命中的盘口按赔率赔付。',
-  },
-  {
-    icon: '📊', title: '盘口与赔率',
-    body: '· 大 / 小：大[13-24] / 小[1-12]，约 1.95 倍。\n· 单 / 双 / 红 / 黑：按冠军车号判定，约 1.95 倍。\n· 三段：头排[1-8] / 中段[9-16] / 尾排[17-24]，约 2.9 倍。\n· 车队：按车号所属车队（每 6 号一队，共 4 队）押注，约 3.85 倍。\n· 车号直选：直接押中冠军车号（1–24），约 22.85 倍。',
-  },
-  {
-    icon: '🎬', title: '开奖与结算',
-    body: '开赛后车辆冲线，亮出冠军车号，命中的盘口立即结算，赔付直接入余额。每期独立，上期不影响下期。',
-  },
-  {
-    icon: '🎰', title: '如何下注',
-    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
-  },
-  {
-    icon: '💡', title: '小技巧',
-    body: '· 想稳押大小单双红黑，中奖率约一半；想搏大赔押车号直选。\n· 三段和车队是中等赔率，覆盖多个车号，命中率比直选高。\n· 本游戏理论返还率约 95%，属娱乐性质，理性游戏。',
-  },
-]
+// 玩法说明文案已切至 ./markets-ui/speedgridRules（RULES import 回用，原页/多桌共享）。
 const ROAD_CAP = 120
 const SEED_CHAMP = 17                   // 种子上局冠军（真开奖逐期顶掉）
 
-// 4 队涂装（色值全部 tokens 现组）：蓝=DERBY.home / 红=DERBY.away /
-// 金=COLORS.amberDeep / 黑=ROULETTE.black；每队 6 车按号段分组
-const TEAMS = [
-  { name: '蓝队', range: '1-6', c: DERBY.home },
-  { name: '红队', range: '7-12', c: DERBY.away },
-  { name: '金队', range: '13-18', c: COLORS.amberDeep },
-  { name: '黑队', range: '19-24', c: ROULETTE.black },
-]
-const teamOf = n => TEAMS[Math.floor((n - 1) / 6)]
+// 4 队涂装(TEAMS/teamOf) 已切至 ./markets-ui/speedgridTeams（开奖区/盘口区同源）。
+// 珠盘路页签/判定(SG_ROAD_TABS/SG_ROAD_LABELS/sgBeadFor) 已随墙件切至 ./markets-ui/SpeedGridRoad。
 
 // 40 期假珠盘：存整局冠军车号(1-24，旧→新；真开奖逐期顶掉)，多视角一律从整值派生
 const SEED_ROAD = [
@@ -79,14 +54,6 @@ const SEED_ROAD = [
   2, 23, 12, 1, 17, 9, 14, 20, 15, 6,
   5, 18, 11, 22, 8, 3, 19, 10, 16, 7,
 ]
-// 珠盘路多视角（B 型：存整值 champ，判定一律走引擎 MARKETS/RED 常量，禁手写第二份表）
-const SG_ROAD_TABS = ['BS', 'OE', 'RB']
-const SG_ROAD_LABELS = { BS: '大小', OE: '单双', RB: '红黑' }
-function sgBeadFor(tab, n) {
-  if (tab === 'OE') return MARKETS.odd.hit(n) ? { t: '单', c: DERBY.away } : { t: '双', c: DERBY.home }
-  if (tab === 'RB') return MARKETS.red.hit(n) ? { t: '红', c: DERBY.away } : { t: '黑', c: ROULETTE.black }
-  return MARKETS.big.hit(n) ? { t: '大', c: DERBY.away } : { t: '小', c: DERBY.home }   // BS 大小
-}
 
 
 export default function SpeedGrid({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
@@ -265,56 +232,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   const cur = animChamp
   const shownChamp = settled && cur ? cur : lastChamp
 
-  // ---- 样式件（选中=金框；命中=绿框绿晕）----
-  const cellBase = (key, bg) => {
-    const sel = picks.has(key)
-    const hit = result?.hits?.has(key)
-    const staked = betsPlaced.has(key)
-    return {
-      flex: 1, minWidth: 0,
-      borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
-      background: bg,
-      border: `1.5px solid ${hit ? DERBY.sel : sel || staked ? DERBY.gold : 'rgba(255,255,255,0.16)'}`,
-      boxShadow: hit
-        ? '0 0 12px rgba(53,208,127,0.6)'
-        : sel ? '0 0 10px rgba(255,213,79,0.45)' : 'inset 0 1px 0 rgba(255,255,255,0.08)',
-      opacity: betting || hit || staked ? 1 : 0.75,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-      transition: 'filter 0.12s, border-color 0.12s, box-shadow 0.15s',
-      boxSizing: 'border-box', position: 'relative',
-    }
-  }
-  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
-  const secHead = { color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
-  const secBox = {
-    flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
-    background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
-    boxSizing: 'border-box',
-  }
-  const stakeChip = key => betsPlaced.has(key) && (
-    <span style={{
-      position: 'absolute', top: 2, right: 3,
-      padding: '1px 5px', borderRadius: RADIUS.pill,
-      background: DERBY.sel, color: '#083a1b',
-      fontSize: 8, fontWeight: 900,
-    }}>${betsPlaced.get(key)}</span>
-  )
-  // 单行键（名称左/区间中/赔率右，照 Line Up 定案行式）
-  const rowCell = (key, name, range, odds, bg = DERBY.grey) => (
-    <button key={key} type="button" className="sgCell" data-key={key} disabled={!betting} onClick={() => toggleSel(key)}
-      style={{
-        ...cellBase(key, bg),
-        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-        padding: isMobile ? '6px 8px' : '5px 12px', gap: 6,
-      }}>
-      <span style={cellName}>{name}</span>
-      <span style={{ ...cellRange, flex: 1, textAlign: 'center' }}>{range}</span>
-      <span style={cellOdds}>{odds}</span>
-      {stakeChip(key)}
-    </button>
-  )
+  // 盘口样式件(cellBase/cellName/cellRange/cellOdds/secHead/secBox/stakeChip/rowCell)
+  // 已随盘口区切至 ./markets-ui/SpeedGridMarkets（键区单一出处）。
 
   // ---- 顶栏（共享件）----
   const connecting = !room.connected && !room.roundNo
@@ -429,111 +348,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     </div>
   )
 
-  // ---- ② 盘区：主盘 6 键 + 三段 3 键 + 车队 4 键 + 24 直选 ----
-  const mainBoard = (
-    <div style={secBox}>
-      <div style={secHead}>主盘 · 冠军车号</div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
-        {rowCell('big', '大', '13-24', MARKETS.big.odds.toFixed(2))}
-        {rowCell('small', '小', '1-12', MARKETS.small.odds.toFixed(2))}
-      </div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
-        {rowCell('odd', '单', '车号单', MARKETS.odd.odds.toFixed(2))}
-        {rowCell('even', '双', '车号双', MARKETS.even.odds.toFixed(2))}
-      </div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
-        {rowCell('red', '红', '12 红号', MARKETS.red.odds.toFixed(2), DERBY.away)}
-        {rowCell('black', '黑', '12 黑号', MARKETS.black.odds.toFixed(2), ROULETTE.black)}
-      </div>
-    </div>
-  )
-  const rowBoard = (
-    <div style={secBox}>
-      <div style={secHead}>发车三段 · 第1/2/3个8 ｜ 车队涂装</div>
-      <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
-        {rowCell('grid-front', '头排', '1-8', MARKETS['grid-front'].odds.toFixed(2))}
-        {rowCell('grid-mid', '中段', '9-16', MARKETS['grid-mid'].odds.toFixed(2))}
-        {rowCell('grid-rear', '尾排', '17-24', MARKETS['grid-rear'].odds.toFixed(2))}
-      </div>
-      {/* 车队行：430 宽一行四键装不下（team-3/4 键内溢出实测），移动改 2×2；桌面保持一行 */}
-      <div style={{
-        display: isMobile ? 'grid' : 'flex',
-        gridTemplateColumns: isMobile ? '1fr 1fr' : undefined,
-        gap: isMobile ? 5 : 8,
-      }}>
-        {TEAMS.map((t, i) => rowCell(`team-${i + 1}`, t.name, t.range, MARKETS[`team-${i + 1}`].odds.toFixed(2), t.c))}
-      </div>
-    </div>
-  )
-  const pickBoard = (
-    <div style={secBox}>
-      <div style={secHead}>车号直选 · 4×6</div>
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)',
-        gap: isMobile ? 4 : 6,
-      }}>
-        {Array.from({ length: 24 }, (_, i) => {
-          const n = i + 1
-          const t = teamOf(n)
-          return (
-            <button key={n} type="button" className="sgCell" data-key={`car-${n}`} disabled={!betting} onClick={() => toggleSel(`car-${n}`)}
-              style={{ ...cellBase(`car-${n}`, t.c), padding: isMobile ? '4px 0' : '5px 0' }}>
-              <span style={{ ...cellName, fontSize: isMobile ? 12 : 14, fontFamily: "'Space Grotesk', sans-serif" }}>{n}</span>
-              <span style={{ ...cellOdds, fontSize: isMobile ? 8.5 : 9.5 }}>{MARKETS[`car-${n}`].odds.toFixed(2)}</span>
-              {stakeChip(`car-${n}`)}
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-
-  // ---- ③ 珠盘路（B 型多视角：存整值 champ → roadTab 派生 大小/单双/红黑；手机桌面共用 roadTab）----
-  const ROAD_COLS = 20
-  const roadBead = isMobile ? 18 : 14
-  const roadInts = road.slice(-ROAD_CAP)
-  const beads = roadInts.map(n => sgBeadFor(roadTab, n))
-  const beadRoad = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '0 12px 8px' : '0 18px 8px',
-    }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-        {SG_ROAD_TABS.map(t => (
-          <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
-            flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 12px', borderRadius: RADIUS.pill,
-            background: roadTab === t ? DERBY.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : DERBY.dim,
-            border: `1px solid ${roadTab === t ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
-            fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
-          }}>{SG_ROAD_LABELS[t]}</button>
-        ))}
-      </div>
-      <div style={{
-        overflowX: 'auto', borderRadius: 10,
-        background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
-      }}>
-        <div style={{
-          display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: `repeat(6, ${roadBead}px)`, gridTemplateColumns: `repeat(${ROAD_COLS}, ${roadBead}px)`,
-          gap: 2, width: 'max-content',
-        }}>
-          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const b = beads[i]
-            return (
-              <span key={i} style={{
-                width: roadBead, height: roadBead, borderRadius: '50%',
-                background: b ? b.c : 'rgba(255,255,255,0.05)',
-                border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: COLORS.white, fontSize: roadBead / 2, fontWeight: 900,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                boxSizing: 'border-box',
-              }}>{b ? b.t : ''}</span>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
+  // ---- ② 盘区（主盘/三段+车队/直选）：已切至 ./markets-ui/SpeedGridMarkets（键区单一出处），下方 JSX 直接组装。----
+  // ---- ③ 珠盘路：已切至 ./markets-ui/SpeedGridRoad（页签/判定单一出处），history=road 整值派生。----
 
   const gameCard = (
     <Panel style={{
@@ -559,18 +375,17 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
         gap: 4, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
-        <div style={{ display: 'flex', flexDirection: isDesk ? 'row' : 'column', gap: isDesk ? 8 : 4, alignItems: isDesk ? 'stretch' : undefined }}>
-          <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{mainBoard}</div>
-          <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{rowBoard}</div>
-        </div>
-        {pickBoard}
+        {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
+        <SpeedGridMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
+          selected={picks} hits={result?.hits} isMobile={isMobile} isDesk={isDesk} />
       </div>
 
       {/* 弹性垫片：把珠盘路推向底部贴注栏（桌面用；手机三段锁死删掉让中区真滚到底） */}
       {isDesk && <div style={{ flex: '1 0 auto' }} />}
 
-      {/* ③ 珠盘路 */}
-      {beadRoad}
+      {/* ③ 珠盘路（切件）：history=road 整值 → 组件内 roadTab 派生 大小/单双/红黑（判定走引擎） */}
+      <SpeedGridRoad history={road} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+        style={{ margin: isMobile ? '0 12px 8px' : '0 18px 8px' }} />
 
       {/* ---- ④ bottom bet band — pinned，grid 4列×2行（照 Line Up 定案）---- */}
       <div style={{

@@ -15,6 +15,11 @@ import CommitRevealFairness from '../components/CommitRevealFairness'
 import BetButton from '../components/shell/BetButton'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import HalfTimeStage from './stages/HalfTimeStage'
+import HalfTimeMarkets from './markets-ui/HalfTimeMarkets'                  // #41 单15：盘口区切件
+import { SEC_KEYS } from './markets-ui/halftimeMarketsData'                // #41 单15：段位 key 集（手机手风琴 selCount 用，单一出处）
+import HalfTimeRoad from './markets-ui/HalfTimeRoad'                        // #41 单15：珠盘路墙
+import HalfTimePodium from './markets-ui/HalfTimePodium'                    // #41 单15：上局信息条（20 球+和值）
+import { RULES } from './markets-ui/halftimeRules'                          // #41 单15：玩法说明内容（共享）
 
 // Half Time — 快乐8和值盘（足球皮）。
 // 引擎：1–80 无重复抽 20 球（保留开出顺序），和值 210–1410。
@@ -32,29 +37,7 @@ const FINALE_HOLD = 1000
 const DRAW_ANIM_MS = 10000
 const G = GAME_BY_ID['HalfTime']
 
-// 玩法说明文案（中文；盘口数字照实）
-const RULES = [
-  {
-    icon: '🎯', title: '怎么玩',
-    body: '每期从 1–80 号池中抽 20 个球，20 球号码相加得到和值（范围 210–1410）。各盘口按和值判定。开球前下注，开奖后命中的盘口按赔率赔付。',
-  },
-  {
-    icon: '📊', title: '盘口与赔率',
-    body: '· 大 / 小：以 810 为界，大[≥811] 约 1.95 倍 / 小[≤810] 约 1.9 倍。\n· 单 / 双：按和值判定，约 1.95 倍。\n· 过关：大小和单双的组合（大单 / 大双 / 小单 / 小双），约 3.8 倍。\n· 段位：按和值落在五个区间分档 —— 乌龙[≤695] / 后防[696-763] / 中场[764-855] / 前锋[856-923] / 破门[≥924]，两端约 9.25 倍、中间约 2.46 倍。\n· 半场：数落在 1–40 区间的球有多少个，超过 10 个押上半场约 2.4 倍，少于 10 个押下半场约 2.4 倍，恰好 10 个押平约 4.7 倍。',
-  },
-  {
-    icon: '🎬', title: '开奖与结算',
-    body: '20 球开出后计算和值，命中的盘口立即结算，赔付直接入余额。每期独立，上期不影响下期。',
-  },
-  {
-    icon: '🎰', title: '如何下注',
-    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
-  },
-  {
-    icon: '💡', title: '小技巧',
-    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押段位两端（乌龙 / 破门）。\n· 段位中间档（中场）覆盖最宽、最易中，赔率也最低。\n· 本游戏理论返还率约 95–96%，属娱乐性质，理性游戏。',
-  },
-]
+// 玩法说明文案已切至 ./markets-ui/halftimeRules（RULES 单一出处，原名 import 回用）。
 const ROAD_CAP = 120   // 珠盘路 6×20 滚动容量
 
 // 种子上期 + 种子历史（真开奖会逐期顶掉）
@@ -67,48 +50,8 @@ const SEED_SUMS = [
 const SEED_HALF = 'FSFDSFFSDSFSFFSDFSSFDFSFSFDSSF'.split('')
 const SEED_HISTORY = SEED_SUMS.map((sum, i) => ({ sum, half: SEED_HALF[i] }))
 
-const zoneOf = s => (s <= 695 ? 'OG' : s <= 763 ? 'DF' : s <= 855 ? 'MF' : s <= 923 ? 'AT' : 'GL')
-const ZONE_COLOR = { OG: HALFTIME.over, DF: HALFTIME.draw, MF: HALFTIME.sel, AT: HALFTIME.draw, GL: HALFTIME.over }
-
-// ---- 盘面（名称/区间展示；赔率一律读 ODDS）----
-const ROW1 = [
-  { key: 'over',  name: '大', range: '811–1410' },
-  { key: 'under', name: '小', range: '210–810' },
-  { key: 'odd',   name: '单', range: '和值为单' },
-  { key: 'even',  name: '双', range: '和值为双' },
-]
-const PARLAY = [
-  { key: 'p-oo', name: '大单' },
-  { key: 'p-oe', name: '大双' },
-  { key: 'p-uo', name: '小单' },
-  { key: 'p-ue', name: '小双' },
-]
-const ZONES = [
-  { key: 'og', name: '乌龙', range: '210–695' },
-  { key: 'df', name: '后防', range: '696–763' },
-  { key: 'mf', name: '中场', range: '764–855' },
-  { key: 'at', name: '前锋', range: '856–923' },
-  { key: 'gl', name: '破门', range: '924–1410' },
-]
-const ROW3 = [
-  { key: 'h1',   name: '上半场', range: '1-40 多' },
-  { key: 'draw', name: '平',     range: '10:10' },
-  { key: 'h2',   name: '下半场', range: '41-80 多' },
-]
-
-// 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照 Derby 先例分离）
-const ROAD_TABS = ['O/U', 'ODD/EVEN', 'PARLAY', 'ZONE', 'HALF']
-const ROAD_TAB_LABELS = { 'O/U': '大小', 'ODD/EVEN': '单双', PARLAY: '过关', ZONE: '段位', HALF: '半场' }
-function beadFor(tab, sum, half) {
-  const over = sum > 810
-  const odd = sum % 2 === 1
-  if (tab === 'O/U') return { t: over ? 'O' : 'U', c: over ? HALFTIME.over : HALFTIME.under }
-  if (tab === 'ODD/EVEN') return { t: odd ? 'O' : 'E', c: odd ? HALFTIME.over : HALFTIME.under }
-  if (tab === 'PARLAY') return { t: (over ? 'O' : 'U') + (odd ? 'O' : 'E'), c: over === odd ? HALFTIME.sel : HALFTIME.draw }
-  if (tab === 'ZONE') { const z = zoneOf(sum); return { t: z, c: ZONE_COLOR[z] } }
-  return { t: half, c: half === 'F' ? HALFTIME.over : half === 'S' ? HALFTIME.under : HALFTIME.draw }
-}
-
+// 盘面数组(ROW1/PARLAY/ZONES/ROW3) 已切至 ./markets-ui/HalfTimeMarkets；
+// 珠盘 ROAD_TABS/ROAD_TAB_LABELS/beadFor/zoneOf/ZONE_COLOR 已切至 ./markets-ui/HalfTimeRoad（判定单一出处）。
 
 export default function HalfTime({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
@@ -284,45 +227,10 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   lastBetsRef.current.forEach(s => { lastTotal = round2(lastTotal + s) })
   const repeatOk = betting && hasLast && lastTotal > 0 && (serverBalance == null || lastTotal <= serverBalance)
 
-  // ---- 样式件 ----
-  const cellBtn = (key, { compact = false } = {}) => {
-    const sel = picks.has(key)
-    const hit = (result?.hits ?? preHits)?.has(key)   // 结算后 result，动画收尾先用预亮
-    const placed = betsPlaced.has(key)
-    return {
-      flex: 1, minWidth: 0, padding: compact ? '7px 2px' : '9px 4px',
-      borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
-      background: sel ? HALFTIME.selTint : HALFTIME.grey,
-      border: `1px solid ${hit ? HALFTIME.gold : sel || placed ? HALFTIME.sel : HALFTIME.cellBorder}`,
-      boxShadow: hit
-        ? `0 0 12px ${HALFTIME.gold}`
-        : sel ? `0 0 10px ${HALFTIME.selTint}` : 'inset 0 1px 0 rgba(255,255,255,0.06)',
-      opacity: betting || hit || placed ? 1 : 0.75,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-      transition: 'filter 0.12s, background 0.12s, border-color 0.12s, box-shadow 0.15s',
-      position: 'relative',
-    }
-  }
-  const cellName = { color: HALFTIME.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: HALFTIME.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: HALFTIME.odds, fontSize: isMobile ? 11 : 13, fontWeight: 900 }
+  // cellBtn/cellName/cellRange/cellOdds/betCell 已随盘口区切至 ./markets-ui/HalfTimeMarkets（键区单一出处）。
 
-  const betCell = (m, opts) => (
-    <button key={m.key} type="button" className="htCell" disabled={!betting}
-      onClick={() => toggleSel(m.key)} style={cellBtn(m.key, opts)}>
-      <span style={cellName}>{m.name}</span>
-      {m.range && <span style={cellRange}>{m.range}</span>}
-      <span style={cellOdds}>{MARKETS[m.key].odds.toFixed(2)}</span>
-      {betsPlaced.has(m.key) && (
-        <span style={{
-          position: 'absolute', top: 3, right: 4,
-          padding: '1px 6px', borderRadius: RADIUS.pill,
-          background: HALFTIME.sel, color: '#083a1b',
-          fontSize: 8.5, fontWeight: 900,
-        }}>${betsPlaced.get(m.key)}</span>
-      )}
-    </button>
-  )
+  // 盘口区切件（视觉原样）：desktop 中区一整块（无 section），mobile 手风琴逐段（section='mX'）。
+  const marketsProps = { onPick: toggleSel, stakes: betsPlaced, disabled: !betting, selected: picks, hits: result?.hits ?? preHits, isMobile }
 
   // ---- 轮次条 ----
   const connecting = !room.connected && !room.roundNo
@@ -343,29 +251,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
     }}>{phaseChip.text}</span>
   )
-  const ballSz = isMobile ? 15 : 17
-  const subRowNode = (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', minWidth: 0, flex: '1 1 auto' }}>
-      {/* 20 球固定两行×10 对齐（grid，不随 wrap 挤乱） */}
-      <span style={{
-        display: 'grid', flex: '0 0 auto',
-        gridTemplateColumns: `repeat(10, ${ballSz}px)`, gridAutoRows: `${ballSz}px`, gap: 3,
-      }}>
-        {lastDraw.balls.map((n, i) => (
-          <span key={`${n}-${i}`} style={{
-            width: ballSz, height: ballSz, borderRadius: '50%',
-            background: n > 40 ? HALFTIME.under : HALFTIME.over, color: COLORS.white,
-            fontSize: isMobile ? 7.5 : 8.5, fontWeight: 800,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}>{n}</span>
-        ))}
-      </span>
-      <span style={{
-        marginLeft: 'auto', flex: '0 0 auto', padding: '2px 12px', borderRadius: RADIUS.pill,
-        background: HALFTIME.sel, color: '#083a1b', fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>和值 {lastDraw.sum}</span>
-    </span>
-  )
+  const subRowNode = <HalfTimePodium lastDraw={lastDraw} isMobile={isMobile} />   // 上局信息条（切件）
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} band={HALFTIME.band} venue={G.venue ?? G.displayName}
@@ -389,51 +275,10 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
     </>
   )
 
-  // ---- 珠盘路（真历史滚动，容量 6×20）----
-  const ROAD_COLS = 20
-  const roadItems = history.slice(-ROAD_CAP)
-  const beads = roadItems.map(h => beadFor(roadTab, h.sum, h.half))
+  // ---- 珠盘路（真历史滚动，容量 6×20）——切件（判定/页签单一出处）----
   const beadRoad = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '0 12px 10px' : '0 18px 12px',
-    }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
-        {ROAD_TABS.map(t => (
-          <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
-            padding: '3px 12px', borderRadius: RADIUS.pill,
-            background: roadTab === t ? HALFTIME.sel : 'rgba(0,0,0,0.35)',
-            color: roadTab === t ? '#083a1b' : HALFTIME.dim,
-            border: `1px solid ${roadTab === t ? HALFTIME.sel : 'rgba(255,255,255,0.2)'}`,
-            fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
-          }}>{ROAD_TAB_LABELS[t]}</button>
-        ))}
-      </div>
-      <div style={{
-        overflowX: 'auto', borderRadius: 10,
-        background: HALFTIME.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
-      }}>
-        <div style={{
-          display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`,
-          gap: 2, width: 'max-content',
-        }}>
-          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const b = beads[i]
-            return (
-              <span key={i} style={{
-                width: 18, height: 18, borderRadius: '50%',
-                background: b ? b.c : 'rgba(255,255,255,0.05)',
-                border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: COLORS.white, fontSize: b && b.t.length > 1 ? 6.5 : 9, fontWeight: 900,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                boxSizing: 'border-box',
-              }}>{b ? b.t : ''}</span>
-            )
-          })}
-        </div>
-      </div>
-    </div>
+    <HalfTimeRoad history={history.slice(-ROAD_CAP)} tab={roadTab} onTab={setRoadTab}
+      style={{ margin: isMobile ? '0 12px 10px' : '0 18px 12px' }} />
   )
 
   const gameCard = (
@@ -444,7 +289,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       display: 'flex', flexDirection: 'column',
       ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
     }}>
-      <style>{`.htCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
+      {/* .htCell hover / .htimeWin 脉冲样式已随盘口区切至 HalfTimeMarkets（组件内 <style> 挂） */}
 
       {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
       {topBar}
@@ -467,39 +312,8 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         gap: isMobile ? 8 : 10,
       }}>
         <WinToast toasts={toasts} />
-        {/* 行① Over/Under + Odd/Even + Parlay */}
-        <div style={{ display: 'flex', gap: isMobile ? 6 : 8, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
-          <div style={{ flex: isMobile ? '1 1 100%' : 2, display: 'flex', gap: isMobile ? 6 : 8 }}>
-            {ROW1.map(m => betCell(m))}
-          </div>
-          <div style={{ flex: isMobile ? '1 1 100%' : 2, display: 'flex', gap: isMobile ? 6 : 8 }}>
-            {PARLAY.map(m => betCell(m, { compact: true }))}
-          </div>
-        </div>
-
-        {/* 行② 球场五段 — 中场线贯穿，五格贴片 */}
-        <div style={{
-          position: 'relative', borderRadius: 12, padding: isMobile ? 6 : 8,
-          background: HALFTIME.strip, border: '1px solid rgba(255,255,255,0.1)',
-        }}>
-          <div style={{
-            position: 'absolute', left: '50%', top: 6, bottom: 6, width: 1,
-            background: 'rgba(255,255,255,0.18)', pointerEvents: 'none',
-          }} />
-          <div style={{
-            position: 'absolute', left: '50%', top: '50%', width: isMobile ? 34 : 46, height: isMobile ? 34 : 46,
-            border: '1px solid rgba(255,255,255,0.18)', borderRadius: '50%',
-            transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-          }} />
-          <div style={{ display: 'flex', gap: isMobile ? 4 : 8, position: 'relative' }}>
-            {ZONES.map(m => betCell(m))}
-          </div>
-        </div>
-
-        {/* 行③ 1st Half / Draw / 2nd Half — 与上两行同左右边界，三等分撑满 */}
-        <div style={{ display: 'flex', gap: isMobile ? 6 : 8, width: '100%' }}>
-          {ROW3.map(m => betCell(m))}
-        </div>
+        {/* 盘口区切件（行①②③ 视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
+        <HalfTimeMarkets {...marketsProps} />
       </div>
 
       {beadRoad}
@@ -563,11 +377,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
 
   // ============ 手机三段式（<1024，照德比模板）：锁顶(顶栏+单舞台) / 中滚(三盘区手风琴) / 锁底(路珠+注栏) ============
   // 折叠纯 UI（userAcc），不动下注 state；结算相位(settled)自动展开三盘区看 hit/lose 高亮，betting 恢复玩家手动态。
-  const SEC_KEYS = {
-    m1: new Set([...ROW1, ...PARLAY].map(m => m.key)),
-    m2: new Set(ZONES.map(m => m.key)),
-    m3: new Set(ROW3.map(m => m.key)),
-  }
+  // SEC_KEYS（段位 key 集）已切至 ./markets-ui/halftimeMarketsData（import 回用，单一出处）。
   const selCount = (sec) => {
     let n = 0
     new Set([...picks, ...betsPlaced.keys()]).forEach(k => { if (SEC_KEYS[sec].has(k)) n++ })
@@ -600,29 +410,17 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       </div>
     )
   }
-  const body1 = (
-    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-      <div style={{ flex: '1 1 100%', display: 'flex', gap: 6 }}>{ROW1.map(m => betCell(m))}</div>
-      <div style={{ flex: '1 1 100%', display: 'flex', gap: 6 }}>{PARLAY.map(m => betCell(m, { compact: true }))}</div>
-    </div>
-  )
-  const body2 = (
-    <div style={{ position: 'relative', padding: 2 }}>
-      <div style={{ position: 'absolute', left: '50%', top: 4, bottom: 4, width: 1, background: 'rgba(255,255,255,0.18)', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', left: '50%', top: '50%', width: 34, height: 34, border: '1px solid rgba(255,255,255,0.18)', borderRadius: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }} />
-      <div style={{ display: 'flex', gap: 4, position: 'relative' }}>{ZONES.map(m => betCell(m))}</div>
-    </div>
-  )
-  const body3 = (
-    <div style={{ display: 'flex', gap: 6, width: '100%' }}>{ROW3.map(m => betCell(m))}</div>
-  )
+  // 手风琴三段 body（切件逐段：section='mX' 渲染该段紧凑 body，视觉原样）
+  const body1 = <HalfTimeMarkets {...marketsProps} section="m1" />
+  const body2 = <HalfTimeMarkets {...marketsProps} section="m2" />
+  const body3 = <HalfTimeMarkets {...marketsProps} section="m3" />
   const mobileCard = (
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${HALFTIME.bgCenter}, ${HALFTIME.bgOuter})`,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
       display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
     }}>
-      <style>{`.htCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
+      {/* .htCell hover / .htimeWin 脉冲样式随盘口区切件内建（各 section body 挂 <style>） */}
 
       {/* ① 锁顶：GameTopBar + 单舞台（drawing/settled 才出，canvas 常驻锁顶不折叠不卸载） */}
       <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column' }}>
@@ -645,34 +443,9 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
 
       {/* ③ 锁底：路珠(5视角 pill 原样 + 珠压 2 行) + 注栏 */}
       <div style={{ flex: '0 0 auto' }}>
-        <div style={{ padding: '4px 12px 0', position: 'relative', zIndex: 1 }}>
-          <div style={{ display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none', marginBottom: 3 }}>
-            {ROAD_TABS.map(t => (
-              <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
-                flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: RADIUS.pill,
-                background: roadTab === t ? HALFTIME.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : HALFTIME.dim,
-                border: `1px solid ${roadTab === t ? HALFTIME.sel : 'rgba(255,255,255,0.2)'}`,
-                fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
-              }}>{ROAD_TAB_LABELS[t]}</button>
-            ))}
-          </div>
-          <div style={{ overflowX: 'auto', borderRadius: 8, background: HALFTIME.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
-            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
-              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
-                const b = beads[i]
-                return (
-                  <span key={i} style={{
-                    width: 15, height: 15, borderRadius: '50%',
-                    background: b ? b.c : 'rgba(255,255,255,0.05)',
-                    border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                    color: COLORS.white, fontSize: b && b.t.length > 1 ? 6 : 8, fontWeight: 900,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
-                  }}>{b ? b.t : ''}</span>
-                )
-              })}
-            </div>
-          </div>
-        </div>
+        {/* 珠盘路切件（紧凑变体：页签横滚 + 2 行 15px 珠矩阵，视觉原样） */}
+        <HalfTimeRoad history={history.slice(-ROAD_CAP)} tab={roadTab} onTab={setRoadTab} compact
+          style={{ padding: '4px 12px 0' }} />
         <div style={{ padding: '6px 12px', background: HALFTIME.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{
             display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
