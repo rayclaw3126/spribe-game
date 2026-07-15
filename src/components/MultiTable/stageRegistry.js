@@ -8,6 +8,7 @@ import GoldenBootStage from '../../games/stages/GoldenBootStage'
 import WuXingStage from '../../games/stages/WuXingStage'
 import LineUpStage from '../../games/stages/LineUpStage'
 import DerbyDayStage from '../../games/stages/DerbyDayStage'
+import DominoDuelStage from '../../games/stages/DominoDuelStage'
 
 export const STAGE_BY_ID = {
   SpeedGrid: SpeedGridStage,
@@ -18,4 +19,5 @@ export const STAGE_BY_ID = {
   WuXing: WuXingStage,
   LineUp: LineUpStage,
   DerbyDay: DerbyDayStage,
+  DominoDuel: DominoDuelStage,
 }

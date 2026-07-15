@@ -17,6 +17,8 @@ import { useRoundRoom } from '../hooks/useRoundRoom'
 import DominoDuelMarkets from './markets-ui/DominoDuelMarkets'   // #41 单16：盘口区切件（section= 逐段接入手风琴，视觉原样）
 import DominoDuelRoad from './markets-ui/DominoDuelRoad'         // #41 单16：珠盘路墙（页签/判定单一出处，走引擎）
 import { RULES } from './markets-ui/dominoduelRules'            // #41 单16：玩法说明内容（共享）
+// #44 单S1：翻牌视觉原子（DominoTile/时间轴/keyframes）单一出处切至多桌舞台件，原页 import 回引（等价搬家）。
+import { DominoTile, FLIP_DELAY, FLIP_DUR, FLIP_END, DD_KEYFRAMES } from './stages/DominoDuelStage'
 
 // Domino Duel — 骨牌版主客对决（闲庄→主蓝客红），第 21 卡。
 // X2：真引擎 + 真赔率 + 真算钱（抄 Derby Day 结构）。翻牌动画留 X3。
@@ -33,10 +35,7 @@ export { rollTiles, deriveRound, ODDS, MARKETS, hitsOf, pushesOf }
 // ---------- 开奖动画时长（#43 单3：收到 drawn → 翻牌演出 → 结算显示 + 回写余额）----------
 // 须 < 服务器 idle(13s)。翻牌 ~3.5s（FLIP_END+揭比分）+ 悬念保留 → 6s 后翻 settled（揭胜负+彩带+余额落定才跳）。
 const DRAW_ANIM_MS = 6000
-// 翻牌错峰时间轴（秒）：主1→客1→主2→客2，第4张（决胜）慢镜
-const FLIP_DELAY = [0, 0.55, 1.1, 1.75]
-const FLIP_DUR = [0.55, 0.55, 0.55, 1.4]
-const FLIP_END = 1.75 + 1.4   // 末张翻完 ≈ 3.15s
+// 翻牌错峰时间轴 FLIP_DELAY/FLIP_DUR/FLIP_END 已切至 ./stages/DominoDuelStage（单一出处，import 回引）。
 const ROAD_CAP = 120
 
 const G = GAME_BY_ID['DominoDuel']
@@ -52,63 +51,8 @@ const SEED_ROAD = [
 ]
 // 珠盘路多视角(DD_ROAD_TABS/DD_ROAD_LABELS/ddBeadFor) 已随墙件切至 ./markets-ui/DominoDuelRoad（页签/判定单一出处，走引擎）。
 
-// 多米诺点位（0-6，3×3 宫格索引；照 DieFace 先例）
-const DOMPIPS = {
-  0: [], 1: [4], 2: [0, 8], 3: [0, 4, 8],
-  4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
-}
-
+// 多米诺点位表 DOMPIPS + 单张 DominoTile 已切至 ./stages/DominoDuelStage（翻牌视觉原子单一出处，import 回引）。
 // 盘面玩法元数据(MAIN/totalRow/GOALS/CORRECT) 已随盘口区切至 ./markets-ui/DominoDuelMarkets（键区单一出处）。
-
-// 单张多米诺（竖向：上半 / 分隔线 / 下半，各半画 pip 点）
-// flip：drawing 相位 3D 翻牌（背面队色 → 正面点数），delay/dur 错峰 + 决胜张慢镜
-function DominoTile({ a, b, size = 34, flip = false, delay = 0, dur = 0.55, backColor = DERBY.home }) {
-  const half = (v, key) => (
-    <div key={key} style={{
-      width: size, height: size, position: 'relative',
-      display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(3, 1fr)',
-      padding: size * 0.12, boxSizing: 'border-box',
-    }}>
-      {Array.from({ length: 9 }, (_, i) => (
-        <span key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {DOMPIPS[v].includes(i) && (
-            <span style={{ width: size * 0.16, height: size * 0.16, borderRadius: '50%', background: '#10131a' }} />
-          )}
-        </span>
-      ))}
-    </div>
-  )
-  const face = (
-    <div style={{
-      display: 'flex', flexDirection: 'column', width: size, height: size * 2 + 2,
-      background: '#f4f6fb', borderRadius: size * 0.16,
-      border: '1px solid rgba(0,0,0,0.35)', boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
-      overflow: 'hidden', boxSizing: 'border-box',
-    }}>
-      {half(a, 'a')}
-      <div style={{ height: 2, background: 'rgba(0,0,0,0.35)' }} />
-      {half(b, 'b')}
-    </div>
-  )
-  if (!flip) return face
-  return (
-    <div style={{ perspective: 700, width: size, height: size * 2 + 2 }}>
-      <div className="ddFlipInner" style={{
-        position: 'relative', width: '100%', height: '100%', transformStyle: 'preserve-3d',
-        animation: `ddFlip ${dur}s cubic-bezier(0.4,0.75,0.3,1) ${delay}s both`,
-      }}>
-        <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden' }}>{face}</div>
-        <div style={{
-          position: 'absolute', inset: 0, backfaceVisibility: 'hidden', transform: 'rotateY(180deg)',
-          borderRadius: size * 0.16, border: '1px solid rgba(0,0,0,0.4)', boxSizing: 'border-box',
-          background: `linear-gradient(135deg, ${backColor}, rgba(0,0,0,0.45))`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: 'rgba(255,255,255,0.85)', fontSize: size * 0.55, fontWeight: 900,
-        }}>⬦</div>
-      </div>
-    </div>
-  )
-}
 
 export default function DominoDuel({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
@@ -525,16 +469,8 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       display: 'flex', flexDirection: 'column',
       ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
     }}>
-      {/* .ddCell hover 样式已随盘口区切至 DominoDuelMarkets（组件内 <style> 挂）；下留对决区(舞台)动画 keyframes */}
-      <style>{`
-        @keyframes ddFlip { from { transform: rotateY(180deg); } to { transform: rotateY(0deg); } }
-        @keyframes ddScoreIn { 0% { opacity: 0; transform: scale(0.5); } 60% { opacity: 1; transform: scale(1.18); } 100% { opacity: 1; transform: scale(1); } }
-        @keyframes ddConfFall {
-          0% { transform: translateY(-12px) rotate(0deg); opacity: 0; }
-          12% { opacity: 1; }
-          100% { transform: translateY(230px) rotate(var(--rot)); opacity: 0; }
-        }
-      `}</style>
+      {/* .ddCell hover 样式已随盘口区切至 DominoDuelMarkets（组件内 <style> 挂）；对决区(舞台)动画 keyframes 单一出处 DD_KEYFRAMES */}
+      <style>{DD_KEYFRAMES}</style>
       {topBar}
       {duelZone}
       <div style={{
@@ -659,12 +595,8 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
       display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
     }}>
-      {/* .ddCell hover 样式已随盘口区切至 DominoDuelMarkets（组件内 <style> 挂）；下留对决区(舞台)动画 keyframes */}
-      <style>{`
-        @keyframes ddFlip { from { transform: rotateY(180deg); } to { transform: rotateY(0deg); } }
-        @keyframes ddScoreIn { 0% { opacity: 0; transform: scale(0.5); } 60% { opacity: 1; transform: scale(1.18); } 100% { opacity: 1; transform: scale(1); } }
-        @keyframes ddConfFall { 0% { transform: translateY(-12px) rotate(0deg); opacity: 0; } 12% { opacity: 1; } 100% { transform: translateY(230px) rotate(var(--rot)); opacity: 0; } }
-      `}</style>
+      {/* .ddCell hover 样式已随盘口区切至 DominoDuelMarkets（组件内 <style> 挂）；对决区(舞台)动画 keyframes 单一出处 DD_KEYFRAMES */}
+      <style>{DD_KEYFRAMES}</style>
 
       {/* ① 锁顶：GameTopBar + 对决区（DOM 常驻，禁折叠禁卸载） */}
       <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column' }}>
