@@ -1,4 +1,4 @@
-import { MULTI_DARK as M } from '../shell/tokens'
+import { MULTI_DARK as M, COLORS } from '../shell/tokens'
 import { RAIL_GROUPS, FAV_IDS, nameOf, nameOfBackend } from './mockData'
 
 // 今日大奖榜块（只读 /player/bigwins.top）：Top5 行 名/游戏/金额；空态由父级 top.length 决定不挂载。
@@ -10,7 +10,7 @@ function TopBoard({ top }) {
       {top.map((it, i) => (
         <div key={i} style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px 5px 12px',
-          borderRadius: 8, margin: '1px 0', background: it.mine ? M.cardHi : 'transparent',
+          borderRadius: 8, margin: '1px 0', background: it.mine ? COLORS.surface : 'transparent',
         }}>
           <span style={{ flex: '0 0 auto', width: 16, color: i < 3 ? M.amount : M.txtMute, fontSize: 11, fontWeight: 900, textAlign: 'center' }}>{i + 1}</span>
           <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
@@ -53,7 +53,7 @@ function RailRow({ id, room, active, star, onSelect }) {
   return (
     <button type="button" onClick={() => onSelect(id)} style={{
       position: 'relative', width: '100%', display: 'flex', alignItems: 'center', gap: 7,
-      background: active ? M.cardHi : 'transparent', border: 'none',
+      background: active ? COLORS.surface : 'transparent', border: 'none',
       borderRadius: 8, padding: '8px 8px 8px 12px', margin: '1px 0', cursor: 'pointer', textAlign: 'left',
     }}>
       {active && <span style={{ position: 'absolute', left: 0, top: 7, bottom: 7, width: 2, borderRadius: 2, background: M.accent }} />}
@@ -77,7 +77,7 @@ export default function GameRail({ tables, onSelect, rooms, top }) {
   return (
     <aside style={{
       flex: '1 1 auto', width: '100%', minHeight: 0,
-      background: M.panel, border: `1px solid ${M.line}`, borderRadius: 12, padding: 6, overflowY: 'auto',
+      background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 6, overflowY: 'auto',
     }}>
       {/* 收藏组空则整组不渲染（#44 接大厅真收藏时恢复标题+行） */}
       {FAV_IDS.length > 0 && (

@@ -302,8 +302,41 @@ function RaceStage({ race, height, shakeRef, sfx, onFinale }) {
   return <canvas ref={canvasRef} style={{ width: '100%', height, display: 'block' }} aria-hidden />
 }
 
-// 待命态（betting/locked，多桌用；GoldenBoot 原页 betting 走静态起跑线块）
-function StandbyBoard({ height = 128 }) { return <div style={{ width: '100%', height }} aria-hidden /> }
+// 待命态（betting/locked，多桌用）：赛车停起跑线 + 红绿灯红灯待发。
+// 单14.6 item3：原「空 div」→ 补齐赛道+红绿灯待命（口径照 GoldenBoot 原页 betting 静态块，
+// 多桌投注中即显同原版；原页 betting 走自身内联块不吃本件，视觉不受影响）。
+function StandbyBoard({ height = 128 }) {
+  return (
+    <div style={{
+      width: '100%', height, position: 'relative', overflow: 'hidden', boxSizing: 'border-box',
+      background: 'linear-gradient(180deg, #252932, #15181f)',
+    }} aria-hidden>
+      {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+        <div key={n} style={{
+          position: 'absolute', left: 0, right: 0, top: `${(n - 1) * 10}%`, height: '10%',
+          borderBottom: n < 10 ? '1px dashed rgba(255,255,255,0.15)' : 'none',
+          display: 'flex', alignItems: 'center', gap: 5, paddingLeft: 10,
+        }}>
+          <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 900, width: 9, textAlign: 'right' }}>{n}</span>
+          <img src={CAR_SRC[n]} alt="" style={{ height: `${height / 10 * 0.82}px`, width: 'auto', display: 'block' }} />
+        </div>
+      ))}
+      {/* 起跑线 */}
+      <div style={{ position: 'absolute', top: 0, bottom: 0, left: 32, width: 2, background: 'rgba(255,255,255,0.45)' }} />
+      {/* 红绿灯（红灯待发，居中）*/}
+      <div style={{
+        position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none',
+      }}>
+        <img src={trafficLightImg} alt="" style={{
+          height: height * 0.58, width: 'auto', display: 'block',
+          filter: 'drop-shadow(0 0 10px rgba(255,60,40,0.75))',
+        }} />
+        <span style={{ color: GOLDENBOOT.dim, fontSize: 9, fontWeight: 900, letterSpacing: 1 }}>起跑线待命</span>
+      </div>
+    </div>
+  )
+}
 
 export default function GoldenBootStage({ phase, roundNo, drawResult, width = '100%', height = 128, muted, shakeRef, onFinale }) {
   const audioRef = useRef({ ctx: null, muted: false })

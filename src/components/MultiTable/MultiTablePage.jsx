@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MULTI_DARK as M } from '../shell/tokens'
+import { MULTI_DARK as M, KENO } from '../shell/tokens'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { usePlayerApi } from '../../lib/playerApi'
 import { WinFxHost, tierOf } from '../shell/WinFx'
@@ -254,27 +254,27 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   if (!isDesk) {
     return (
       <div style={{
-        minHeight: '100vh', background: M.bg, color: M.txt,
+        minHeight: '100vh', background: KENO.bgOuter, color: M.txt,
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, padding: 24,
       }}>
         <div style={{ fontSize: 15, fontWeight: 700, textAlign: 'center', lineHeight: 1.6 }}>多桌专区请使用电脑访问</div>
         <button type="button" onClick={onBack} style={{
-          padding: '10px 22px', borderRadius: 999, cursor: 'pointer', border: `1px solid ${M.line}`,
-          background: M.card, color: M.txtDim, fontSize: 14, fontWeight: 800,
+          padding: '10px 22px', borderRadius: 999, cursor: 'pointer', border: `1px solid ${KENO.band}`,
+          background: KENO.ctrl, color: M.txtDim, fontSize: 14, fontWeight: 800,
         }}>返回大厅</button>
       </div>
     )
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: M.bg }}>
+    <div style={{ minHeight: '100vh', background: KENO.bgOuter }}>
       {/* 中奖庆祝三档宿主（共享 canvas + WinToast 并入 + 全屏彩带）+ 瞬时 toast 叠层 */}
       <WinFxHost ref={winFxRef} />
       {toasts.length > 0 && (
         <div style={{ position: 'fixed', top: 56, left: 0, right: 0, zIndex: 60, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
           {toasts.map(t => (
             <div key={t.id} style={{
-              background: M.panel, border: `1px solid ${M.line}`, color: M.txt,
+              background: KENO.ctrl, border: `1px solid ${KENO.band}`, color: M.txt,
               borderRadius: 999, padding: '6px 16px', fontSize: 12, fontWeight: 800, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
             }}>{t.text}</div>
           ))}
@@ -284,7 +284,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
       {/* 顶栏 */}
       <header style={{
         position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: 16,
-        padding: '10px 18px', borderBottom: `1px solid ${M.line}`, background: M.panel,
+        padding: '10px 18px', borderBottom: `1px solid ${KENO.band}`, background: KENO.band,
       }}>
         <button type="button" onClick={onBack} style={{
           display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer',
@@ -313,7 +313,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
         </div>
 
         {/* 模式开关：注单(默认) / 快投 */}
-        <div style={{ display: 'flex', border: `1px solid ${M.line}`, borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', border: `1px solid ${KENO.band}`, borderRadius: 999, overflow: 'hidden' }}>
           {[['slip', '注单'], ['quick', '快投']].map(([mk, ml]) => {
             const on = mode === mk
             return (
@@ -328,7 +328,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
         <button type="button" onClick={toggleSfxMuted} aria-label={sfxMuted ? '取消静音' : '静音'} title={sfxMuted ? '取消静音' : '静音'} style={{
           marginLeft: 'auto', flex: '0 0 auto', width: 30, height: 30, borderRadius: 999, cursor: 'pointer',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          background: M.card, border: `1px solid ${sfxMuted ? M.line : M.betting}`, color: sfxMuted ? M.txtMute : M.betting,
+          background: KENO.ctrl, border: `1px solid ${sfxMuted ? KENO.band : M.betting}`, color: sfxMuted ? M.txtMute : M.betting,
         }}>
           <SpeakerIcon on={!sfxMuted} />
         </button>
@@ -336,7 +336,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
         <button type="button" onClick={() => onOpenBill?.()} aria-label="我的账单" title="我的账单" style={{
           flex: '0 0 auto', width: 30, height: 30, borderRadius: 999, cursor: 'pointer',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          background: M.card, border: `1px solid ${M.line}`, color: M.txtDim, fontSize: 15,
+          background: KENO.ctrl, border: `1px solid ${KENO.band}`, color: M.txtDim, fontSize: 15,
         }}>🧾</button>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: M.txtDim, fontSize: 12, fontWeight: 700 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: M.betting }} />
@@ -369,7 +369,7 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
             <div style={{
               gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               gap: 10, minHeight: 320, color: M.txtMute,
-              background: M.card, border: `1px dashed ${M.line}`, borderRadius: 12,
+              background: KENO.bgCenter, border: `1px dashed ${KENO.band}`, borderRadius: 12,
             }}>
               <div style={{ fontSize: 15, fontWeight: 800, color: M.txtDim }}>桌面已清空</div>
               <div style={{ fontSize: 12 }}>从左栏点选游戏上桌</div>

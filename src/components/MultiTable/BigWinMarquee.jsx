@@ -31,13 +31,19 @@ export default function BigWinMarquee({ items }) {
   const dur = Math.max(18, items.length * 4)   // ~4s/条，最短 18s
   return (
     <div style={{
-      overflow: 'hidden', whiteSpace: 'nowrap', background: M.panel,
+      display: 'flex', alignItems: 'center', background: M.panel,
       borderBottom: `1px solid ${M.line}`, padding: '6px 0',
     }}>
       <style>{`@keyframes bwMarquee { from { transform: translateX(0) } to { transform: translateX(-50%) } }`}</style>
-      <div style={{ display: 'inline-flex', animation: `bwMarquee ${dur}s linear infinite`, willChange: 'transform' }}>
-        <MarqueeRow items={items} tag="a" ariaHidden={false} />
-        <MarqueeRow items={items} tag="b" ariaHidden={true} />
+      {/* 条头 ⚽ 标（固定不滚） */}
+      <span style={{ flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 12px', color: M.accent, fontSize: 12, fontWeight: 900, borderRight: `1px solid ${M.line}`, whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 15 }}>⚽</span> 大奖播报
+      </span>
+      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+        <div style={{ display: 'inline-flex', animation: `bwMarquee ${dur}s linear infinite`, willChange: 'transform' }}>
+          <MarqueeRow items={items} tag="a" ariaHidden={false} />
+          <MarqueeRow items={items} tag="b" ariaHidden={true} />
+        </div>
       </div>
     </div>
   )

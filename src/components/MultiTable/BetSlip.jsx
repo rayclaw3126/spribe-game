@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { MULTI_DARK as M } from '../shell/tokens'
+import { MULTI_DARK as M, COLORS } from '../shell/tokens'
 import Chip from '../shell/Chip'
 
 // 右栏 190px 注单：顶「本轮注单·N」/ 注单行（游戏·盘口 / @赔率 / 可点改金额 / ×撤 / 失败标红）
@@ -21,7 +21,7 @@ export default function BetSlip({ items, mode, quickLog = [], confirming, onRemo
       <aside style={{
         flex: '0 0 auto', width: '100%', maxHeight: '50%',
         display: 'flex', flexDirection: 'column',
-        background: M.panel, border: `1px solid ${M.locked}`, borderRadius: 12, overflow: 'hidden',
+        background: COLORS.panel, border: `1px solid ${M.locked}`, borderRadius: 12, overflow: 'hidden',
       }}>
         <button type="button" onClick={() => setQuickOpen(o => !o)} style={{
           flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
@@ -33,11 +33,11 @@ export default function BetSlip({ items, mode, quickLog = [], confirming, onRemo
           <span style={{ color: M.txtMute, fontSize: 11, fontWeight: 800 }}>{quickLog.length} {quickOpen ? '▾' : '▸'}</span>
         </button>
         {quickOpen && (
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 8px 8px', borderTop: `1px solid ${M.line}` }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 8px 8px', borderTop: `1px solid ${COLORS.border}` }}>
             {quickLog.length === 0 ? (
               <div style={{ color: M.txtMute, fontSize: 11, textAlign: 'center', padding: '14px 6px' }}>点桌卡盘口即时下注</div>
             ) : quickLog.map(it => (
-              <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 4px', borderBottom: `1px solid ${M.line}` }}>
+              <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 4px', borderBottom: `1px solid ${COLORS.border}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: M.txt, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.gameName}·{it.market}</div>
                   <div style={{ color: M.txtMute, fontSize: 10, marginTop: 1 }}>@{it.odds} · 已发</div>
@@ -56,12 +56,12 @@ export default function BetSlip({ items, mode, quickLog = [], confirming, onRemo
     <aside style={{
       flex: '0 0 auto', width: '100%', maxHeight: '50%',
       display: 'flex', flexDirection: 'column',
-      background: M.panel, border: `1px solid ${M.line}`, borderRadius: 12, overflow: 'hidden',
+      background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 12, overflow: 'hidden',
     }}>
       {/* 顶 */}
       <div style={{
         flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 12px', borderBottom: `1px solid ${M.line}`,
+        padding: '10px 12px', borderBottom: `1px solid ${COLORS.border}`,
       }}>
         <span style={{ color: M.txt, fontSize: 13, fontWeight: 800 }}>本轮注单</span>
         <span style={{ background: M.bettingTint, color: M.accent, borderRadius: 999, padding: '1px 8px', fontSize: 11, fontWeight: 900 }}>{items.length}</span>
@@ -77,7 +77,7 @@ export default function BetSlip({ items, mode, quickLog = [], confirming, onRemo
         ) : items.map(it => (
           <div key={it.id} style={{
             display: 'flex', alignItems: 'center', gap: 6,
-            padding: '7px 4px 7px 6px', borderBottom: `1px solid ${M.line}`,
+            padding: '7px 4px 7px 6px', borderBottom: `1px solid ${COLORS.border}`,
             borderLeft: it.error ? `3px solid ${M.danger}` : '3px solid transparent',
           }}>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -96,7 +96,7 @@ export default function BetSlip({ items, mode, quickLog = [], confirming, onRemo
                 onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditId(null) }}
                 style={{
                   flex: '0 0 auto', width: 46, textAlign: 'right',
-                  background: M.card, border: `1px solid ${M.amount}`, borderRadius: 5, color: M.amount,
+                  background: COLORS.surface, border: `1px solid ${M.amount}`, borderRadius: 5, color: M.amount,
                   fontSize: 12, fontWeight: 800, padding: '2px 4px',
                 }} />
             ) : (
@@ -110,7 +110,7 @@ export default function BetSlip({ items, mode, quickLog = [], confirming, onRemo
             )}
             <button type="button" onClick={() => onRemove(it.id)} aria-label="撤销" style={{
               flex: '0 0 auto', width: 18, height: 18, borderRadius: 5, cursor: 'pointer',
-              background: M.cardHi, border: `1px solid ${M.line}`, color: M.txtMute, fontSize: 11, fontWeight: 900,
+              background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: M.txtMute, fontSize: 11, fontWeight: 900,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>×</button>
           </div>
@@ -118,7 +118,7 @@ export default function BetSlip({ items, mode, quickLog = [], confirming, onRemo
       </div>
 
       {/* 底部合计 + 确认 */}
-      <div style={{ flex: '0 0 auto', padding: '10px 12px', borderTop: `1px solid ${M.line}` }}>
+      <div style={{ flex: '0 0 auto', padding: '10px 12px', borderTop: `1px solid ${COLORS.border}` }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <span style={{ color: M.txtDim, fontSize: 12, fontWeight: 700 }}>合计</span>
           <span style={{ color: M.amount, fontSize: 16, fontWeight: 900, fontVariantNumeric: 'tabular-nums' }}>${total}</span>

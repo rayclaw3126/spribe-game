@@ -15,20 +15,12 @@ import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import GoldenBootStage from './stages/GoldenBootStage'
-import car01 from '../assets/goldenboot/car_01.png'
-import car02 from '../assets/goldenboot/car_02.png'
-import car03 from '../assets/goldenboot/car_03.png'
-import car04 from '../assets/goldenboot/car_04.png'
-import car05 from '../assets/goldenboot/car_05.png'
-import car06 from '../assets/goldenboot/car_06.png'
-import car07 from '../assets/goldenboot/car_07.png'
-import car08 from '../assets/goldenboot/car_08.png'
-import car09 from '../assets/goldenboot/car_09.png'
-import car10 from '../assets/goldenboot/car_10.png'
+import GoldenBootMarkets, { CarImgBead } from './markets-ui/GoldenBootMarkets'   // #41 单14.4：盘口区切件（CarImgBead 随件，subRow 复用）
+import GoldenBootPodium from './markets-ui/GoldenBootPodium'   // #41 单14.5：上局前三名信息条
+import GoldenBootRoad from './markets-ui/GoldenBootRoad'       // #41 单14.5：珠盘路墙
+import { RULES } from './markets-ui/goldenbootRules'           // #41 单14.5：玩法说明内容（共享）
+import { CAR_SRC } from './markets-ui/carAssets'   // 舞台赛道渲染用（single source）
 import trafficLightImg from '../assets/goldenboot/traffic_light.png'
-
-// 赛车图按号索引（car_0X = 车号 X）
-const CAR_SRC = { 1: car01, 2: car02, 3: car03, 4: car04, 5: car05, 6: car06, 7: car07, 8: car08, 9: car09, 10: car10 }
 
 // Golden Boot — 10 辆赛车冲刺排名彩（PK10 赛车皮）。
 // 引擎：1–10 全排列（Fisher-Yates），index = 名次；冠亚和 3–19。
@@ -45,29 +37,6 @@ export { drawRace, deriveRace, ODDS, MARKETS, hitsOf }
 const DRAW_ANIM_MS = 8000
 const G = GAME_BY_ID['GoldenBoot']
 
-// 玩法说明文案（中文；盘口数字照实）
-const RULES = [
-  {
-    icon: '🎯', title: '怎么玩',
-    body: '每期 10 辆车冲刺赛跑，决出 1–10 名。你可以押冠军是哪辆车、冠亚军点数之和、以及和值的大小单双。开赛前下注，冲线后命中的盘口按赔率赔付。',
-  },
-  {
-    icon: '📊', title: '盘口与赔率',
-    body: '· 冠军直选：押中冠军是哪辆车（1–10 号），约 9.60 倍。\n· 冠亚和：押冠军与亚军的车号之和（3–19），赔率随难度约 8.6 倍到 42.98 倍不等，越极端的和值赔越高。\n· 大 / 小：冠亚和以 11/12 为界，大[12-19] 约 2.15 倍 / 小[3-11] 约 1.72 倍。\n· 单 / 双：按冠亚和判定，单约 1.72 倍 / 双约 2.15 倍。',
-  },
-  {
-    icon: '🎬', title: '开奖与结算',
-    body: '10 辆车冲线决出名次，取冠军和冠亚军之和结算，命中的盘口立即结算，赔付直接入余额。每期独立，上期不影响下期。',
-  },
-  {
-    icon: '🎰', title: '如何下注',
-    body: '点筹码设每注金额，点盘口格下注，可同时押多个盘口。点「↻ 重复」按上一局注单原额重下。确认后一次扣款。',
-  },
-  {
-    icon: '💡', title: '小技巧',
-    body: '· 想稳押大小单双，中奖率约一半；想搏大赔押冠军直选或冠亚和两端。\n· 冠亚和押中间值（10、11、12）比押两端（3、19）容易得多。\n· 本游戏理论返还率约 95.5–96%，属娱乐性质，理性游戏。',
-  },
-]
 const ROAD_CAP = 120
 
 // 种子上期 + 种子历史（真开奖逐期顶掉）
@@ -76,33 +45,11 @@ const SEED_WINNERS = [3, 7, 1, 9, 2, 10, 5, 8, 4, 6, 2, 8, 1, 4, 10, 6, 3, 9, 7,
 const SEED_SUMS = [10, 9, 4, 13, 12, 16, 8, 14, 7, 11, 5, 15, 3, 9, 17, 10, 6, 12, 19, 8, 11, 7, 13, 5, 16, 9, 4, 18, 12, 10]
 const SEED_HISTORY = SEED_WINNERS.map((w, i) => ({ winner: w, sum: SEED_SUMS[i] }))
 
-const ROAD_TABS = ['WINNER', 'SUM']
-// 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照先例分离）
-const ROAD_TAB_LABELS = { WINNER: '冠军', SUM: '冠亚和' }
-function beadFor(tab, h) {
-  if (tab === 'WINNER') return { t: String(h.winner), c: h.winner <= 5 ? GOLDENBOOT.dragon : GOLDENBOOT.tiger }
-  return h.sum >= 12 ? { t: 'B', c: GOLDENBOOT.dragon } : { t: 'S', c: GOLDENBOOT.tiger }
-}
+// ROAD_TABS/ROAD_TAB_LABELS/beadFor 已随珠盘路切至 ./markets-ui/GoldenBootRoad（页签/判定单一出处）。
 
 // 金靴球衣珠 — 迷你球衣轮廓 + 号码（金渐变，共享 gold/fire/goldDeep）
 
-// 冠军直选盘口图标：Codex 真车图（car_0X，跟舞台同款）+ 左上角号码 badge
-function CarImgBead({ num, size = 30 }) {
-  return (
-    <div style={{ position: 'relative', width: size * 1.7, height: size }}>
-      <img src={CAR_SRC[num]} alt={`car ${num}`}
-        style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
-      <span style={{
-        position: 'absolute', top: -2, left: -2,
-        width: size * 0.52, height: size * 0.52, borderRadius: '50%',
-        background: 'rgba(0,0,0,0.75)', border: `1px solid ${GOLDENBOOT.gold}`,
-        color: GOLDENBOOT.gold, fontSize: size * 0.32, fontWeight: 900, lineHeight: 1,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: "'Space Grotesk', sans-serif", boxSizing: 'border-box',
-      }}>{num}</span>
-    </div>
-  )
-}
+// CarImgBead 已随盘口区切至 ./markets-ui/GoldenBootMarkets（此处 import 回用于 subRow 名次串）。
 
 
 export default function GoldenBoot({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
@@ -279,36 +226,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   const repeatOk = betting && hasLast && lastTotal > 0 && (serverBalance == null || lastTotal <= serverBalance)
 
   // ---- 样式件（选中=金框绿罩；命中=绿框绿晕）----
-  const cellBtn = (key, { compact = false } = {}) => {
-    const sel = picks.has(key)
-    const hit = (result?.hits ?? preHits)?.has(key)   // 结算后 result，动画收尾先预亮
-    const placed = betsPlaced.has(key)
-    return {
-      flex: 1, minWidth: 0, padding: compact ? '5px 2px' : '8px 4px',
-      borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
-      background: sel ? GOLDENBOOT.selTint : GOLDENBOOT.grey,
-      border: `1px solid ${hit ? GOLDENBOOT.sel : sel ? GOLDENBOOT.gold : placed ? GOLDENBOOT.gold : 'rgba(255,255,255,0.16)'}`,
-      boxShadow: hit
-        ? `0 0 12px ${GOLDENBOOT.selTint.replace('0.16', '0.6')}`
-        : sel ? '0 0 10px rgba(255,213,79,0.35)' : 'inset 0 1px 0 rgba(255,255,255,0.06)',
-      opacity: betting || hit || placed ? 1 : 0.75,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-      transition: 'filter 0.12s, background 0.12s, border-color 0.12s, box-shadow 0.15s',
-      boxSizing: 'border-box',
-      position: 'relative',
-    }
-  }
-  const cellName = { color: GOLDENBOOT.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: GOLDENBOOT.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: GOLDENBOOT.gold, fontSize: isMobile ? 10.5 : 12.5, fontWeight: 900 }
-  const stakeChip = key => betsPlaced.has(key) && (
-    <span style={{
-      position: 'absolute', top: 2, right: 3,
-      padding: '1px 5px', borderRadius: RADIUS.pill,
-      background: GOLDENBOOT.sel, color: '#083a1b',
-      fontSize: 8, fontWeight: 900,
-    }}>${betsPlaced.get(key)}</span>
-  )
+  // cellBtn/cellName/cellRange/cellOdds/stakeChip 已随盘口区切至 ./markets-ui/GoldenBootMarkets。
 
   // ---- 轮次条（desk 走骨架 34px 历史行位）----
   const connecting = !room.connected && !room.roundNo
@@ -329,22 +247,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
     }}>{phaseChip.text}</span>
   )
-  const subRowNode = (
-    <span style={{ display: 'flex', alignItems: 'center', minWidth: 0, flex: '1 1 auto' }}>
-      {/* 上期名次串 — 只显前 3 名（冠/亚/季），删 WINNER 标后放大占满整行 */}
-      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', flex: 1, minWidth: 0, gap: isMobile ? 6 : 12 }}>
-        {lastRace.order.slice(0, 3).map((n, i) => (
-          <span key={`${n}-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} title={`第${i + 1}名`}>
-            <span style={{
-              color: ['#ffd54f', '#cfd6de', '#d9873f'][i], fontSize: isMobile ? 10 : 12, fontWeight: 900,
-              fontFamily: "'Space Grotesk', sans-serif", whiteSpace: 'nowrap',
-            }}>{['冠', '亚', '季'][i]}</span>
-            <CarImgBead num={n} size={isMobile ? 38 : 48} />
-          </span>
-        ))}
-      </span>
-    </span>
-  )
+  const subRowNode = <GoldenBootPodium order={lastRace.order} isMobile={isMobile} />   // 上局前三名信息条（切件）
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} band={GOLDENBOOT.band} venue={G.venue ?? G.displayName}
@@ -367,51 +270,10 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
     </>
   )
 
-  // ---- 珠盘路（真历史滚动，容量 6×20）----
-  const ROAD_COLS = 20
-  const roadItems = history.slice(-ROAD_CAP)
-  const beads = roadItems.map(h => beadFor(roadTab, h))
+  // ---- 珠盘路（切件；真历史滚动，容量 6×20）----
   const beadRoad = (
-    <div style={{
-      flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '0 12px 10px' : '0 18px 12px',
-    }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
-        {ROAD_TABS.map(t => (
-          <button key={t} type="button" onClick={() => setRoadTab(t)} style={{
-            padding: '3px 12px', borderRadius: RADIUS.pill,
-            background: roadTab === t ? GOLDENBOOT.sel : 'rgba(0,0,0,0.35)',
-            color: roadTab === t ? '#083a1b' : GOLDENBOOT.dim,
-            border: `1px solid ${roadTab === t ? GOLDENBOOT.sel : 'rgba(255,255,255,0.2)'}`,
-            fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer',
-          }}>{ROAD_TAB_LABELS[t]}</button>
-        ))}
-      </div>
-      <div style={{
-        overflowX: 'auto', borderRadius: 10,
-        background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
-      }}>
-        <div style={{
-          display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`,
-          gap: 2, width: 'max-content',
-        }}>
-          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-            const b = beads[i]
-            return (
-              <span key={i} style={{
-                width: 18, height: 18, borderRadius: '50%',
-                background: b ? b.c : 'rgba(255,255,255,0.05)',
-                border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: COLORS.white, fontSize: b && b.t.length > 1 ? 7 : 9, fontWeight: 900,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                boxSizing: 'border-box',
-              }}>{b ? b.t : ''}</span>
-            )
-          })}
-        </div>
-      </div>
-    </div>
+    <GoldenBootRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+      style={{ margin: isMobile ? '0 12px 10px' : '0 18px 12px' }} />
   )
 
   // ---- 开奖区（常驻顶部）：RACING/SETTLED 冲刺舞台 / BETTING 上期名次静态待命 ----
@@ -469,7 +331,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       display: 'flex', flexDirection: 'column',
       height: '100%', boxSizing: 'border-box',   // 手机三段锁死：撑满 100dvh 根（桌面本就 100%，渲染不变）
     }}>
-      <style>{`.gbCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
+      {/* .gbCell hover 样式已随盘口区切至 GoldenBootMarkets（组件内 <style> 挂） */}
 
       {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
       {topBar}
@@ -485,56 +347,9 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
         gap: isMobile ? 8 : 10, overflowY: 'auto',
       }}>
         <WinToast toasts={toasts} />
-        {/* 族① WINNER 冠军直选 1–10 */}
-        <div style={{
-          borderRadius: 12, padding: isMobile ? 6 : 8,
-          background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)',
-        }}>
-          <div style={{ color: GOLDENBOOT.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 6 }}>冠军直选</div>
-          <div style={{ display: 'flex', gap: isMobile ? 5 : 8, flexWrap: 'wrap' }}>
-            {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
-              <button key={n} type="button" className="gbCell" disabled={!betting} onClick={() => toggleSel(`w-${n}`)}
-                style={{ ...cellBtn(`w-${n}`), flexBasis: isMobile ? '17%' : 0 }}>
-                <CarImgBead num={n} size={isMobile ? 24 : 30} />
-                <span style={cellOdds}>{ODDS.winner.toFixed(2)}</span>
-                {stakeChip(`w-${n}`)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 族② SPRINT SUM 冠亚和 */}
-        <div style={{
-          borderRadius: 12, padding: isMobile ? 6 : 8,
-          background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)',
-        }}>
-          <div style={{ color: GOLDENBOOT.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 6 }}>冠亚和</div>
-          <div style={{ display: 'flex', gap: isMobile ? 4 : 5, flexWrap: 'wrap', marginBottom: isMobile ? 6 : 8 }}>
-            {Object.keys(SUM_N).map(s => (
-              <button key={s} type="button" className="gbCell" disabled={!betting} onClick={() => toggleSel(`sum-${s}`)}
-                style={{ ...cellBtn(`sum-${s}`, { compact: true }), flexBasis: isMobile ? '14%' : 0, minWidth: isMobile ? 0 : 42 }}>
-                <span style={{ ...cellName, fontSize: isMobile ? 11 : 12.5 }}>{s}</span>
-                <span style={{ ...cellOdds, fontSize: isMobile ? 9 : 10.5 }}>{ODDS.sum[s].toFixed(2)}</span>
-                {stakeChip(`sum-${s}`)}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: isMobile ? 5 : 8 }}>
-            {[
-              { key: 's-big',   name: '大', range: '12–19', odds: ODDS.big },
-              { key: 's-small', name: '小', range: '3–11',  odds: ODDS.small },
-              { key: 's-odd',   name: '单', range: '和为单', odds: ODDS.odd },
-              { key: 's-even',  name: '双', range: '和为双', odds: ODDS.even },
-            ].map(m => (
-              <button key={m.key} type="button" className="gbCell" disabled={!betting} onClick={() => toggleSel(m.key)} style={cellBtn(m.key)}>
-                <span style={cellName}>{m.name}</span>
-                <span style={cellRange}>{m.range}</span>
-                <span style={cellOdds}>{m.odds.toFixed(2)}</span>
-                {stakeChip(m.key)}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
+        <GoldenBootMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
+          selected={picks} hits={result?.hits ?? preHits} isMobile={isMobile} />
 
       </div>
 
