@@ -6,6 +6,9 @@ import BillDrawer from './components/BillDrawer'
 import { COLORS } from './components/shell/tokens'
 import { GameNavContext, BillNavContext } from './components/shell/navContexts'
 import { usePlayerApi } from './lib/playerApi'
+import { useMediaQuery } from './hooks/useMediaQuery'
+// 单S4：桌面单游戏页右栏（今日大奖/近期开奖/换个游戏）。App 层一处挂载包全款，游戏内部文件零改。
+import GameSideRail from './components/shell/GameSideRail'
 // #44 我的最爱：前端 id ↔ backendId 反查单一数据源（禁手抄第二份映射）。
 import { GAME_BY_ID, GAME_BY_BACKEND_ID } from './gameRegistry'
 // 单2改：前台反馈钮暂隐藏（挪去代理后台）。组件文件保留，需要时取消注释即可恢复。
@@ -73,6 +76,8 @@ export default function App() {
   const [favIds, setFavIds] = useState(() => new Set())
 
   const GameComponent = activeGame ? GAMES[activeGame] : null
+  // 单S4：右栏仅桌面宽（≥1280）+ 处于单游戏视图时渲染；1024-1279 及以下现状零变。
+  const showSideRail = useMediaQuery('(min-width: 1280px)')
 
   // 收藏读/写收口到 playerApi（同鉴权/401 约定）；余额回写此处不需要，传现成 setter 满足签名即可。
   const playerApi = usePlayerApi({ playerToken, onLogout: handlePlayerLogout, setServerBalance })
@@ -184,7 +189,7 @@ export default function App() {
     )
   } else if (GameComponent) {
     // 选了游戏：全屏铺满，不挂 Header。Context 下发 setActiveGame（切款不过大厅，游戏文件零改）。
-    body = (
+    const gameView = (
       <div style={{ minHeight: '100vh', background: '#0e1520' }}>
         <GameNavContext.Provider value={setActiveGame}>
           <Suspense fallback={<GameLoading />}>
@@ -201,6 +206,20 @@ export default function App() {
         {/* {feedback} */}
       </div>
     )
+    // 单S4/S4b：≥1280 挂右栏。改前 flex 包裹把游戏套进 flex 上下文，游戏内 height:calc(100vh) 骨架
+    // 下的 height:100% BetFeed 头部在真机 Chrome 被裁（S4b 回归）。改为「游戏留右 margin + 右栏 position:fixed」：
+    // 游戏回到与 <1280 完全一致的普通块流（不再有 flex 上下文），仅靠 marginRight 让出 200px 给右栏。
+    body = showSideRail ? (
+      <div style={{ position: 'relative', minHeight: '100vh', background: '#0e1520' }}>
+        <div style={{ marginRight: 200 }}>{gameView}</div>
+        <GameSideRail
+          currentGameId={activeGame}
+          playerToken={playerToken}
+          onSelect={setActiveGame}
+          onLogout={handlePlayerLogout}
+        />
+      </div>
+    ) : gameView
   } else {
     // 未进游戏：Header + 大厅。大厅账单入口不回退（改调 App 单实例 openBill）。
     body = (
