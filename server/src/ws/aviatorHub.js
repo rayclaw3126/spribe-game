@@ -35,9 +35,10 @@ const state = {
   crashPoint: null,
   flyStart: null,
   bettingStart: null, // betting 阶段开始时间戳（ms）—— 支撑中途加入时的 snapshot 剩余时间计算
-  // 本局下注表：key = playerId（字符串，来自 JWT payload.sub），
-  // value = { amount, cashedOut, betId, agentId, payout }。
-  // 每局 betting 阶段开始时清空（runWaitingPhase），crashed 阶段结算时读取。
+  // 本局下注表：key = `${playerId}:${panel}`（复合键，S7a 双注位：同轮每人两槽 panel 0/1），
+  // value = { playerId, panel, amount, cashedOut, betId, agentId, payout }。
+  // 每局 betting 阶段开始时清空（runWaitingPhase），crashed 阶段逐槽结算时读取。
+  // 老协议（不带 panel 的 bet/cashout）缺省 panel=0，与新协议 panel0 槽同键、行为一致。
   bets: new Map(),
 };
 
@@ -49,6 +50,15 @@ const timers = {
 };
 
 let started = false;
+
+// S7a 双注位：解析消息里的 panel。缺省（老协议不带）=0；非 {0,1} 返回 null（调用方转 rejected）。
+function parsePanel(msg) {
+  if (msg.panel === undefined || msg.panel === null) return 0;
+  const p = Number(msg.panel);
+  return p === 0 || p === 1 ? p : null;
+}
+// 复合键：同轮每人 panel 0/1 两槽各自独立登记/结算。
+const betKey = (playerId, panel) => `${playerId}:${panel}`;
 
 function sendJSON(ws, payload) {
   // 1 === WebSocket.OPEN；连接已关闭/正在关闭时静默丢弃，不抛异常。
@@ -164,14 +174,15 @@ function runFlyingPhase(wss) {
 async function settleRound(wss) {
   const { roundId, bets } = state;
 
-  for (const [playerId, bet] of bets) {
+  // S7a：逐槽结算（每人最多两槽 panel0/1 各自独立）。输槽各走一次 distributeLoss，playerId 从 value 取。
+  for (const [key, bet] of bets) {
     if (bet.cashedOut) continue; // 赢家：cashout 时已经结算过
 
     try {
       // eslint-disable-next-line no-await-in-loop
       await withTransaction(async (client) => {
         await distributeLoss(client, {
-          playerId,
+          playerId: bet.playerId,
           agentId: bet.agentId,
           roundId,
           lossAmount: bet.amount,
@@ -179,7 +190,7 @@ async function settleRound(wss) {
         await client.query(`UPDATE bets SET outcome = 'lose' WHERE id = $1`, [bet.betId]);
       });
     } catch (err) {
-      console.error(`[aviatorHub] 结算输家失败 playerId=${playerId}：`, err.message);
+      console.error(`[aviatorHub] 结算输家失败 key=${key}：`, err.message);
     }
   }
 
@@ -221,14 +232,21 @@ async function runCrashedPhase(wss) {
 async function handleBet(ws, msg) {
   const playerId = ws.playerId;
 
+  // S7a：解析注位（老协议不带 panel → 缺省 0）；panel ∉ {0,1} 直接拒（回显原值便于排障）。
+  const panel = parsePanel(msg);
+  if (panel === null) {
+    sendJSON(ws, { type: 'bet_rejected', reason: '注位无效', panel: msg.panel });
+    return;
+  }
+
   if (state.phase !== 'betting') {
-    sendJSON(ws, { type: 'bet_rejected', reason: '非下注阶段' });
+    sendJSON(ws, { type: 'bet_rejected', reason: '非下注阶段', panel });
     return;
   }
 
   const rawAmount = Number(msg.amount);
   if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
-    sendJSON(ws, { type: 'bet_rejected', reason: '下注金额无效' });
+    sendJSON(ws, { type: 'bet_rejected', reason: '下注金额无效', panel });
     return;
   }
   const amount = rawAmount.toFixed(2);
@@ -236,32 +254,35 @@ async function handleBet(ws, msg) {
   // 风控前置（WS 专用）：注额超限直接拒。RiskError 不能靠 HTTP 中间件兜，
   // 这里就地转成 bet_rejected 帧并带 code，绝不落到下面兜底的「请重试」。
   try {
+    // S7a 敞口：每注各自过 maxBet 闸（每 panel 独立），故玩家单轮上限自然 = 2×单注上限
+    //（双注位=同轮可押两注，Spribe 同款，属产品预期，非漏闸）。房间聚合负债仍按全部未兑现槽计。
     assertBetWithinLimits('aviator', amount);
     // 聚合负债闸：本局房间未兑现注潜在赔付（每注封顶 maxPayout）+ 本注 > maxRoomLiability 则拒
     const openLiability = [...state.bets.values()].filter((b) => !b.cashedOut).length * maxPayoutFor('aviator');
     assertRoundLiability('aviator', openLiability, maxPayoutFor('aviator'));
   } catch (err) {
     if (err instanceof RiskError) {
-      sendJSON(ws, { type: 'bet_rejected', reason: err.message, code: err.code });
+      sendJSON(ws, { type: 'bet_rejected', reason: err.message, code: err.code, panel });
       return;
     }
     throw err;
   }
 
-  // 幂等：内存里已经记过这个玩家本局的下注，直接回已有信息，不重复扣钱。
-  const existing = state.bets.get(playerId);
+  // 幂等（防双击守卫）：内存里已记过这个玩家本局【本 panel】的下注，直接回已有信息，不重复扣钱。
+  const existing = state.bets.get(betKey(playerId, panel));
   if (existing) {
     sendJSON(ws, {
       type: 'bet_ack',
       roundId: state.roundId,
       amount: existing.amount,
+      panel,
       idempotent: true,
     });
     return;
   }
 
   const roundId = state.roundId;
-  const idempotencyKey = `aviator-${roundId}-${playerId}`;
+  const idempotencyKey = `aviator-${roundId}-${playerId}-p${panel}`;
 
   try {
     const { betId, agentId, balanceAfter } = await withTransaction(async (client) => {
@@ -292,12 +313,12 @@ async function handleBet(ws, msg) {
     // 防御：下注写库期间房间恰好翻页到下一局（betting 窗口极短的边界情况），
     // 这一注仍然真实落库、钱已扣，只是本局内存 Map 不再登记它参与本局结算。
     if (state.roundId === roundId) {
-      state.bets.set(playerId, { amount, cashedOut: false, betId, agentId, payout: null });
+      state.bets.set(betKey(playerId, panel), { playerId, panel, amount, cashedOut: false, betId, agentId, payout: null });
     } else {
       console.error('[aviatorHub] 下注写库完成但房间已翻页，roundId 不一致，跳过内存登记');
     }
 
-    sendJSON(ws, { type: 'bet_ack', roundId, amount, balanceAfter, idempotent: false });
+    sendJSON(ws, { type: 'bet_ack', roundId, amount, balanceAfter, panel, idempotent: false });
   } catch (err) {
     if (err.code === '23505') {
       // 唯一索引冲突：并发重复下注消息导致的竞态，回查已落库的记录按幂等命中处理。
@@ -307,22 +328,23 @@ async function handleBet(ws, msg) {
           type: 'bet_ack',
           roundId,
           amount: existingBet.rows[0]?.amount ?? amount,
+          panel,
           idempotent: true,
         });
       } catch (lookupErr) {
         console.error('[aviatorHub] 幂等回查失败：', lookupErr.message);
-        sendJSON(ws, { type: 'bet_rejected', reason: '下注失败，请重试' });
+        sendJSON(ws, { type: 'bet_rejected', reason: '下注失败，请重试', panel });
       }
       return;
     }
 
     if (err.message === '余额不足' || err.message === '钱包不存在') {
-      sendJSON(ws, { type: 'bet_rejected', reason: err.message });
+      sendJSON(ws, { type: 'bet_rejected', reason: err.message, panel });
       return;
     }
 
     console.error('[aviatorHub] 下注处理异常：', err.message);
-    sendJSON(ws, { type: 'bet_rejected', reason: '下注失败，请重试' });
+    sendJSON(ws, { type: 'bet_rejected', reason: '下注失败，请重试', panel });
   }
 }
 
@@ -334,17 +356,24 @@ async function handleBet(ws, msg) {
  * 该玩家会在 crashed 阶段结算时按输家处理。
  * @param {import('ws').WebSocket} ws - 已认证（ws.playerId 存在）的连接
  */
-async function handleCashout(ws) {
+async function handleCashout(ws, msg) {
   const playerId = ws.playerId;
 
-  if (state.phase !== 'flying') {
-    sendJSON(ws, { type: 'cashout_rejected', reason: '非飞行阶段' });
+  // S7a：解析注位（老协议不带 panel → 缺省 0）；panel ∉ {0,1} 直接拒。
+  const panel = parsePanel(msg);
+  if (panel === null) {
+    sendJSON(ws, { type: 'cashout_rejected', reason: '注位无效', panel: msg.panel });
     return;
   }
 
-  const bet = state.bets.get(playerId);
+  if (state.phase !== 'flying') {
+    sendJSON(ws, { type: 'cashout_rejected', reason: '非飞行阶段', panel });
+    return;
+  }
+
+  const bet = state.bets.get(betKey(playerId, panel));
   if (!bet || bet.cashedOut) {
-    sendJSON(ws, { type: 'cashout_rejected', reason: '无有效下注或已兑现' });
+    sendJSON(ws, { type: 'cashout_rejected', reason: '无有效下注或已兑现', panel });
     return;
   }
 
@@ -352,12 +381,12 @@ async function handleCashout(ws) {
   const mult = multiplierAt(elapsed);
 
   if (mult >= state.crashPoint) {
-    sendJSON(ws, { type: 'cashout_rejected', reason: '已过崩盘点' });
+    sendJSON(ws, { type: 'cashout_rejected', reason: '已过崩盘点', panel });
     return;
   }
 
   const roundId = state.roundId;
-  const idempotencyKey = `aviator-cash-${roundId}-${playerId}`;
+  const idempotencyKey = `aviator-cash-${roundId}-${playerId}-p${panel}`;
 
   try {
     const { payout, balanceAfter } = await withTransaction(async (client) => {
@@ -385,21 +414,21 @@ async function handleCashout(ws) {
     bet.cashedOut = true;
     bet.payout = payout;
 
-    sendJSON(ws, { type: 'cashout_ok', multiplier: mult, payout, balanceAfter });
+    sendJSON(ws, { type: 'cashout_ok', multiplier: mult, payout, balanceAfter, panel });
   } catch (err) {
     if (err.code === '23505') {
-      // 幂等命中：这个玩家的兑现请求已经处理过一次（并发重复消息），不重复加钱。
+      // 幂等命中：这个玩家【本 panel】的兑现请求已经处理过一次（并发重复消息），不重复加钱。
       bet.cashedOut = true;
-      sendJSON(ws, { type: 'cashout_rejected', reason: '无有效下注或已兑现' });
+      sendJSON(ws, { type: 'cashout_rejected', reason: '无有效下注或已兑现', panel });
       return;
     }
     // 风控封顶（WS 专用）：派彩超上限。带 code 明确告知，绝不落到下面兜底的「请重试」。
     if (err instanceof RiskError) {
-      sendJSON(ws, { type: 'cashout_rejected', reason: err.message, code: err.code });
+      sendJSON(ws, { type: 'cashout_rejected', reason: err.message, code: err.code, panel });
       return;
     }
     console.error('[aviatorHub] 兑现处理异常：', err.message);
-    sendJSON(ws, { type: 'cashout_rejected', reason: '兑现失败，请重试' });
+    sendJSON(ws, { type: 'cashout_rejected', reason: '兑现失败，请重试', panel });
   }
 }
 
@@ -408,7 +437,19 @@ async function handleCashout(ws) {
  * 严守不变量：betting/flying 阶段绝不包含 serverSeed/crashPoint；
  * crashed 阶段的 serverSeed 早已随 crashed 广播 reveal 过，snapshot 里带出来不算破例。
  */
-function buildSnapshot() {
+// S7a：某玩家本局的注槽列表（新数组，前端 S7b 恢复两注位只吃此字段）。老 JS 忽略未知字段不炸。
+function playerBets(playerId) {
+  const out = [];
+  for (const bet of state.bets.values()) {
+    if (bet.playerId === playerId) {
+      out.push({ panel: bet.panel, amount: bet.amount, cashedOut: bet.cashedOut, payout: bet.payout });
+    }
+  }
+  return out.sort((a, b) => a.panel - b.panel);
+}
+
+function buildSnapshot(playerId) {
+  const bets = playerBets(playerId);
   if (state.phase === 'betting') {
     const waitMs = BETTING_MS;
     const elapsed = state.bettingStart ? Date.now() - state.bettingStart : 0;
@@ -422,6 +463,7 @@ function buildSnapshot() {
       commitHash: state.commitHash,
       waitMs,
       remainingMs,
+      bets,
     };
   }
 
@@ -436,6 +478,7 @@ function buildSnapshot() {
       commitHash: state.commitHash,
       elapsed,
       multiplier: multiplierAt(elapsed),
+      bets,
     };
   }
 
@@ -449,6 +492,7 @@ function buildSnapshot() {
     commitHash: state.commitHash,
     crashPoint: state.crashPoint,
     serverSeed: state.serverSeed,
+    bets,
   };
 }
 
@@ -486,7 +530,7 @@ export function startAviatorHub(wss) {
     if (ws.playerId) {
       fetchPlayerBalance(ws.playerId).then((balance) => {
         sendJSON(ws, { type: 'hello', phase: state.phase, balance });
-        sendJSON(ws, buildSnapshot());
+        sendJSON(ws, buildSnapshot(ws.playerId));
       }).catch((err) => {
         console.error('[aviatorHub] 连接初始化异常：', err.message);
       });
@@ -513,7 +557,7 @@ export function startAviatorHub(wss) {
       }
 
       if (msg.type === 'cashout') {
-        handleCashout(ws).catch((err) => {
+        handleCashout(ws, msg).catch((err) => {
           console.error('[aviatorHub] handleCashout 未捕获异常：', err.message);
         });
         return;
@@ -521,7 +565,7 @@ export function startAviatorHub(wss) {
 
       if (msg.type === 'sync') {
         // 断线重连 / 中途加入主动请求当前局快照，补发的字段和连接时一致。
-        sendJSON(ws, buildSnapshot());
+        sendJSON(ws, buildSnapshot(ws.playerId));
       }
     });
   });
