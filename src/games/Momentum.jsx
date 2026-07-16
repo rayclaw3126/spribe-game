@@ -47,20 +47,23 @@ const round2 = x => Math.round(x * 100) / 100
 // log height mapping: 0.05 → 4%, 1 → ~50%, 20 → ~94% (防爆表)
 const barH = x => Math.min(94, Math.max(4, 6 + 88 * Math.log(Math.max(x, 0.055) / 0.05) / Math.log(400)))
 
+// 单S8：双注位注状态单元（照飞机 makePanel）。playerBet=null|{amount,cashed,win,pending}；
+// autoCashOn+autoCashMult = 服务端 autoTarget 来源（下注时随 panel 各自发）。
+function makePanel() {
+  return { bet: 10, playerBet: null, autoBet: false, autoCashOn: false, autoCashMult: 2 }
+}
+
 export default function Momentum({ serverBalance, setServerBalance, playerToken, onLogout, onBack }) {
   const isMobile = useIsMobile()
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 仅用 wsUrl 收口 token 拼法
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const balance = serverBalance ?? 0
-  const [bet, setBet] = useState(10)
+  // 单S8：双注位——散 bet/playerBet/autoBet/autoCashOn/autoCashMult 收进 panels[2]（照飞机）。
+  const [panels, setPanels] = useState(() => [makePanel(), makePanel()])
   const [phase, setPhase] = useState('betting')   // betting | running | done
   const [countdown, setCountdown] = useState(BETTING_MS / 1000)
   const [bars, setBars] = useState([])            // {x, up} per bar（后端逐柱）
   const [busted, setBusted] = useState(false)
-  const [playerBet, setPlayerBet] = useState(null)   // { amount, cashed, win }
-  const [autoBet, setAutoBet] = useState(false)
-  const [autoCashOn, setAutoCashOn] = useState(false)
-  const [autoCashMult, setAutoCashMult] = useState(2)
   const [lastRange, setLastRange] = useState({ min: 0.9, max: 1.47 })
   const [roundHistory, setRoundHistory] = useState([])
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
@@ -77,9 +80,17 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
 
   const phaseRef = useRef('betting')
   const barsRef = useRef([])
-  const playerBetRef = useRef(null)
-  const autoRef = useRef({ betOn: false, cashOn: false, mult: 2 })
-  const betAmtRef = useRef(10)
+  // 单S8：panels 镜像 ref（rAF/WS 回调读最新，不吃闭包过期）+ updatePanel 单一写口（照飞机）。
+  const panelsRef = useRef(null)
+  if (panelsRef.current === null) panelsRef.current = panels
+  function updatePanel(i, patch) {
+    panelsRef.current = panelsRef.current.map((p, j) => (j === i ? { ...p, ...patch } : p))
+    setPanels(panelsRef.current)
+  }
+  function setBetFor(i, next) {
+    const p = panelsRef.current[i]
+    updatePanel(i, { bet: typeof next === 'function' ? next(p.bet) : next })
+  }
   const roundIdRef = useRef(0)
   const timersRef = useRef([])
   const toastIdRef = useRef(0)
@@ -90,9 +101,7 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
   const reconnectTimerRef = useRef(null)
   const cdTimerRef = useRef(null)
 
-  useEffect(() => { betAmtRef.current = bet }, [bet])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
-  useEffect(() => { autoRef.current = { betOn: autoBet, cashOn: autoCashOn, mult: autoCashMult } }, [autoBet, autoCashOn, autoCashMult])
   function later(fn, ms) { const id = setTimeout(fn, ms); timersRef.current.push(id); return id }
 
   // ---------- audio ----------
@@ -157,13 +166,15 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
   function onBettingMsg(msg) {
     phaseRef.current = 'betting'; setPhase('betting')
     barsRef.current = []; setBars([]); setBusted(false)
-    playerBetRef.current = null; setPlayerBet(null)
+    // 单S8：两注位一并清场 playerBet（bet/autoBet/autoCash 跨局保留）。
+    panelsRef.current = panelsRef.current.map((p) => ({ ...p, playerBet: null }))
+    setPanels(panelsRef.current)
     roundIdRef.current = msg.roundId; setRoundId(msg.roundId)
     setCommitHash(msg.commitHash); setRevealedSeed(null); setFairClientSeed(msg.clientSeed || ''); setFairNonce(msg.nonce ?? null)
     setFeedBets(makeFeedBots())
     startCountdown(msg.remainingMs != null ? msg.remainingMs : (msg.waitMs || BETTING_MS))
-    // 自动下注：本局 betting 开窗就发（若上一局勾了自动）
-    if (autoRef.current.betOn && !playerBetRef.current) later(() => placeBet(), 80)
+    // 自动下注：两注位各自——本局 betting 开窗就发（若该注位勾了自动且本局未下注）
+    panelsRef.current.forEach((p, i) => { if (p.autoBet && !p.playerBet) later(() => placeBet(i), 80) })
   }
   function pushBar(barIdx, x) {
     const prev = barsRef.current.length ? barsRef.current[barsRef.current.length - 1].x : 1
@@ -189,20 +200,23 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
       : { ...r, status: 'crashed' }))
     // 未兑现且 bust → 本局输（余额已在下注时扣，不返）；survive 由后端发 final cashout_ok 处理
   }
+  // 单S8：入站帧按 S8 回显的 msg.panel 路由到对应注位（缺省 0 兼容老帧，不再写死单注）。
   function onBetAck(msg) {
     if (msg.idempotent) return
-    playerBetRef.current = { amount: Number(msg.amount), cashed: false, win: 0 }
-    setPlayerBet({ ...playerBetRef.current })
+    const i = msg.panel ?? 0
+    updatePanel(i, { playerBet: { amount: Number(msg.amount), cashed: false, win: 0 } })
     if (msg.balanceAfter != null) setServerBalance(Number(msg.balanceAfter))
     setNetErr(null)
   }
   function onBetRejected(msg) {
-    playerBetRef.current = null; setPlayerBet(null)
+    const i = msg.panel ?? 0
+    updatePanel(i, { playerBet: null })
     setNetErr(msg.reason || '下注被拒')
   }
   function onCashoutOk(msg) {
-    const b = playerBetRef.current
-    if (b) { b.cashed = true; b.win = Number(msg.payout); setPlayerBet({ ...b }) }
+    const i = msg.panel ?? 0
+    const b = panelsRef.current[i].playerBet
+    if (b) updatePanel(i, { playerBet: { ...b, cashed: true, win: Number(msg.payout) } })
     if (msg.balanceAfter != null) setServerBalance(Number(msg.balanceAfter))
     pushToast(`${Number(msg.multiplier).toFixed(2)}×`, Number(msg.payout))
     playCash()
@@ -221,26 +235,41 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
       phaseRef.current = 'done'; setPhase('done')
       setCommitHash(msg.commitHash); setRevealedSeed(msg.serverSeed); setFairClientSeed(msg.clientSeed || ''); setFairNonce(msg.nonce ?? null)
     }
+    // 单S8：吃 S8 快照 bets[] 按 panel 归位，断线重连两注恢复（cashed/win 续算 + autoTarget 复原自动挡）。
+    if (Array.isArray(msg.bets)) {
+      panelsRef.current = panelsRef.current.map((p, i) => {
+        const b = msg.bets.find((x) => x.panel === i)
+        if (!b) return { ...p, playerBet: null }
+        return {
+          ...p,
+          playerBet: { amount: Number(b.amount), cashed: !!b.cashedOut, win: b.cashedOut ? Number(b.payout) : 0 },
+          ...(b.autoTarget != null ? { autoCashOn: true, autoCashMult: Number(b.autoTarget) } : {}),
+        }
+      })
+      setPanels(panelsRef.current)
+    }
   }
 
   // ---------- player actions（发 WS，服务端权威）----------
-  function placeBet() {
-    if (phaseRef.current !== 'betting' || playerBetRef.current) return
-    const amt = betAmtRef.current
+  // 单S8：全参数化 panelId i。出站 bet 带 panel:i + 各自 autoTarget；cashout 带 panel:i。
+  function placeBet(i) {
+    const p = panelsRef.current[i]
+    if (phaseRef.current !== 'betting' || p.playerBet) return
+    const amt = p.bet
     if (amt > balance || amt < 1) return
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) { setNetErr('连接断开，正在重连…'); return }
     ensureAudio()
-    playerBetRef.current = { amount: amt, cashed: false, win: 0, pending: true }   // 乐观占位，等 bet_ack
-    setPlayerBet({ ...playerBetRef.current })
-    ws.send(JSON.stringify({ type: 'bet', amount: amt, autoTarget: autoRef.current.cashOn ? autoRef.current.mult : undefined }))
+    updatePanel(i, { playerBet: { amount: amt, cashed: false, win: 0, pending: true } })   // 乐观占位，等 bet_ack
+    ws.send(JSON.stringify({ type: 'bet', amount: amt, autoTarget: p.autoCashOn ? p.autoCashMult : undefined, panel: i }))
   }
-  function cashNow() {
-    if (phaseRef.current !== 'running' || !playerBetRef.current || playerBetRef.current.cashed) return
+  function cashNow(i) {
+    const p = panelsRef.current[i]
+    if (phaseRef.current !== 'running' || !p.playerBet || p.playerBet.cashed) return
     if (barsRef.current.length === 0) return   // 首柱后才可兑现
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(JSON.stringify({ type: 'cashout' }))   // 不报 X，服务端按当前柱结算
+    ws.send(JSON.stringify({ type: 'cashout', panel: i }))   // 不报 X，服务端按当前柱结算；panel 随槽
   }
 
   // ---------- WebSocket 连接（唯一相位/数值/资金来源；照 Aviator 前端）----------
@@ -304,17 +333,19 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
     if (n < 1) return { bg: 'rgba(224,75,58,0.2)', fg: MOMENTUM.red }
     return { bg: 'rgba(53,208,127,0.16)', fg: MOMENTUM.green }
   }
-  const shellBtn = (() => {
+  // 单S8：每注位一个按钮状态（参数化 i）。
+  function panelButton(i) {
+    const p = panels[i]
     if (phase === 'betting') {
-      if (playerBet) return { state: 'waiting', label: '已下注', sub: `$${playerBet.amount.toFixed(2)}`, disabled: true }
-      return { state: 'bet', label: `下注 $${Number(bet).toFixed(2)}`, onClick: placeBet, disabled: bet > balance || bet < 1 }
+      if (p.playerBet) return { state: 'waiting', label: '已下注', sub: `$${p.playerBet.amount.toFixed(2)}`, disabled: true }
+      return { state: 'bet', label: `下注 $${Number(p.bet).toFixed(2)}`, onClick: () => placeBet(i), disabled: p.bet > balance || p.bet < 1 }
     }
-    if (phase === 'running' && playerBet && !playerBet.cashed) {
-      return { state: 'cashout', label: '兑现', sub: `$${round2(playerBet.amount * X).toFixed(2)}`, onClick: cashNow, disabled: bars.length === 0 }
+    if (phase === 'running' && p.playerBet && !p.playerBet.cashed) {
+      return { state: 'cashout', label: '兑现', sub: `$${round2(p.playerBet.amount * X).toFixed(2)}`, onClick: () => cashNow(i), disabled: bars.length === 0 }
     }
-    if (playerBet?.cashed) return { state: 'waiting', label: '已兑现', sub: `$${playerBet.win.toFixed(2)}`, disabled: true }
+    if (p.playerBet?.cashed) return { state: 'waiting', label: '已兑现', sub: `$${p.playerBet.win.toFixed(2)}`, disabled: true }
     return { state: 'waiting', label: '等待下一局', disabled: true }
-  })()
+  }
 
   // real multiplier history pills — desktop 34px row / mobile in-card
   const historyStrip = (
@@ -479,24 +510,38 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
       </Panel>
   )
 
-  const locked = phase !== 'betting' || !!playerBet
-  const bayPanel = (
+  // 单S8：双注位——makeBay(i) 每注一块 BetPanel（全参数化 panelId），S8 后端契约接双注。
+  // 自动挡 onToggleBet 逐字节保原语义（仅置旗，下一局 betting 由 onBettingMsg 触发下注，不即时下）。
+  function makeBay(i) {
+    const p = panels[i]
+    const locked = phase !== 'betting' || !!p.playerBet
+    return (
         <BetPanel
           bare={isDesk}
-          bet={bet}
-          setBet={setBet}
+          bet={p.bet}
+          setBet={next => setBetFor(i, next)}
           max={balance}
           inputDisabled={locked}
           chipDisabled={locked}
-          button={shellBtn}
+          button={panelButton(i)}
           auto={{
-            betOn: autoBet, cashOn: autoCashOn, cashMult: autoCashMult,
-            onToggleBet: () => setAutoBet(v => !v),
-            onToggleCash: () => setAutoCashOn(v => !v),
-            onCashMult: v => setAutoCashMult(v),
+            betOn: p.autoBet, cashOn: p.autoCashOn, cashMult: p.autoCashMult,
+            onToggleBet: () => updatePanel(i, { autoBet: !panelsRef.current[i].autoBet }),
+            onToggleCash: () => updatePanel(i, { autoCashOn: !panelsRef.current[i].autoCashOn }),
+            onCashMult: v => updatePanel(i, { autoCashMult: v }),
           }}
         />
-  )
+    )
+  }
+  // BetPanel 共享件零碰：小标「注单1/注单2」在外层 div 加（样式复用零重画）。
+  function labeledBay(i) {
+    return (
+      <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: COLORS.textMuted, letterSpacing: 0.5, margin: '0 0 4px 2px' }}>注单{i + 1}</div>
+        {makeBay(i)}
+      </div>
+    )
+  }
 
   // ---- Spribe-parity desktop skeleton (≥1024), same bones as Dribble ----
   if (isDesk) {
@@ -521,7 +566,11 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
               background: `linear-gradient(rgba(10,17,25,0.78), rgba(10,17,25,0.78)), url(${bayBgUrl}) center / cover no-repeat`,
               borderTop: `1px solid ${COLORS.border}`,
             }}>
-              <div style={{ width: LAYOUT.bayW, maxWidth: '100%' }}>{bayPanel}</div>
+              {/* 单S8：两块注位 bay 并排等宽，居中（注单1 左 / 注单2 右） */}
+              <div style={{ display: 'flex', gap: 12, width: '100%', maxWidth: LAYOUT.bayW * 2 + 12, padding: '0 12px', boxSizing: 'border-box' }}>
+                {labeledBay(0)}
+                {labeledBay(1)}
+              </div>
             </div>
           </div>
         </div>
@@ -533,7 +582,11 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
   return (
     <GameLayout color={MOMENTUM.green}>
       {gameCard}
-      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bayPanel}</div>
+      {/* 单S8：手机上下叠两块注位（注单1 上 / 注单2 下） */}
+      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {labeledBay(0)}
+        {labeledBay(1)}
+      </div>
     </GameLayout>
   )
 }

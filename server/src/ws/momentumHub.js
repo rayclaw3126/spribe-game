@@ -30,12 +30,22 @@ const state = {
   barIdx: 0,        // 当前已 tick 到第几根柱
   xRef: 1,          // 最后一根已 tick 柱的 X（cashout 服务端权威结算用）
   bettingStart: null,
-  // key = playerId；value = { ws, amount, cashedOut, betId, agentId, payout, autoTarget }
+  // key = `${playerId}:${panel}`（复合键，S8 双注位：同轮每人两槽 panel 0/1，各自 autoTarget/结算独立），
+  // value = { ws, playerId, panel, amount, cashedOut, betId, agentId, payout, autoTarget }。
+  // 老协议（不带 panel 的 bet/cashout）缺省 panel=0，与新协议 panel0 槽同键、行为一致。
   bets: new Map(),
 };
 
 const timers = { bettingTimeout: null, runningInterval: null, doneTimeout: null };
 let started = false;
+
+// S8 双注位：解析 panel（缺省 0，老协议不带）；非 {0,1} 返回 null（调用方转 rejected）。
+function parsePanel(msg) {
+  if (msg.panel === undefined || msg.panel === null) return 0;
+  const p = Number(msg.panel);
+  return p === 0 || p === 1 ? p : null;
+}
+const betKey = (playerId, panel) => `${playerId}:${panel}`;
 
 function sendJSON(ws, payload) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(payload)); }
 function broadcast(wss, payload) {
@@ -134,7 +144,7 @@ function runRunningPhase(wss) {
 async function settleBetAt(bet, atX, source) {
   if (bet.cashedOut) return;
   bet.cashedOut = true;   // 先占位防并发重入（auto + manual 同柱竞态）
-  const idempotencyKey = `momentum-cash-${state.roundId}-${bet.playerId}`;
+  const idempotencyKey = `momentum-cash-${state.roundId}-${bet.playerId}-p${bet.panel}`;
   try {
     const { payout, netLoss, balanceAfter } = await withTransaction(async (client) => {
       const row = await client.query(
@@ -155,12 +165,12 @@ async function settleBetAt(bet, atX, source) {
       return { payout: p, netLoss: loss, balanceAfter: after };
     });
     bet.payout = payout;
-    sendJSON(bet.ws, { type: 'cashout_ok', source, multiplier: Number(atX), payout, netLoss: netLoss.toFixed(2), balanceAfter });
+    sendJSON(bet.ws, { type: 'cashout_ok', source, multiplier: Number(atX), payout, netLoss: netLoss.toFixed(2), balanceAfter, panel: bet.panel });
   } catch (err) {
-    if (err.code === '23505') { sendJSON(bet.ws, { type: 'cashout_rejected', reason: '已兑现' }); return; }
+    if (err.code === '23505') { sendJSON(bet.ws, { type: 'cashout_rejected', reason: '已兑现', panel: bet.panel }); return; }
     bet.cashedOut = false;   // 结算失败回滚占位，允许重试
     console.error('[momentumHub] 结算异常：', err.message);
-    sendJSON(bet.ws, { type: 'cashout_rejected', reason: '兑现失败，请重试' });
+    sendJSON(bet.ws, { type: 'cashout_rejected', reason: '兑现失败，请重试', panel: bet.panel });
   }
 }
 
@@ -196,30 +206,35 @@ async function runDonePhase(wss) {
 
 async function handleBet(ws, msg) {
   const playerId = ws.playerId;
-  if (state.phase !== 'betting') { sendJSON(ws, { type: 'bet_rejected', reason: '非下注阶段' }); return; }
+  // S8：解析注位（老协议不带 panel → 缺省 0）；panel ∉ {0,1} 直接拒。
+  const panel = parsePanel(msg);
+  if (panel === null) { sendJSON(ws, { type: 'bet_rejected', reason: '注位无效', panel: msg.panel }); return; }
+  if (state.phase !== 'betting') { sendJSON(ws, { type: 'bet_rejected', reason: '非下注阶段', panel }); return; }
 
   const rawAmount = Number(msg.amount);
-  if (!Number.isFinite(rawAmount) || rawAmount <= 0) { sendJSON(ws, { type: 'bet_rejected', reason: '下注金额无效' }); return; }
+  if (!Number.isFinite(rawAmount) || rawAmount <= 0) { sendJSON(ws, { type: 'bet_rejected', reason: '下注金额无效', panel }); return; }
   const amount = rawAmount.toFixed(2);
-  // auto-cashout 目标（可选）：>1 才有意义
+  // auto-cashout 目标（可选，随槽独立）：>1 才有意义
   let autoTarget = null;
   if (msg.autoTarget != null) { const t = Number(msg.autoTarget); if (Number.isFinite(t) && t > 1) autoTarget = t; }
 
   try {
+    // S8 敞口：每注各自过 maxBet 闸（每 panel 独立），玩家单轮上限自然 = 2×单注上限（双注位=同轮可押两注，Spribe 同款，属产品预期）。
     assertBetWithinLimits('momentum', amount);
     // 聚合负债闸：本局未兑现注潜在赔付（每注封顶 maxPayout）+ 本注 > maxRoomLiability 则拒
     const openLiability = [...state.bets.values()].filter((b) => !b.cashedOut).length * maxPayoutFor('momentum');
     assertRoundLiability('momentum', openLiability, maxPayoutFor('momentum'));
   } catch (err) {
-    if (err instanceof RiskError) { sendJSON(ws, { type: 'bet_rejected', reason: err.message, code: err.code }); return; }
+    if (err instanceof RiskError) { sendJSON(ws, { type: 'bet_rejected', reason: err.message, code: err.code, panel }); return; }
     throw err;
   }
 
-  const existing = state.bets.get(playerId);
-  if (existing) { sendJSON(ws, { type: 'bet_ack', roundId: state.roundId, amount: existing.amount, idempotent: true }); return; }
+  // 幂等（防双击守卫）：内存里已记过这个玩家本局【本 panel】的下注，直接回已有信息，不重复扣钱。
+  const existing = state.bets.get(betKey(playerId, panel));
+  if (existing) { sendJSON(ws, { type: 'bet_ack', roundId: state.roundId, amount: existing.amount, panel, idempotent: true }); return; }
 
   const roundId = state.roundId;
-  const idempotencyKey = `momentum-${roundId}-${playerId}`;
+  const idempotencyKey = `momentum-${roundId}-${playerId}-p${panel}`;
   try {
     const { betId, agentId, balanceAfter } = await withTransaction(async (client) => {
       const { balanceAfter: after } = await debit(client, { playerId, amount, type: 'momentum_bet', idempotencyKey, roundId });
@@ -231,48 +246,63 @@ async function handleBet(ws, msg) {
       return { betId: betResult.rows[0].id, agentId: playerResult.rows[0]?.agent_id ?? null, balanceAfter: after };
     });
     if (state.roundId === roundId) {
-      state.bets.set(playerId, { ws, playerId, amount, cashedOut: false, betId, agentId, payout: null, autoTarget });
+      state.bets.set(betKey(playerId, panel), { ws, playerId, panel, amount, cashedOut: false, betId, agentId, payout: null, autoTarget });
     } else {
       console.error('[momentumHub] 下注写库完成但房间已翻页，跳过内存登记');
     }
-    sendJSON(ws, { type: 'bet_ack', roundId, amount, autoTarget, balanceAfter, idempotent: false });
+    sendJSON(ws, { type: 'bet_ack', roundId, amount, autoTarget, balanceAfter, panel, idempotent: false });
   } catch (err) {
     if (err.code === '23505') {
       try {
         const existingBet = await query('SELECT amount FROM bets WHERE idempotency_key = $1', [idempotencyKey]);
-        sendJSON(ws, { type: 'bet_ack', roundId, amount: existingBet.rows[0]?.amount ?? amount, idempotent: true });
-      } catch { sendJSON(ws, { type: 'bet_rejected', reason: '下注失败，请重试' }); }
+        sendJSON(ws, { type: 'bet_ack', roundId, amount: existingBet.rows[0]?.amount ?? amount, panel, idempotent: true });
+      } catch { sendJSON(ws, { type: 'bet_rejected', reason: '下注失败，请重试', panel }); }
       return;
     }
-    if (err.message === '余额不足' || err.message === '钱包不存在') { sendJSON(ws, { type: 'bet_rejected', reason: err.message }); return; }
+    if (err.message === '余额不足' || err.message === '钱包不存在') { sendJSON(ws, { type: 'bet_rejected', reason: err.message, panel }); return; }
     console.error('[momentumHub] 下注处理异常：', err.message);
-    sendJSON(ws, { type: 'bet_rejected', reason: '下注失败，请重试' });
+    sendJSON(ws, { type: 'bet_rejected', reason: '下注失败，请重试', panel });
   }
 }
 
 // ⭐ 服务端权威 cashout：按 state.xRef（最后已 tick 柱 X）结算，不信客户端报的 X。
-async function handleCashout(ws) {
+async function handleCashout(ws, msg) {
   const playerId = ws.playerId;
-  if (state.phase !== 'running') { sendJSON(ws, { type: 'cashout_rejected', reason: '非进行阶段' }); return; }
-  const bet = state.bets.get(playerId);
-  if (!bet || bet.cashedOut) { sendJSON(ws, { type: 'cashout_rejected', reason: '无有效下注或已兑现' }); return; }
-  if (state.barIdx < 0 || state.xRef <= 0) { sendJSON(ws, { type: 'cashout_rejected', reason: '已崩盘' }); return; }
+  // S8：解析注位（老协议不带 panel → 缺省 0）；panel ∉ {0,1} 直接拒。
+  const panel = parsePanel(msg);
+  if (panel === null) { sendJSON(ws, { type: 'cashout_rejected', reason: '注位无效', panel: msg.panel }); return; }
+  if (state.phase !== 'running') { sendJSON(ws, { type: 'cashout_rejected', reason: '非进行阶段', panel }); return; }
+  const bet = state.bets.get(betKey(playerId, panel));
+  if (!bet || bet.cashedOut) { sendJSON(ws, { type: 'cashout_rejected', reason: '无有效下注或已兑现', panel }); return; }
+  if (state.barIdx < 0 || state.xRef <= 0) { sendJSON(ws, { type: 'cashout_rejected', reason: '已崩盘', panel }); return; }
   bet.ws = ws;   // 刷新 ws（可能重连）
-  await settleBetAt(bet, state.xRef, 'manual');   // ← 服务端 X，客户端报的 X 一律不用
+  await settleBetAt(bet, state.xRef, 'manual');   // ← 服务端 X，客户端报的 X 一律不用；panel 已存在 bet 上
 }
 
-function buildSnapshot() {
+// S8：某玩家本局的注槽列表（新数组，前端恢复两注位只吃此字段；带 autoTarget 供重连恢复自动挡）。老 JS 忽略未知字段不炸。
+function playerBets(playerId) {
+  const out = [];
+  for (const bet of state.bets.values()) {
+    if (bet.playerId === playerId) {
+      out.push({ panel: bet.panel, amount: bet.amount, cashedOut: bet.cashedOut, payout: bet.payout, autoTarget: bet.autoTarget });
+    }
+  }
+  return out.sort((a, b) => a.panel - b.panel);
+}
+
+function buildSnapshot(playerId) {
+  const bets = playerBets(playerId);
   if (state.phase === 'betting') {
     const remainingMs = Math.max(0, BETTING_MS - (state.bettingStart ? Date.now() - state.bettingStart : 0));
-    return { type: 'snapshot', phase: 'betting', roundId: state.roundId, nonce: state.nonce, clientSeed: state.clientSeed, commitHash: state.commitHash, waitMs: BETTING_MS, remainingMs };
+    return { type: 'snapshot', phase: 'betting', roundId: state.roundId, nonce: state.nonce, clientSeed: state.clientSeed, commitHash: state.commitHash, waitMs: BETTING_MS, remainingMs, bets };
   }
   if (state.phase === 'running') {
     // 只给已走的柱（bars 到 barIdx），绝不给未来柱 / serverSeed / walk 全貌。
     const revealed = state.walk.bars.slice(0, state.barIdx + 1).map((b) => ({ barIdx: b.barIdx, x: b.x }));
-    return { type: 'snapshot', phase: 'running', roundId: state.roundId, nonce: state.nonce, clientSeed: state.clientSeed, commitHash: state.commitHash, barIdx: state.barIdx, x: state.xRef, bars: revealed };
+    return { type: 'snapshot', phase: 'running', roundId: state.roundId, nonce: state.nonce, clientSeed: state.clientSeed, commitHash: state.commitHash, barIdx: state.barIdx, x: state.xRef, bars: revealed, bets };
   }
   // done —— serverSeed 已 reveal
-  return { type: 'snapshot', phase: 'done', roundId: state.roundId, nonce: state.nonce, clientSeed: state.clientSeed, commitHash: state.commitHash, crashBar: state.walk?.crashBar, finalX: state.walk?.finalX, serverSeed: state.serverSeed };
+  return { type: 'snapshot', phase: 'done', roundId: state.roundId, nonce: state.nonce, clientSeed: state.clientSeed, commitHash: state.commitHash, crashBar: state.walk?.crashBar, finalX: state.walk?.finalX, serverSeed: state.serverSeed, bets };
 }
 
 async function fetchPlayerBalance(playerId) {
@@ -287,15 +317,15 @@ export function startMomentumHub(wss) {
     if (ws.playerId) {
       fetchPlayerBalance(ws.playerId).then((balance) => {
         sendJSON(ws, { type: 'hello', phase: state.phase, balance });
-        sendJSON(ws, buildSnapshot());
+        sendJSON(ws, buildSnapshot(ws.playerId));
       }).catch((err) => console.error('[momentumHub] 连接初始化异常：', err.message));
     }
     ws.on('message', (raw) => {
       if (!ws.playerId || ws.readyState !== 1) return;
       let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
       if (msg.type === 'bet') { handleBet(ws, msg).catch((err) => console.error('[momentumHub] handleBet 异常：', err.message)); return; }
-      if (msg.type === 'cashout') { handleCashout(ws).catch((err) => console.error('[momentumHub] handleCashout 异常：', err.message)); return; }
-      if (msg.type === 'sync') { sendJSON(ws, buildSnapshot()); }
+      if (msg.type === 'cashout') { handleCashout(ws, msg).catch((err) => console.error('[momentumHub] handleCashout 异常：', err.message)); return; }
+      if (msg.type === 'sync') { sendJSON(ws, buildSnapshot(ws.playerId)); }
     });
   });
   runWaitingPhase(wss).catch((err) => console.error('[momentumHub] 启动房间循环失败：', err.message));
