@@ -5,6 +5,8 @@ import { GAME_REGISTRY, GAME_BY_ID, GAME_BY_BACKEND_ID, TOP_IDS, HOT_IDS, NEW_ID
 import { formatDraw } from '../drawFormatters'
 // 排期器 9 款（多桌桌款）= 有 WS 轮次 + 公开 /round/history 快照的款；单一数据源沿用多桌 mockData，禁手抄第二份。
 import { ALL_TABLE_IDS } from '../MultiTable/mockData'
+// 单S4c：大奖跑马灯瘦版（复用多桌 BigWinMarquee，仅瘦 padding/字号）——移入右栏顶部（顶横条方案已废弃）。
+import BigWinMarqueeSlim from './BigWinMarqueeSlim'
 
 // apiGet 只读、不写余额：传稳定 noop 满足 usePlayerApi 签名并保 memo 不抖（照 TableCard 口径）。
 const NOOP = () => {}
@@ -125,17 +127,18 @@ export default function GameSideRail({ currentGameId, playerToken, onSelect, onL
   useEffect(() => { apiRef.current = api })
 
   const [top, setTop] = useState([])                          // 今日大奖 Top5
+  const [marquee, setMarquee] = useState([])                  // 大奖跑马灯（顶部横滚），与 top 同一 /player/bigwins 请求两用
   const [recentByBe, setRecentByBe] = useState({ be: null, items: [] })  // 近期开奖：连 be 一起存，换款前不串号
 
   const g = currentGameId ? GAME_BY_ID[currentGameId] : null
   const be = g?.backendId
   const isScheduler = !!currentGameId && SCHEDULER.has(currentGameId)
 
-  // 今日大奖：20s 轮询 /player/bigwins（与多桌同频、同源），拉 top。仅本栏挂载时跑。
+  // 大奖播报：20s 轮询 /player/bigwins（与多桌同频、同源）——**一次请求两用**：marquee(跑马灯)+top(今日大奖)，禁重复轮询。
   useEffect(() => {
     let cancelled = false
     const pull = () => apiRef.current.apiGet('/player/bigwins')
-      .then(d => { if (!cancelled && d) setTop(d.top || []) })
+      .then(d => { if (!cancelled && d) { setTop(d.top || []); setMarquee(d.marquee || []) } })
       .catch(() => {})
     pull()
     const t = setInterval(pull, 20000)
@@ -163,6 +166,12 @@ export default function GameSideRail({ currentGameId, playerToken, onSelect, onL
       position: 'fixed', top: 0, right: 0, width: 200, height: '100vh', overflowY: 'auto',
       zIndex: 30, boxSizing: 'border-box', padding: 10, background: COLORS.bg,
     }}>
+      {/* 单S4c：大奖跑马灯 = 右栏第一件（今日大奖上方 200px 内横滚细条），融入卡风格圆角边框；空则不占位。 */}
+      {marquee.length > 0 && (
+        <div style={{ borderRadius: 12, overflow: 'hidden', border: `1px solid ${COLORS.border}`, marginBottom: 10 }}>
+          <BigWinMarqueeSlim items={marquee} />
+        </div>
+      )}
       {top.length > 0 && <TodayJackpot top={top} />}
       {isScheduler && <RecentDraws items={recent} be={be} />}
       <SwitchGame ids={others} onSelect={onSelect} />

@@ -210,6 +210,8 @@ export default function App() {
     // 下的 height:100% BetFeed 头部在真机 Chrome 被裁（S4b 回归）。改为「游戏留右 margin + 右栏 position:fixed」：
     // 游戏回到与 <1280 完全一致的普通块流（不再有 flex 上下文），仅靠 marginRight 让出 200px 给右栏。
     body = showSideRail ? (
+      // 单S4c：跑马灯已移入 GameSideRail 顶部（顶横条方案废弃：其占位依赖游戏底部留白随窗口高度浮动、真机裁下注条）。
+      // 游戏区回到 S4b 形态：普通块流 + marginRight 让出 200px 给右栏（fixed），零 paddingTop、零 overflow 改动。
       <div style={{ position: 'relative', minHeight: '100vh', background: '#0e1520' }}>
         <div style={{ marginRight: 200 }}>{gameView}</div>
         <GameSideRail
