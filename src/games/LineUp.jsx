@@ -80,6 +80,9 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // 单S5：≥1280 有右栏、中栏变窄 → 开奖区/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
+  const hasRail = useMediaQuery('(min-width: 1280px)')
+  const RAIL_MAXW = 670
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
@@ -310,7 +313,8 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
   const drawZone = (
     <LineUpStage phase={drawing ? 'drawn' : settled ? 'settled' : 'betting'} roundNo={room.roundNo}
       drawResult={cur ? { grid: cur.cells } : null} lastRound={shown} muted={muted}
-      style={{ flex: '0 0 auto', zIndex: 1, margin: isMobile ? '8px 12px 0' : '6px 18px 0', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }} />
+      style={{ flex: '0 0 auto', zIndex: 1, margin: isMobile ? '8px 12px 0' : hasRail ? '6px 0 0' : '6px 18px 0', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
   )
 
   // ---- ② 盘区：A 列表 / B 矩阵 双视图 —— 已切至 ./markets-ui/LineUpMarkets（键区单一出处，A/B 视图+维度内建）。
@@ -342,8 +346,9 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
       <div style={{
         flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column',
-        padding: isMobile ? '6px 12px' : '4px 18px', boxSizing: 'border-box',
+        padding: isMobile ? '6px 12px' : hasRail ? '4px 0' : '4px 18px', boxSizing: 'border-box',
         gap: 4, overflowY: 'auto',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
       }}>
         <WinToast toasts={toasts} />
         <LineUpMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
@@ -355,13 +360,14 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
 
       {/* ③ 珠盘路（底部，大小单轨）：切件 history=road 整值 total → 组件内 ROAD_VIEWS 派生 */}
       <LineUpRoad history={road} tab={roadView} onTab={setRoadView} isMobile={isMobile}
-        cols={ROAD_COLS} rows={6} style={{ margin: isMobile ? '0 12px 8px' : '0 18px 8px' }} />
+        cols={ROAD_COLS} rows={6} style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
+          ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
 
       {/* ---- ④ bottom bet band — pinned，grid 4列×2行：
            列1-2 面额四格（10/100 上、50/500 下）｜列3 Bet USD 上/重复钮下｜列4 下注大方钮跨两行 ---- */}
       <div style={{
         flex: '0 0 auto',
-        padding: '6px 12px',
+        padding: hasRail ? '6px 0' : '6px 12px',
         background: DERBY.band,
         borderTop: '1px solid rgba(0,0,0,0.25)',
         position: 'relative', zIndex: 1,
@@ -371,7 +377,7 @@ export default function LineUp({ serverBalance, setServerBalance, playerToken, o
           gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
           gridTemplateRows: 'repeat(2, 28px)',
           gap: 6,
-          maxWidth: 480, margin: '0 auto',
+          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },

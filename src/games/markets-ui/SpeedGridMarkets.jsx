@@ -15,7 +15,7 @@ const EMPTY = new Set()
 // 三组组名（单15 item5）：原页 secHead 三条真实中文标题，逐字节沿用（禁硬造英文）。
 const GROUP_TITLES = ['主盘 · 冠军车号', '发车三段 · 第1/2/3个8 ｜ 车队涂装', '车号直选 · 4×6']
 
-export default function SpeedGridMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, isDesk: isDeskProp, chipMode = false, openMode = 'all' }) {
+export default function SpeedGridMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, isDesk: isDeskProp, chipMode = false, openMode = 'all', hasRail = false }) {
   const isDeskMedia = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const isDesk = isDeskProp == null ? isDeskMedia : isDeskProp
   const betting = !disabled
@@ -95,6 +95,17 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
       {stakeChip(key)}{flyDot(key)}
     </button>
   )
+  // 单S5：竖排键（名/区间/赔率三行）——≥1280 有右栏中栏变窄时，车队四键挤在半幅子盘会裁断赔率，
+  // 改此竖排（照滚球行注三档），赔率独占一行永不被裁。cellBase 默认即 column，不加 row 覆写即竖排。
+  const stackCell = (key, name, range, odds, bg = DERBY.grey) => (
+    <button key={key} type="button" className={`sgCell${wonCls(key)}`} data-key={key} disabled={!betting} onClick={() => onPick(key)}
+      style={{ ...cellBase(key, bg), padding: isMobile ? '4px 2px' : '5px 4px' }}>
+      <span style={cellName}>{name}</span>
+      {range ? <span style={cellRange}>{range}</span> : null}
+      <span style={cellOdds}>{odds}</span>
+      {stakeChip(key)}{flyDot(key)}
+    </button>
+  )
 
   // ---- ② 盘区：主盘 6 键 + 三段 3 键 + 车队 4 键 + 24 直选 ----
   const mainBoard = (
@@ -124,17 +135,19 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
       {open[1] && (
       <>
       <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
-        {rowCell('grid-front', '头排', '1-8', MARKETS['grid-front'].odds.toFixed(2))}
-        {rowCell('grid-mid', '中段', '9-16', MARKETS['grid-mid'].odds.toFixed(2))}
-        {rowCell('grid-rear', '尾排', '17-24', MARKETS['grid-rear'].odds.toFixed(2))}
+        {/* 三段同处半幅子盘：≥1280 右栏挤压时改竖排，赔率独占一行永不裁（单S5 ①）。 */}
+        {(hasRail ? stackCell : rowCell)('grid-front', '头排', '1-8', MARKETS['grid-front'].odds.toFixed(2))}
+        {(hasRail ? stackCell : rowCell)('grid-mid', '中段', '9-16', MARKETS['grid-mid'].odds.toFixed(2))}
+        {(hasRail ? stackCell : rowCell)('grid-rear', '尾排', '17-24', MARKETS['grid-rear'].odds.toFixed(2))}
       </div>
-      {/* 车队行：430 宽一行四键装不下（team-3/4 键内溢出实测），移动改 2×2；桌面保持一行 */}
+      {/* 车队行：430 宽一行四键装不下（team-3/4 键内溢出实测），移动改 2×2；桌面保持一行；
+          ≥1280 有右栏中栏更窄 → 四键改竖排（stackCell），赔率独占一行永不裁（单S5 ①）。 */}
       <div style={{
         display: isMobile ? 'grid' : 'flex',
         gridTemplateColumns: isMobile ? '1fr 1fr' : undefined,
         gap: isMobile ? 5 : 8,
       }}>
-        {TEAMS.map((t, i) => rowCell(`team-${i + 1}`, t.name, t.range, MARKETS[`team-${i + 1}`].odds.toFixed(2), t.c))}
+        {TEAMS.map((t, i) => (hasRail ? stackCell : rowCell)(`team-${i + 1}`, t.name, t.range, MARKETS[`team-${i + 1}`].odds.toFixed(2), t.c))}
       </div>
       </>
       )}

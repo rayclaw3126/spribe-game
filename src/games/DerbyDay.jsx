@@ -82,6 +82,9 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // 单S5：≥1280 有右栏、中栏变窄 → 开奖区/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
+  const hasRail = useMediaQuery('(min-width: 1280px)')
+  const RAIL_MAXW = 670
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
@@ -512,7 +515,8 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   // ---- ③ 珠盘路（切件；六页签 + 占比条 + 真历史滚动，容量 6×20）——判定/页签单一出处 ----
   const beadRoad = (
     <DerbyDayRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
-      style={{ margin: isMobile ? '0 12px 8px' : '0 18px 8px' }} />
+      style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
   )
 
   const gameCard = (
@@ -529,14 +533,15 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       {topBar}
 
       {/* ① 开奖区（顶部）：全场块 + 半场块（按相位亮真珠） */}
-      {drawZone}
+      {hasRail ? <div style={{ alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW, boxSizing: 'border-box' }}>{drawZone}</div> : drawZone}
 
       {/* ② 盘区：半场/全场两组（desk 并排压总高）+ 半全场占位组（中部；空间不足内部纵滚兜底） */}
       <div style={{
         flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column',
-        padding: isMobile ? '6px 12px' : '4px 18px', boxSizing: 'border-box',
+        padding: isMobile ? '6px 12px' : hasRail ? '4px 0' : '4px 18px', boxSizing: 'border-box',
         gap: 4, overflowY: 'auto',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
       }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（两组并排 + 半全场组，视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
@@ -553,7 +558,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
            列1-2 面额四格（10/100 上、50/500 下）｜列3 Bet USD 上/重复钮下｜列4 下注大方钮跨两行 ---- */}
       <div style={{
         flex: '0 0 auto',
-        padding: '6px 12px',
+        padding: hasRail ? '6px 0' : '6px 12px',
         background: DERBY.band,
         borderTop: '1px solid rgba(0,0,0,0.25)',
         position: 'relative', zIndex: 1,
@@ -563,7 +568,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
           gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
           gridTemplateRows: 'repeat(2, 28px)',
           gap: 6,
-          maxWidth: 480, margin: '0 auto',
+          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },

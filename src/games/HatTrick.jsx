@@ -59,6 +59,9 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const isMobile = useIsMobile()
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // 单S5：≥1280 有右栏、中栏变窄 → 舞台/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
+  const hasRail = useMediaQuery('(min-width: 1280px)')
+  const RAIL_MAXW = 670
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
@@ -543,7 +546,8 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       <div style={{
         flex: '1 1 auto', minHeight: isMobile ? 150 : 140, maxHeight: 260,
         position: 'relative', zIndex: 1,
-        margin: isMobile ? '8px 12px 0' : '8px 18px 0',
+        margin: isMobile ? '8px 12px 0' : hasRail ? '8px 0 0' : '8px 18px 0',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
         background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
         borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box',
       }}>
@@ -569,8 +573,9 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       <div style={{
         flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column',
-        padding: isMobile ? '6px 12px' : '6px 18px', boxSizing: 'border-box',
+        padding: isMobile ? '6px 12px' : hasRail ? '6px 0' : '6px 18px', boxSizing: 'border-box',
         gap: 5, overflowY: 'auto',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
       }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处。
@@ -583,12 +588,12 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       </div>
 
       {/* ③ 珠盘路（底部，三页签） */}
-      {beadRoad}
+      {hasRail ? <div style={{ alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW, boxSizing: 'border-box' }}>{beadRoad}</div> : beadRoad}
 
       {/* ---- ④ bottom bet band — pinned（抄 Line Up：grid 4×2 筹码 + USD + 重复 + BetButton）---- */}
       <div style={{
         flex: '0 0 auto',
-        padding: '6px 12px',
+        padding: hasRail ? '6px 0' : '6px 12px',
         background: HATTRICK.band,
         borderTop: '1px solid rgba(0,0,0,0.25)',
         position: 'relative', zIndex: 1,
@@ -598,7 +603,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
           gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
           gridTemplateRows: 'repeat(2, 28px)',
           gap: 6,
-          maxWidth: 480, margin: '0 auto',
+          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },

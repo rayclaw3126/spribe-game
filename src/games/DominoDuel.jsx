@@ -58,6 +58,9 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // 单S5：≥1280 有右栏、中栏变窄 → 对决区/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
+  const hasRail = useMediaQuery('(min-width: 1280px)')
+  const RAIL_MAXW = 670
   // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
   const room = useRoundRoom(playerToken, G.backendId)
 
@@ -459,7 +462,8 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   const beadRoad = (
     <DominoDuelRoad history={road} tab={roadTab} onTab={setRoadTab}
       cols={20} rows={6} bead={isMobile ? 18 : 14} tabFs={10} ratioFs={9.5} pad={6} radius={10}
-      style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, margin: isMobile ? '0 12px 8px' : '0 18px 8px' }} />
+      style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
   )
 
   const gameCard = (
@@ -472,11 +476,12 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       {/* .ddCell hover 样式已随盘口区切至 DominoDuelMarkets（组件内 <style> 挂）；对决区(舞台)动画 keyframes 单一出处 DD_KEYFRAMES */}
       <style>{DD_KEYFRAMES}</style>
       {topBar}
-      {duelZone}
+      {hasRail ? <div style={{ alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW, boxSizing: 'border-box' }}>{duelZone}</div> : duelZone}
       <div style={{
         flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column',
-        padding: isMobile ? '6px 12px' : '4px 18px', boxSizing: 'border-box', gap: 5, overflowY: 'auto',
+        padding: isMobile ? '6px 12px' : hasRail ? '4px 0' : '4px 18px', boxSizing: 'border-box', gap: 5, overflowY: 'auto',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
       }}>
         <WinToast toasts={toasts} />
         <DominoDuelMarkets {...marketsProps} isDesk={isDesk} />
@@ -486,12 +491,12 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
 
       {/* ---- 底部下注栏 grid 4×2 ---- */}
       <div style={{
-        flex: '0 0 auto', padding: '6px 12px', background: DERBY.band,
+        flex: '0 0 auto', padding: hasRail ? '6px 0' : '6px 12px', background: DERBY.band,
         borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
       }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
+          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },

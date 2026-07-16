@@ -57,6 +57,10 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // 单S5：≥1280 才有右栏（App 层 marginRight:200 让位），中栏变窄。此regime收一条统一宽度线：
+  // 舞台/盘区/珠盘/下注条同 maxWidth 居中（压缩收留白），下注条与盘口板左右沿对齐。严格门控 ≥1280，<1280 逐位不变。
+  const hasRail = useMediaQuery('(min-width: 1280px)')
+  const RAIL_MAXW = 680
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
@@ -278,7 +282,8 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   // ---- 珠盘路（真历史滚动，容量 6×20）——切件（判定/页签单一出处）----
   const beadRoad = (
     <HalfTimeRoad history={history.slice(-ROAD_CAP)} tab={roadTab} onTab={setRoadTab}
-      style={{ margin: isMobile ? '0 12px 10px' : '0 18px 12px' }} />
+      style={{ margin: isMobile ? '0 12px 10px' : hasRail ? '0 auto 12px' : '0 18px 12px',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
   )
 
   const gameCard = (
@@ -297,7 +302,8 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
 
       {/* ---- 开奖舞台：DRAWING 展开表演，SETTLED 保持定格，回 BETTING 收起 ---- */}
       {(drawing || settled) && pendingRef.current && (
-        <div style={{ flex: '0 0 auto', margin: isMobile ? '10px 12px 0' : '12px 18px 0', position: 'relative', zIndex: 1 }}>
+        <div style={{ flex: '0 0 auto', margin: isMobile ? '10px 12px 0' : hasRail ? '12px 0 0' : '12px 18px 0', position: 'relative', zIndex: 1,
+          ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
           <HalfTimeStage phase={settled ? 'settled' : 'drawn'} roundNo={room.roundNo} drawResult={{ balls: pendingRef.current.balls }}
             height={isMobile ? 150 : 185} muted={muted}
             shakeRef={cardShakeRef} onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
@@ -308,8 +314,9 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       <div style={{
         flex: 1, minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        padding: isMobile ? '10px 12px' : '12px 18px', boxSizing: 'border-box',
+        padding: isMobile ? '10px 12px' : hasRail ? '12px 0' : '12px 18px', boxSizing: 'border-box',
         gap: isMobile ? 8 : 10,
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
       }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（行①②③ 视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
@@ -320,12 +327,12 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
 
       {/* ---- bottom bet band — pinned，grid 4列×2行（照 Line Up 定案）---- */}
       <div style={{
-        flex: '0 0 auto', padding: '6px 12px', background: HALFTIME.band,
+        flex: '0 0 auto', padding: hasRail ? '6px 0' : '6px 12px', background: HALFTIME.band,
         borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
       }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
+          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
