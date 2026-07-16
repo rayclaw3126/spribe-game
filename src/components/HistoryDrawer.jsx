@@ -210,6 +210,14 @@ function ExpandCard({ it, detail, pending }) {
       )}
       {/* 验证徽章 */}
       <div style={{ display: 'inline-flex', alignItems: 'center', alignSelf: 'flex-start', gap: 6, fontSize: 12, fontWeight: 900, color: badge.c, background: badge.bg, border: `1px solid ${COLORS.border}`, borderRadius: RADIUS.pill, padding: '4px 12px' }}>{badge.t}</div>
+      {/* 单V1：nonce 展示位（本地重算三要素之一 serverSeed+clientSeed+nonce）。
+          落库前的老局 nonce 为 null → 显「该局早于公平链升级」，不炸；重算钮留 V2。 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+        <span style={{ color: COLORS.textFaint, fontWeight: 700 }}>nonce · 随机序</span>
+        {it.nonce != null
+          ? <span style={{ fontFamily: MONO, fontWeight: 800, color: COLORS.text }}>{it.nonce}</span>
+          : <span style={{ color: COLORS.textFaint, fontWeight: 700 }}>{pending ? '开奖后揭晓' : '该局早于公平链升级'}</span>}
+      </div>
       {/* 三字段 mono 可复制 */}
       <div>
         {copyBox('服务器种子哈希 · commitHash', it.serverSeedHash, DERBY.gold)}

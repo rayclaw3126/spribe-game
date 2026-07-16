@@ -278,10 +278,13 @@ async function runDrawn(room) {
   room.drawResult = drawResult;
 
   // reveal 落库：此刻才写 server_seed 明文 + result。
+  // 单V1：nonce 随 result JSONB 落库（照即时游戏 Dice 先例 round.js:356），补齐本地重算三要素
+  // （serverSeed+clientSeed+nonce）——历史局可查。room.nonce 即本期 RNG 派生序（276 行已用），
+  // 只落已有值，开奖推导/RNG/reveal 顺序一行不改。
   try {
     await query(
       `UPDATE rounds SET result = $1::jsonb, server_seed = $2, status = 'drawn' WHERE id = $3`,
-      [JSON.stringify({ drawResult }), room.serverSeed, room.roundId],
+      [JSON.stringify({ drawResult, nonce: room.nonce }), room.serverSeed, room.roundId],
     );
   } catch (err) {
     console.error(`[roundHub:${gameName}] drawn 落库失败：`, err.message);

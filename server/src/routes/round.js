@@ -3030,7 +3030,8 @@ router.get('/history/:game', requireAuth, async (req, res, next) => {
     );
     // settled 局 = 已揭晓，可出 server_seed 明文（照 GET /:id 的 settled 白名单口径）+ 承诺/公开种子，
     // 供前端行内 commit-reveal 验证（sha256(serverSeed)==serverSeedHash）。禁出任何注单/资金字段。
-    // nonce：roundHub 不落库（rounds 无 nonce 列、result 只存 drawResult），历史无法回取 → null。
+    // 单V1：nonce 现随 result JSONB 落库（roundHub reveal），此处直读透出；
+    // 公平链升级前的老局 result 无 nonce 字段 → ?? null（前端显「该局早于公平链升级」）。
     const items = result.rows.map((r) => ({
       id: r.id,
       roundNo: r.round_no,
@@ -3038,7 +3039,7 @@ router.get('/history/:game', requireAuth, async (req, res, next) => {
       serverSeedHash: r.result_hash,
       clientSeed: r.client_seed,
       serverSeed: r.server_seed,
-      nonce: null,
+      nonce: r.result?.nonce ?? null,
       createdAt: r.created_at,
     }));
     const nextCursor = items.length === limit ? items[items.length - 1].id : null;
