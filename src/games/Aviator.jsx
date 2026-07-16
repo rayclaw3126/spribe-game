@@ -136,16 +136,16 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
   }
 
   const displayPlayers = useMemo(() => {
-    const p = panels[0]
-    const you = p.playerBet ? [{
-      id: `you-${roundIdRef.current}`,
+    // 单S7b：两注位各一行「你」（各带 panel 后缀 key，投注流双注两行不串）。
+    const you = panels.flatMap((p, i) => (p.playerBet ? [{
+      id: `you-${roundIdRef.current}-${i}`,
       name: '你',
       bet: p.playerBet.amount,
       target: p.cashedOut?.mult || null,
       status: p.cashedOut ? 'cashed' : phase === 'crashed' ? 'crashed' : 'live',
       payout: p.cashedOut?.win || null,
       you: true,
-    }] : []
+    }] : []))
     return [...you, ...players]
   }, [panels, phase, players])
 
@@ -257,15 +257,16 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
     whistle.stop(ctx.currentTime + 0.5)
   }
 
-  // ---- 自动下注：每局 betting 开始时，若上一局勾了「自动下注」就立即发一次 ----
+  // ---- 自动下注：每局 betting 开始时，若上一局某注位勾了「自动下注」就立即发一次（两注位各自独立）----
   function autoBetOnRoundStart() {
-    const p = panelsRef.current[0]
-    if (!p.autoBet) return
-    if (!(p.bet >= 1)) {
-      updatePanel(0, { autoBet: false, autoNote: '下注金额无效，自动下注已停' })
-      return
-    }
-    placeBetFor(0)
+    panelsRef.current.forEach((p, i) => {
+      if (!p.autoBet) return
+      if (!(p.bet >= 1)) {
+        updatePanel(i, { autoBet: false, autoNote: '下注金额无效，自动下注已停' })
+        return
+      }
+      placeBetFor(i)
+    })
   }
 
   // ---- WS 消息驱动的相位切换 ----
@@ -293,7 +294,9 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
     bettingDeadlineRef.current = performance.now() + waitMs
     countdownRef.current = Math.ceil(waitMs / 1000)
     setCountdown(countdownRef.current)
-    updatePanel(0, { playerBet: null, cashedOut: null, pending: false, cashoutPending: false, note: '' })
+    // 单S7b：两注位一并清场（playerBet/cashedOut/pending/cashoutPending/note）；autoBet/autoCash/bet 跨局保留。
+    panelsRef.current = panelsRef.current.map((p) => ({ ...p, playerBet: null, cashedOut: null, pending: false, cashoutPending: false, note: '' }))
+    setPanels(panelsRef.current)
     setPlayers(makeFeedBots())
     setMessage('')
     stopEngine()
@@ -329,12 +332,13 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
       })
       return changed ? next : list
     })
-    // auto-cashout：达到目标倍数就发一次 cashout（幂等由 cashoutPending 守卫）
-    const p0 = panelsRef.current[0]
-    if (p0.autoCashOn && p0.playerBet && !p0.cashedOut && !p0.cashoutPending && m >= p0.autoCashMult) {
-      updatePanel(0, { cashoutPending: true })
-      wsRef.current?.send(JSON.stringify({ type: 'cashout' }))
-    }
+    // auto-cashout：两注位各自达到目标倍数就发一次 cashout（幂等由各自 cashoutPending 守卫，带 panel:i）
+    panelsRef.current.forEach((p, i) => {
+      if (p.autoCashOn && p.playerBet && !p.cashedOut && !p.cashoutPending && m >= p.autoCashMult) {
+        updatePanel(i, { cashoutPending: true })
+        wsRef.current?.send(JSON.stringify({ type: 'cashout', panel: i }))
+      }
+    })
   }
 
   function onCrashedMsg(msg) {
@@ -354,13 +358,16 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
     setHistory(h => [Number(cp.toFixed(2)), ...h].slice(0, 20))
     setPlayers(list => list.map(p => p.status === 'live' ? { ...p, status: 'crashed' } : p))
 
-    const p0 = panelsRef.current[0]
-    if (p0.playerBet && !p0.cashedOut) {
-      setMyBets(m => [{ bet: p0.playerBet.amount, mult: 0, win: 0 }, ...m].slice(0, 20))
-    }
+    // 单S7b：两注位各自崩盘输本金 → 各推一条战绩行（未兑现的注）。
+    const lostAny = panelsRef.current.some((p) => p.playerBet && !p.cashedOut)
+    panelsRef.current.forEach((p) => {
+      if (p.playerBet && !p.cashedOut) {
+        setMyBets(m => [{ bet: p.playerBet.amount, mult: 0, win: 0 }, ...m].slice(0, 20))
+      }
+    })
     if (cp <= 1.05) {
       setMessage(`本局 ${cp.toFixed(2)}× 秒崩`)
-    } else if (p0.playerBet && !p0.cashedOut) {
+    } else if (lostAny) {
       setMessage(`本轮 ${cp.toFixed(2)}× 飞了，没能及时兑现`)
     } else {
       setMessage(`本轮 ${cp.toFixed(2)}× 飞了`)
@@ -410,13 +417,29 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
       setCrashPoint(cp)
       setServerSeedReveal(msg.serverSeed || null)
     }
+    // 单S7b：吃 S7a 快照新增 bets[] 按 panel 归位，断线重连两注都恢复（兑现钮金额续算）。
+    // cashedOut 无 mult 字段 → 由 payout/amount 反推显示倍数；未开始/无此注位则清空。
+    if (Array.isArray(msg.bets)) {
+      panelsRef.current = panelsRef.current.map((p, i) => {
+        const b = msg.bets.find((x) => x.panel === i)
+        if (!b) return { ...p, playerBet: null, cashedOut: null, pending: false, cashoutPending: false }
+        const amt = Number(b.amount)
+        const cashed = b.cashedOut
+          ? { win: Number(b.payout), mult: amt > 0 ? Number((Number(b.payout) / amt).toFixed(2)) : null }
+          : null
+        return { ...p, playerBet: { amount: amt }, cashedOut: cashed, pending: false, cashoutPending: false }
+      })
+      setPanels(panelsRef.current)
+    }
   }
 
+  // 单S7b：入站帧按 S7a 回显的 msg.panel 路由到对应注位（缺省 0 兼容老帧，绝不再写死 0）。
   function onBetAck(msg) {
     if (msg.balanceAfter !== undefined && msg.balanceAfter !== null) {
       setServerBalance(Number(msg.balanceAfter))
     }
-    updatePanel(0, {
+    const i = msg.panel ?? 0
+    updatePanel(i, {
       pending: false,
       playerBet: { amount: Number(msg.amount) },
       note: `已下注 $${money(msg.amount)}，本轮生效`,
@@ -424,63 +447,64 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
   }
 
   function onBetRejected(msg) {
-    const p0 = panelsRef.current[0]
-    if (p0.autoBet) {
-      updatePanel(0, { pending: false, autoBet: false, autoNote: msg.reason || '下注失败，自动下注已停', note: '' })
+    const i = msg.panel ?? 0
+    const p = panelsRef.current[i]
+    if (p.autoBet) {
+      updatePanel(i, { pending: false, autoBet: false, autoNote: msg.reason || '下注失败，自动下注已停', note: '' })
     } else {
-      updatePanel(0, { pending: false, note: msg.reason || '下注失败' })
+      updatePanel(i, { pending: false, note: msg.reason || '下注失败' })
     }
   }
 
   function onCashoutOk(msg) {
-    const p0 = panelsRef.current[0]
+    const i = msg.panel ?? 0
+    const p = panelsRef.current[i]
     const mult = Number(msg.multiplier)
     const win = Number(msg.payout)
-    updatePanel(0, {
+    updatePanel(i, {
       cashoutPending: false,
       cashedOut: { mult, win },
       note: `已套现 ${mult.toFixed(2)}× — +$${money(win)}`,
     })
     setServerBalance(Number(msg.balanceAfter))
-    setMyBets(m => [{ bet: p0.playerBet?.amount ?? 0, mult, win }, ...m].slice(0, 20))
+    setMyBets(m => [{ bet: p.playerBet?.amount ?? 0, mult, win }, ...m].slice(0, 20))
     pushToast(mult, win)
     playDing()
   }
 
   function onCashoutRejected(msg) {
-    updatePanel(0, { cashoutPending: false, note: msg.reason || '兑现失败' })
+    const i = msg.panel ?? 0
+    updatePanel(i, { cashoutPending: false, note: msg.reason || '兑现失败' })
   }
 
+  // 单S7b：全参数化 panelId i（去写死 0），出站 bet/cashout 带 panel:i。
   function placeBetFor(i) {
-    if (i !== 0) return // 第二注位本批不接服务器，禁用
-    const p = panelsRef.current[0]
+    const p = panelsRef.current[i]
     if (phaseRef.current !== 'betting' || p.playerBet || p.pending || !(p.bet >= 1)) return
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      updatePanel(0, { note: '未连接服务器，请稍候重试' })
+      updatePanel(i, { note: '未连接服务器，请稍候重试' })
       return
     }
     ensureAudio()
     const amount = Number(p.bet)
-    updatePanel(0, { pending: true, note: '下注提交中…' })
-    wsRef.current.send(JSON.stringify({ type: 'bet', amount }))
+    updatePanel(i, { pending: true, note: '下注提交中…' })
+    wsRef.current.send(JSON.stringify({ type: 'bet', amount, panel: i }))
   }
 
   function cashOutFor(i) {
-    if (i !== 0) return
-    const p = panelsRef.current[0]
+    const p = panelsRef.current[i]
     if (phaseRef.current !== 'flying' || !p.playerBet || p.cashedOut || p.cashoutPending) return
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
     ensureAudio()
-    updatePanel(0, { cashoutPending: true })
-    wsRef.current.send(JSON.stringify({ type: 'cashout' }))
+    updatePanel(i, { cashoutPending: true })
+    wsRef.current.send(JSON.stringify({ type: 'cashout', panel: i }))
   }
 
   function toggleAutoBet(i) {
-    if (i !== 0) return
-    const p = panelsRef.current[0]
+    const p = panelsRef.current[i]
     const next = !p.autoBet
-    updatePanel(0, { autoBet: next, autoNote: '' })
-    if (next && phaseRef.current === 'betting' && !p.playerBet && !p.pending) placeBetFor(0)
+    updatePanel(i, { autoBet: next, autoNote: '' })
+    if (next && phaseRef.current === 'betting' && !p.playerBet && !p.pending) placeBetFor(i)
   }
 
   function drawArena(current, mode = phaseRef.current) {
@@ -790,14 +814,11 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
   // Shell BetButton state per bay — mapped from phase/playerBet/cashedOut only.
   function panelButton(i) {
     const p = panels[i]
-    if (i !== 0) {
-      return { state: 'waiting', label: '多注功能下批开放', disabled: true }
-    }
     if (phase === 'flying') {
       if (!p.playerBet) return { state: 'waiting', label: '等待下一局', disabled: true }
       if (p.cashedOut) return { state: 'waiting', label: '已兑现', sub: `$${money(p.cashedOut.win)}`, disabled: true }
       if (p.cashoutPending) return { state: 'cashout', label: '兑现中…', disabled: true }
-      return { state: 'cashout', label: '兑现', sub: `$${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(0), disabled: false }
+      return { state: 'cashout', label: '兑现', sub: `$${money(p.playerBet.amount * multiplier)}`, onClick: () => cashOutFor(i), disabled: false }
     }
     if (p.pending) {
       return { state: 'waiting', label: '下注提交中…', disabled: true }
@@ -809,7 +830,7 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
       state: 'bet',
       label: '下注',
       sub: `$${money(p.bet)}`,
-      onClick: () => placeBetFor(0),
+      onClick: () => placeBetFor(i),
       disabled: !canBetPhase || connStatus !== 'open' || !!p.playerBet || p.bet > (serverBalance ?? 0) || !(p.bet >= 1),
     }
   }
@@ -935,30 +956,41 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
       </Panel>
   )
 
-  // Single bet bay — dual-bay panel architecture retained, only bay 0 rendered
-  // and only bay 0 talks to the server (一局一注协议，双注会幂等冲突)。
-  const p0 = panels[0]
-  const locked0 = !canBetPhase || !!p0.playerBet || p0.pending
-  const bay = (
-    <BetPanel
-      bare={isDesk}
-      bet={p0.bet}
-      setBet={next => setBetFor(0, next)}
-      max={serverBalance ?? 0}
-      inputDisabled={locked0}
-      chipDisabled={locked0}
-      button={panelButton(0)}
-      hint={p0.note || p0.autoNote || message}
-      auto={{
-        betOn: p0.autoBet,
-        cashOn: p0.autoCashOn,
-        cashMult: p0.autoCashMult,
-        onToggleBet: () => toggleAutoBet(0),
-        onToggleCash: () => updatePanel(0, { autoCashOn: !panelsRef.current[0].autoCashOn }),
-        onCashMult: v => updatePanel(0, { autoCashMult: v }),
-      }}
-    />
-  )
+  // 单S7b：双注位——makeBay(i) 每注一块 BetPanel（全参数化 panelId），S7a 协议接双注。
+  // 全局 round message 只挂注单1 的 hint（避免两块重复），注单2 只显自己的 note/autoNote。
+  function makeBay(i) {
+    const p = panels[i]
+    const locked = !canBetPhase || !!p.playerBet || p.pending
+    return (
+      <BetPanel
+        bare={isDesk}
+        bet={p.bet}
+        setBet={next => setBetFor(i, next)}
+        max={serverBalance ?? 0}
+        inputDisabled={locked}
+        chipDisabled={locked}
+        button={panelButton(i)}
+        hint={p.note || p.autoNote || (i === 0 ? message : '')}
+        auto={{
+          betOn: p.autoBet,
+          cashOn: p.autoCashOn,
+          cashMult: p.autoCashMult,
+          onToggleBet: () => toggleAutoBet(i),
+          onToggleCash: () => updatePanel(i, { autoCashOn: !panelsRef.current[i].autoCashOn }),
+          onCashMult: v => updatePanel(i, { autoCashMult: v }),
+        }}
+      />
+    )
+  }
+  // BetPanel 共享件零碰：小标「注单1/注单2」在外层 div 加（样式复用零重画）。
+  function labeledBay(i) {
+    return (
+      <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: COLORS.textMuted, letterSpacing: 0.5, margin: '0 0 4px 2px' }}>注单{i + 1}</div>
+        {makeBay(i)}
+      </div>
+    )
+  }
 
   // ---- Spribe-parity desktop skeleton (≥1024, 1440×900 basis) ----
   if (isDesk) {
@@ -988,8 +1020,11 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
               background: `linear-gradient(rgba(10,17,25,0.78), rgba(10,17,25,0.78)), url(${bayBgUrl}) center / cover no-repeat`,
               borderTop: `1px solid ${COLORS.border}`,
             }}>
-              {/* d. single centered bay */}
-              <div style={{ width: LAYOUT.bayW, maxWidth: '100%' }}>{bay}</div>
+              {/* d. 单S7b：两块注位 bay 并排等宽，居中（注单1 左 / 注单2 右） */}
+              <div style={{ display: 'flex', gap: 12, width: '100%', maxWidth: LAYOUT.bayW * 2 + 12, padding: '0 12px', boxSizing: 'border-box' }}>
+                {labeledBay(0)}
+                {labeledBay(1)}
+              </div>
             </div>
           </div>
         </div>
@@ -1001,7 +1036,11 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
   return (
     <GameLayout color={GREEN}>
       {arena}
-      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0' }}>{bay}</div>
+      {/* 单S7b：手机上下叠两块注位（注单1 上 / 注单2 下） */}
+      <div style={{ maxWidth: isMobile ? '100%' : 480, margin: '14px auto 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {labeledBay(0)}
+        {labeledBay(1)}
+      </div>
       <div style={{ marginTop: 14 }}>
         <BetFeed bets={displayPlayers} myBets={myBets} online={online} maxHeight={300} />
       </div>
