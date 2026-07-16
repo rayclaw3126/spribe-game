@@ -4,11 +4,14 @@
 // 原页 GameTopBar subRow 槽复用；视觉逐字节搬（默认态与原 subRowNode 分毫不变）。
 import { COLORS, RADIUS, HALFTIME } from '../../components/shell/tokens'
 
-export default function HalfTimePodium({ lastDraw, isMobile = false, inline = false }) {
+// compact（单S6，默认关）：≥1280 右栏压窄时游戏侧透传。实测顶栏 subRow 槽仅 ~88px，20 球（收到极限仍 >100px）
+// 物理装不下 → 复用既有 inline 分支【只显和值 pill】：串完整(和值)、期号完整两不挤；20 球在开奖舞台仍可见。
+// 多桌卡头/手机不传 compact → 逐字节不变。
+export default function HalfTimePodium({ lastDraw, isMobile = false, inline = false, compact = false }) {
   const balls = lastDraw?.balls ?? []
   const ballSz = inline ? 12 : (isMobile ? 15 : 17)
-  // 多桌卡头行内：20 球太宽撑爆头行 → 只显门控的和值 pill（20 球在舞台/底部路子墙已见）
-  if (inline) {
+  // 多桌卡头行内 / compact 顶栏窄：20 球太宽撑爆头行 → 只显门控的和值 pill（20 球在舞台/底部路子墙已见）
+  if (inline || compact) {
     return (
       <span style={{ display: 'flex', alignItems: 'center', flex: '0 1 auto', minWidth: 0, overflow: 'hidden' }}>
         <span style={{

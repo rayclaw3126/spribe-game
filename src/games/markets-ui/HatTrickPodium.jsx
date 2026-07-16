@@ -5,19 +5,22 @@
 import { HATTRICK, RADIUS, COLORS } from '../../components/shell/tokens'
 import { DieFace } from './HatTrickMarkets'
 
-export default function HatTrickPodium({ lastRoll, recent = [], isMobile = false, inline = false }) {
+// compact（单S6，默认关）：≥1280 右栏压窄时游戏侧透传 → 骰径收小 + 收起近5期和值串（最宽项）+ 和值 pill 收字号，
+// 留 3 骰+和值 pill，让 GameTopBar 顶栏串完整、期号完整两不挤。多桌卡头/手机不传 → 逐字节不变。
+export default function HatTrickPodium({ lastRoll, recent = [], isMobile = false, inline = false, compact = false }) {
   if (!lastRoll) return null
-  const dieSize = inline ? 14 : (isMobile ? 16 : 18)
+  const dieSize = compact ? 14 : (inline ? 14 : (isMobile ? 16 : 18))
   return (
     <span style={{
-      display: 'flex', alignItems: 'center', gap: inline ? 5 : 8, flexWrap: inline ? 'nowrap' : 'wrap',
+      display: 'flex', alignItems: 'center', gap: compact ? 5 : (inline ? 5 : 8), flexWrap: (inline || compact) ? 'nowrap' : 'wrap',
       minWidth: 0, ...(inline ? { flex: '0 1 auto', overflow: 'hidden' } : { flex: '1 1 auto' }),
     }}>
       {/* 上期三骰迷你面（CSS 点阵） */}
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, ...(inline ? { flex: '0 0 auto' } : {}) }}>
         {lastRoll.dice.map((v, i) => <DieFace key={i} v={v} size={dieSize} />)}
       </span>
-      {/* 近 5 期和值小串（新→旧） */}
+      {/* 近 5 期和值小串（新→旧）——compact 时收起（最宽项，让串完整不挤期号） */}
+      {!compact && (
       <span style={{ display: 'flex', alignItems: 'center', gap: 3, ...(inline ? { minWidth: 0, overflow: 'hidden' } : {}) }}>
         {recent.map((s, i) => (
           <span key={`${s}-${i}`} style={{
@@ -28,9 +31,10 @@ export default function HatTrickPodium({ lastRoll, recent = [], isMobile = false
           }}>{s}</span>
         ))}
       </span>
+      )}
       <span style={{
-        marginLeft: inline ? 4 : 'auto', padding: '2px 12px', borderRadius: RADIUS.pill,
-        background: HATTRICK.gold, color: '#3a2c00', fontSize: inline ? 10 : 12, fontWeight: 900, whiteSpace: 'nowrap',
+        marginLeft: (inline || compact) ? 4 : 'auto', padding: compact ? '2px 9px' : '2px 12px', borderRadius: RADIUS.pill,
+        background: HATTRICK.gold, color: '#3a2c00', fontSize: (inline || compact) ? 10 : 12, fontWeight: 900, whiteSpace: 'nowrap',
         ...(inline ? { flex: '0 0 auto' } : {}),
       }}>{lastRoll.isTriple ? `豹子 ${lastRoll.tripleFace}` : `和值 ${lastRoll.total}`}</span>
     </span>

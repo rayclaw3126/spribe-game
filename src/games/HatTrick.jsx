@@ -432,7 +432,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
     }}>{phaseChip.text}</span>
   )
-  const subRowNode = <HatTrickPodium lastRoll={lastRoll} recent={recent} isMobile={isMobile} />   // 上局信息条（切件）
+  const subRowNode = <HatTrickPodium lastRoll={lastRoll} recent={recent} isMobile={isMobile} compact={hasRail} />   // 上局信息条（切件）；单S6：≥1280 右栏压窄启紧凑档防裁
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} band={HATTRICK.band} venue={G.venue ?? G.displayName}
