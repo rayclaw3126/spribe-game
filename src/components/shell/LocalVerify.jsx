@@ -2,9 +2,17 @@
 // 铁律·单一出处：rng 用同构 makeSeededRng（server/src/lib/seededRng.js，浏览器走纯 JS HMAC-SHA256 分支）；
 // 派生用 ROUND_SPINS（server/src/game/roundSpins.js，与 roundHub 结算同一份）——前端【不手抄】第二份逻辑。
 // 输入 serverSeed+clientSeed+nonce → 本地重算 drawResult，与实际开奖逐字段 ✓/✗ 比对。
+//
+// 单V3a：即时 6 款（dice/plinko/limbo/keno/streakRoll/miniRoulette）并入本件。
+// 两类游戏派生形状不同，故走两条路径：
+//   · 排期器 9 款：ROUND_SPINS[game](rng) → drawResult，逐字段比（原路径，零改动）。
+//   · 即时 6 款：各引擎派生签名各异（rollDice/derivePath/drawKeno/…），走 INSTANT_VERIFY
+//     注册表按款适配（./instantVerify.js，同样直 import 引擎导出，禁手抄公式）。
+//     注册表独立成文件是为了让静态 import 它的 SeedFairness 不被牵连拖进 roundSpins——详见该文件。
 import { useMemo } from 'react';
 import { makeSeededRng } from '../../../server/src/lib/seededRng.js';
 import { ROUND_SPINS } from '../../../server/src/game/roundSpins.js';
+import { INSTANT_VERIFY } from './instantVerify';
 import { COLORS, RADIUS } from './tokens';
 
 const MONO = "ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono', monospace";
@@ -23,11 +31,23 @@ export default function LocalVerify({ game, serverSeed, clientSeed, nonce, drawR
   const result = useMemo(() => {
     try {
       const spin = ROUND_SPINS[game];
-      if (!spin) return { error: '该游戏暂不支持本地重算' };
+      const inst = INSTANT_VERIFY[game];
+      if (!spin && !inst) return { error: '该游戏暂不支持本地重算' };
       if (!serverSeed || nonce == null || !drawResult) return { error: '缺少重算要素（serverSeed/nonce/开奖结果）' };
-      const rng = makeSeededRng(serverSeed, clientSeed ?? '', nonce); // nonce 原样传（与后端 room.nonce 字符串插值同口径）
-      const got = spin(rng).drawResult;
-      const fields = Object.keys(drawResult);
+      let got, fields;
+      if (spin) {
+        // 排期器 9 款（原路径，零改动）：整个 drawResult 都是派生产物，逐字段全比。
+        const rng = makeSeededRng(serverSeed, clientSeed ?? '', nonce); // nonce 原样传（与后端 room.nonce 字符串插值同口径）
+        got = spin(rng).drawResult;
+        fields = Object.keys(drawResult);
+      } else {
+        // 即时 6 款：result 里混着玩家输入与结算产物，只比 fields 列的派生产物；
+        // needs（plinko rows / streak risk）从 result 回显值取——它们是派生的【输入】不是产物。
+        const missing = inst.needs.filter((nd) => drawResult[nd.key] == null);
+        if (missing.length) return { error: `缺少重算要素（${missing.map((m) => m.key).join('/')}）` };
+        got = inst.derive(serverSeed, clientSeed ?? '', nonce, drawResult);
+        fields = inst.fields;
+      }
       const rows = fields.map((k) => ({ k, want: drawResult[k], got: got[k], ok: deepEq(drawResult[k], got[k]) }));
       return { rows, allOk: rows.length > 0 && rows.every((r) => r.ok), got };
     } catch (e) {

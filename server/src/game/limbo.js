@@ -17,7 +17,13 @@
 // 曲线公式完全一致，只是随机源变成「可验证」的：只要事后公开 serverSeed，
 // 任何人都能用 clientSeed + nonce 重算出同一个 r / finalMult，从而验证服务端
 // 没有在开奖后临时改点位作弊。
-import crypto from 'crypto';
+// 单V3a 同构化：本文件原 `import crypto from 'crypto'` 已退役，hmac/sha256 回引
+// lib/seededRng.js 单一出处（Node→原生 crypto / 浏览器→纯 JS，逐位等价由
+// scripts/_isocrypto_parity.mjs 硬闸兜底）。前端 LocalVerify 直 import 本文件的派生函数
+// 做本地重算——禁前端手抄第二份公式。派生逻辑本身零改动，只换哈希调用点。
+// randomBytes（newServerSeed/newClientSeed）是 server-only，改函数体内惰性取 node:crypto，
+// 浏览器 import 本模块不触发、不抛。
+import { hmacSha256Hex, sha256Hex } from '../lib/seededRng.js';
 
 export const HOUSE_EDGE = 0.99;
 export const MAX_MULT = 1000000;
@@ -31,7 +37,7 @@ export const TARGET_MIN = 1.01;
  * @returns {string} 64 位十六进制 sha256 摘要
  */
 export function hashSeed(serverSeed) {
-  return crypto.createHash('sha256').update(serverSeed).digest('hex');
+  return sha256Hex(serverSeed);
 }
 
 /**
@@ -46,10 +52,7 @@ export function hashSeed(serverSeed) {
  * @returns {number} finalMult，范围 [1, MAX_MULT]，保留两位小数
  */
 export function deriveMult(serverSeed, clientSeed, nonce) {
-  const hex = crypto
-    .createHmac('sha256', serverSeed)
-    .update(`${clientSeed}:${nonce}`)
-    .digest('hex');
+  const hex = hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}`);
   let r = parseInt(hex.slice(0, 13), 16) / Math.pow(2, 52);
   // 防除零：r 理论上落在 [0,1)，若恰好为 0（概率极低）用极小正数兜底，
   // 避免 HOUSE_EDGE / r 得到 Infinity。
@@ -89,6 +92,8 @@ export function payoutMultFor(target) {
  * @returns {string}
  */
 export function newServerSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(32).toString('hex');
 }
 
@@ -98,5 +103,7 @@ export function newServerSeed() {
  * @returns {string}
  */
 export function newClientSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(8).toString('hex');
 }

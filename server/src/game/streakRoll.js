@@ -7,7 +7,13 @@
 // 派生的 [0,1) 浮点 → idx = floor(r × 32)。2^52 % 32 = 0，32 个桶【严格等概率】，无模偏、
 // 无需拒绝采样（且玩家押颜色不押 idx）。只要事后公开 serverSeed，任何人能用 clientSeed+nonce
 // 重算同一落格，验证服务端没在开奖后改点。
-import crypto from 'crypto';
+// 单V3a 同构化：本文件原 `import crypto from 'crypto'` 已退役，hmac/sha256 回引
+// lib/seededRng.js 单一出处（Node→原生 crypto / 浏览器→纯 JS，逐位等价由
+// scripts/_isocrypto_parity.mjs 硬闸兜底）。前端 LocalVerify 直 import 本文件的派生函数
+// 做本地重算——禁前端手抄第二份公式。派生逻辑本身零改动，只换哈希调用点。
+// randomBytes（newServerSeed/newClientSeed）是 server-only，改函数体内惰性取 node:crypto，
+// 浏览器 import 本模块不触发、不抛。
+import { hmacSha256Hex, sha256Hex } from '../lib/seededRng.js';
 
 const RTP = 0.95;
 
@@ -45,10 +51,7 @@ export const MULTS = { normal: multsFor(PATTERN_NORMAL), high: multsFor(PATTERN_
  */
 export function drawStreak(serverSeed, clientSeed, nonce, risk) {
   const pattern = PATTERNS[risk];
-  const hex = crypto
-    .createHmac('sha256', serverSeed)
-    .update(`${clientSeed}:${nonce}`)
-    .digest('hex');
+  const hex = hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}`);
   const r = parseInt(hex.slice(0, 13), 16) / Math.pow(2, 52);
   const idx = Math.floor(r * pattern.length);
   return { idx, landed: pattern[idx] };
@@ -69,15 +72,19 @@ export function streakPayout(color, risk, landed) {
 
 /** 对 serverSeed 做 commit hash（reveal 前只广播 hash）。 */
 export function hashSeed(serverSeed) {
-  return crypto.createHash('sha256').update(serverSeed).digest('hex');
+  return sha256Hex(serverSeed);
 }
 
 /** 新私密 serverSeed（32 字节随机，hex）。 */
 export function newServerSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(32).toString('hex');
 }
 
 /** 新公开 clientSeed（8 字节随机，hex）。 */
 export function newClientSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(8).toString('hex');
 }

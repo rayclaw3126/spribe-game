@@ -7,7 +7,13 @@
 // 落号不信前端：spinRoulette 用 HMAC-SHA256(serverSeed, `${clientSeed}:${nonce}:${counter}`)
 // 派生字节，n = 1 + uniform(12)。%12 有模偏（256%12=4，余 0-3 偏多），玩家押具体号可套利，
 // 故用【拒绝采样】丢弃 ≥252 的字节重抽，保证 12 号严格等概率（前端用无偏 Math.random，须对齐）。
-import crypto from 'crypto';
+// 单V3a 同构化：本文件原 `import crypto from 'crypto'` 已退役，hmac/sha256 回引
+// lib/seededRng.js 单一出处（Node→原生 crypto / 浏览器→纯 JS，逐位等价由
+// scripts/_isocrypto_parity.mjs 硬闸兜底）。前端 LocalVerify 直 import 本文件的派生函数
+// 做本地重算——禁前端手抄第二份公式。派生逻辑本身零改动，只换哈希调用点。
+// randomBytes（newServerSeed/newClientSeed）是 server-only，改函数体内惰性取 node:crypto，
+// 浏览器 import 本模块不触发、不抛。
+import { hmacSha256Hex, sha256Hex } from '../lib/seededRng.js';
 
 // 轮盘 12 格顺序（视觉布局，非结算用）；红号集合（特定 6 号，非奇偶）。逐位照抄前端。
 export const WHEEL_ORDER = [11, 1, 9, 5, 4, 10, 6, 12, 2, 8, 7, 3];
@@ -28,10 +34,7 @@ export function spinRoulette(serverSeed, clientSeed, nonce) {
   let counter = 0;
   const nextByte = () => {
     if (hex.length < 2) {
-      hex = crypto
-        .createHmac('sha256', serverSeed)
-        .update(`${clientSeed}:${nonce}:${counter++}`)
-        .digest('hex');
+      hex = hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}:${counter++}`);
     }
     const b = parseInt(hex.slice(0, 2), 16);
     hex = hex.slice(2);
@@ -73,15 +76,19 @@ export function isValidBetKey(key) {
 
 /** 对 serverSeed 做 commit hash（reveal 前只广播 hash）。 */
 export function hashSeed(serverSeed) {
-  return crypto.createHash('sha256').update(serverSeed).digest('hex');
+  return sha256Hex(serverSeed);
 }
 
 /** 新私密 serverSeed（32 字节随机，hex）。 */
 export function newServerSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(32).toString('hex');
 }
 
 /** 新公开 clientSeed（8 字节随机，hex）。 */
 export function newClientSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(8).toString('hex');
 }

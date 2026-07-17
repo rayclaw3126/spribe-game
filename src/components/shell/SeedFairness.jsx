@@ -1,16 +1,51 @@
 import { useState, useEffect, useCallback } from 'react'
 import { COLORS, DERBY, RADIUS, LAYOUT } from './tokens'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
-import { verifyDice } from '../../lib/fairVerify'
+import { INSTANT_VERIFY } from './instantVerify'
 
 // 可验证公平抽屉 — 共享件。壳（定位/圆角/动画/遮罩/抓手/标题行）1:1 抄 HowToPlay.jsx，
 // 暗色皮同取 DERBY 系（球场绿卡底 + 金顶边/段标 + 浅绿正文），禁自编 hex。
 //
-// 批 C：接后端 /seed/current /rotate /client 真数据流 + 挂 verifyDice 本地重算。
-// 本地验证器目前仅支持 Dice（fairVerify 只做了 verifyDice），其它游戏标"暂不支持本地重算"。
+// 批 C：接后端 /seed/current /rotate /client 真数据流 + 挂本地重算。
+//
+// 单V3a：本地验证器从「仅 Dice（手抄的 lib/fairVerify.js）」升级为【即时 6 款】，
+// 派生统一走 shell/instantVerify.js 的 INSTANT_VERIFY 注册表（其直 import 服务端引擎导出）。
+// 原 lib/fairVerify.js 是前端手抄的第二份 dice 公式（且用 crypto.subtle 异步），已整个删除：
+// 手抄件与引擎迟早分叉，分叉时验证器不但证明不了公平，还会把好局判成作弊。
+// 注册表的 derive 是【同步】的（纯 JS HMAC-SHA256，非 crypto.subtle），故 doVerify 不再 await。
 //
 // 等宽字体 MONO 为【新增约定值】（tokens.js 无等宽定义，非抄袭）：用于 hash/seed 长串对齐可读。
 const MONO = "ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono', monospace"
+
+// 手填「后端开出值」的输入提示（按款主字段的实际形状给例）。
+const PLACEHOLDER = {
+  dice: '例如 80.99',
+  limbo: '例如 3.21',
+  roulette: '例如 7',
+  keno: '例如 [3,7,11,14,19,22,25,28,31,36]',
+  plinko: '例如 [1,0,1,1,0,0,1,0]',
+  streak: '例如 5',
+}
+
+// 顺序无关规范化深比（keno drawn / plinko path 是数组，需深比；数组保原序）。
+const canon = (v) => {
+  if (Array.isArray(v)) return v.map(canon)
+  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) o[k] = canon(v[k]); return o }
+  return v
+}
+const deepEq = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b))
+const fmtVal = (v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))
+// 手填的「后端开出值」宽松解析：数组既收 JSON（[1,2,3]）也收逗号列（1,2,3）；数字收数字；其余按字符串。
+function parseExpected(raw, sample) {
+  const s = String(raw).trim()
+  if (s === '') return undefined
+  if (Array.isArray(sample)) {
+    try { const j = JSON.parse(s); if (Array.isArray(j)) return j } catch { /* 非 JSON，落逗号列 */ }
+    return s.replace(/^\[|\]$/g, '').split(',').map((x) => Number(x.trim()))
+  }
+  if (typeof sample === 'number') return Number(s)
+  return s
+}
 
 async function seedApi(path, { method = 'GET', token, body } = {}) {
   const resp = await fetch(path, {
@@ -39,10 +74,13 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
   const [vClient, setVClient] = useState('')
   const [vNonce, setVNonce] = useState('')
   const [vBackend, setVBackend] = useState('')
-  const [vLocal, setVLocal] = useState(null)
+  const [vLocal, setVLocal] = useState(null)     // { 字段名: 重算值 } | 'ERR'
   const [vBusy, setVBusy] = useState(false)
+  const [vExtra, setVExtra] = useState({})       // 单V3a：plinko rows / streak risk 等派生额外输入
 
-  const verifierSupported = game === 'dice'
+  // 单V3a：支持面 = INSTANT_VERIFY 注册表（即时 6 款）。不在表里的（mines/hilo/goal/aviator…）仍标"尚在开发中"。
+  const spec = INSTANT_VERIFY[game]
+  const verifierSupported = !!spec
 
   const loadCurrent = useCallback(async () => {
     setLoading(true); setError('')
@@ -90,17 +128,23 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
     } catch (e) { setClientMsg(e.message) }
   }
 
-  async function doVerify() {
-    if (!verifierSupported) return
+  // 单V3a：注册表 derive 是同步纯 JS（非 crypto.subtle），无需 await；保留 vBusy 只为按钮态一致。
+  function doVerify() {
+    if (!spec) return
     setVBusy(true)
-    try { setVLocal(await verifyDice(vSeed.trim(), vClient.trim(), vNonce.trim())) }
-    catch { setVLocal(NaN) }
+    try { setVLocal(spec.derive(vSeed.trim(), vClient.trim(), vNonce.trim(), vExtra)) }
+    catch { setVLocal('ERR') }
     finally { setVBusy(false) }
   }
 
   const canSetClient = current && current.nonce === 0
-  const backendNum = vBackend.trim() === '' ? null : Number(vBackend)
-  const vMatch = vLocal != null && !Number.isNaN(vLocal) && backendNum != null && backendNum === vLocal
+  // 主字段 = spec.fields[0]（dice→roll / keno→drawn / roulette→n / plinko→path / limbo→finalMult / streak→idx）
+  const mainField = spec ? spec.fields[0] : null
+  const vLocalOk = vLocal != null && vLocal !== 'ERR'
+  const expected = vLocalOk ? parseExpected(vBackend, vLocal[mainField]) : undefined
+  const vMatch = vLocalOk && expected !== undefined && deepEq(expected, vLocal[mainField])
+  // needs 齐了才让点重算（plinko 缺 rows / streak 缺 risk 时 derive 必炸）
+  const extrasReady = !spec || spec.needs.every((nd) => String(vExtra[nd.key] ?? '').trim() !== '')
 
   // —— 样式片 ——
   const sectionTitle = { color: DERBY.gold, fontSize: 12, fontWeight: 900, letterSpacing: 0.5, marginBottom: 8 }
@@ -233,13 +277,13 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
             <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span>🧮 本地验证器（浏览器就地重算）</span>
               <span style={{ fontSize: 10, fontWeight: 800, color: verifierSupported ? DERBY.sel : DERBY.dim, background: verifierSupported ? DERBY.selTint : DERBY.strip, borderRadius: RADIUS.pill, padding: '1px 8px' }}>
-                {verifierSupported ? '当前支持 Dice' : '暂不支持本地重算'}
+                {verifierSupported ? '本局支持重算' : '暂不支持本地重算'}
               </span>
             </div>
             {verifierSupported ? (
               <>
                 <div style={{ color: DERBY.dim, fontSize: 12, lineHeight: 1.6, marginBottom: 8 }}>
-                  贴入已揭晓的 serverSeed + 当时的 clientSeed / nonce，本地 HMAC-SHA256 重算该局 roll，与后端开出的比对。
+                  贴入已揭晓的 serverSeed + 当时的 clientSeed / nonce，本地 HMAC-SHA256 重算该局 {spec.fields.join(' / ')}，与后端开出的比对。
                 </div>
                 <div style={{ marginBottom: 8 }}>
                   <div style={fieldLabel}>serverSeed（明文，轮换后带入）</div>
@@ -255,26 +299,45 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
                     <input type="text" value={vNonce} onChange={e => setVNonce(e.target.value)} spellCheck={false} style={input} />
                   </div>
                 </div>
+                {/* 单V3a：派生额外输入（plinko rows / streak risk）——是玩家下注时选的，不是派生产物，须手填 */}
+                {spec.needs.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    {spec.needs.map((nd) => (
+                      <div key={nd.key} style={{ flex: 1 }}>
+                        <div style={fieldLabel}>{nd.label}</div>
+                        <input type="text" value={vExtra[nd.key] ?? ''} spellCheck={false} style={input}
+                          onChange={e => setVExtra(x => ({ ...x, [nd.key]: e.target.value }))} />
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div style={{ marginBottom: 8 }}>
-                  <div style={fieldLabel}>后端开出的 roll（从该局记录带入 / 手填比对）</div>
-                  <input type="text" value={vBackend} onChange={e => setVBackend(e.target.value)} spellCheck={false} placeholder="例如 80.99" style={input} />
+                  <div style={fieldLabel}>后端开出的 {mainField}（从该局记录带入 / 手填比对）</div>
+                  <input type="text" value={vBackend} onChange={e => setVBackend(e.target.value)} spellCheck={false}
+                    placeholder={PLACEHOLDER[game] || ''} style={input} />
                 </div>
-                <button type="button" onClick={doVerify} disabled={vBusy || !vSeed.trim() || !vClient.trim() || vNonce.trim() === ''} style={{
+                <button type="button" onClick={doVerify} disabled={vBusy || !vSeed.trim() || !vClient.trim() || vNonce.trim() === '' || !extrasReady} style={{
                   width: '100%', padding: '10px 14px', border: `1px solid ${DERBY.sel}`, borderRadius: RADIUS.btn,
                   background: DERBY.selTint, color: DERBY.sel, fontSize: 13, fontWeight: 900,
-                  cursor: vBusy ? 'default' : 'pointer', opacity: vBusy ? 0.6 : 1,
+                  cursor: vBusy || !extrasReady ? 'default' : 'pointer', opacity: vBusy || !extrasReady ? 0.6 : 1,
                 }}>{vBusy ? '重算中…' : '本地重算'}</button>
-                {vLocal != null && (
+                {vLocal === 'ERR' && (
+                  <div style={{ marginTop: 10, color: '#ff8a9a', fontSize: 12, fontWeight: 700 }}>输入有误 · 请核对 serverSeed / clientSeed / nonce{spec.needs.length ? ` / ${spec.needs.map(n => n.key).join('/')}` : ''}</div>
+                )}
+                {vLocalOk && (
                   <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6, background: DERBY.strip, borderRadius: RADIUS.input, padding: '10px 12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                      <span style={{ color: DERBY.dim }}>本地重算 roll</span>
-                      <span style={{ fontFamily: MONO, color: DERBY.text, fontWeight: 800 }}>{Number.isNaN(vLocal) ? '输入有误' : vLocal}</span>
+                    {/* 多字段款（streak→idx+landed）逐字段列出重算值 */}
+                    {spec.fields.map((f) => (
+                      <div key={f} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
+                        <span style={{ color: DERBY.dim, flex: '0 0 auto' }}>本地重算 {f}</span>
+                        <span style={{ fontFamily: MONO, color: DERBY.text, fontWeight: 800, wordBreak: 'break-all', textAlign: 'right' }}>{fmtVal(vLocal[f])}</span>
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
+                      <span style={{ color: DERBY.dim, flex: '0 0 auto' }}>后端开出 {mainField}</span>
+                      <span style={{ fontFamily: MONO, color: DERBY.text, fontWeight: 800, wordBreak: 'break-all', textAlign: 'right' }}>{expected === undefined ? '—' : fmtVal(expected)}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                      <span style={{ color: DERBY.dim }}>后端开出 roll</span>
-                      <span style={{ fontFamily: MONO, color: DERBY.text, fontWeight: 800 }}>{backendNum == null ? '—' : vBackend}</span>
-                    </div>
-                    {backendNum != null && (
+                    {expected !== undefined && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, color: vMatch ? DERBY.sel : '#ff8a9a', fontSize: 13, fontWeight: 900 }}>
                         {vMatch ? '✓ 一致 · 本局公平已验证' : '✗ 不一致 · 请核对输入'}
                       </div>

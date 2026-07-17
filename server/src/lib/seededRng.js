@@ -113,11 +113,15 @@ function hmacSha256HexPure(keyStr, msgStr) {
 //   故 `typeof createHmac` 都会在 dev 浏览器抛错。用 isNode 门控：浏览器分支永不引用 createHmac。
 const isNode = typeof process !== 'undefined' && process.versions != null && process.versions.node != null;
 let hmacNode = null;
+let sha256Node = null;   // 单V3a：sha256 同款环境切（供 6 款即时游戏 hashSeed 复用）
 if (isNode && typeof process.getBuiltinModule === 'function') {
   const nodeCrypto = process.getBuiltinModule('node:crypto'); // 同步取原生 crypto，无静态 import
   hmacNode = (keyStr, msgStr) => nodeCrypto.createHmac('sha256', keyStr).update(msgStr).digest('hex');
+  sha256Node = (str) => nodeCrypto.createHash('sha256').update(str).digest('hex');
 }
-const hmacSha256Hex = hmacNode || hmacSha256HexPure;
+// 单V3a：即时 6 款（dice/plinko/limbo/keno/streakRoll/miniRoulette）退役各自的 import crypto，
+// 统一回引本导出——前后端同一份 HMAC，前端本地重算才可能与后端逐位对上（禁手抄第二份）。
+export const hmacSha256Hex = hmacNode || hmacSha256HexPure;
 
 // 给定 hmac 实现，造 makeSeededRng（硬闸可注入两分支分别对拍）。
 function makeSeededRngWith(hmacHex) {
@@ -150,3 +154,8 @@ export const __hmacPure = hmacSha256HexPure;   // 纯 JS 分支
 export const __hmacNode = hmacNode;            // Node 原生分支（浏览器为 null）
 export const __makeSeededRngWith = makeSeededRngWith;
 export const __sha256HexPure = (str) => toHex(sha256Bytes(utf8(str))); // 边界组直比 sha256 用
+
+// 单V3a：sha256 环境切导出（Node→createHash / 浏览器→复用上面的纯 JS 件）。
+// ⚠ 位置铁律：必须声明在 __sha256HexPure 之【后】——const 有 TDZ，若挪到上面的环境分支处
+//   会在模块初始化时引用未初始化绑定直接抛。
+export const sha256Hex = sha256Node || __sha256HexPure;

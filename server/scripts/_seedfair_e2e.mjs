@@ -1,8 +1,14 @@
 // 批 C 端到端：复刻 SeedFairness 抽屉的真实数据流。
 // GET /seed/current → 打几注 dice → POST /seed/rotate 拿 revealed 明文 →
-// verifyDice(revealed.serverSeed, 该局clientSeed, nonce) === 后端开出的 roll。
+// rollDice(revealed.serverSeed, 该局clientSeed, nonce) === 后端开出的 roll。
+//
+// 单V3a 重指：原引 src/lib/fairVerify.js 的 verifyDice（前端手抄的第二份 dice 公式），该文件已删除，
+// 改引引擎 rollDice 单一出处——本脚本测的是【seed API 的数据流】（commit/reveal/rotate/nonce 递增
+// 是否自洽），不是「两份公式是否相等」，故重指后仍是真测试。
+// ⚠ 公式本身的防改动哨兵另在 scripts/_isocrypto_parity.mjs c 段（那里刻意留一份副本对拍）。
+// rollDice 是同步的（verifyDice 原为 crypto.subtle 异步），故下方调用点已去 await。
 import { pool } from '../src/db.js';
-import { verifyDice } from '../../src/lib/fairVerify.js';
+import { rollDice } from '../src/game/dice.js';
 
 const BASE = 'http://localhost:4000';
 let uid = 0;
@@ -41,10 +47,10 @@ check('POST /seed/rotate 200 + revealed 有 serverSeed 明文 + active nonce=0',
 const revealedSeed = rot.json.revealed.serverSeed;
 
 // 4. ★ 端到端：用 revealed 明文本地重算这 3 局 == 后端开出的 roll
-console.log('\n★ 本地验证器（verifyDice）重算历史局：');
+console.log('\n★ 本地验证器（引擎 rollDice 单一出处）重算历史局：');
 let e2eOk = true;
 for (const r of rounds) {
-  const local = await verifyDice(revealedSeed, r.clientSeed, r.nonce);
+  const local = rollDice(revealedSeed, r.clientSeed, r.nonce);   // 单V3a：同步，无 await
   const ok = local === r.roll;
   if (!ok) e2eOk = false;
   console.log(`   nonce=${r.nonce}  本地=${local}  后端=${r.roll}  ${ok ? '✓ 一致' : '✗ 不符'}`);
