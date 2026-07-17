@@ -3,10 +3,13 @@ import { useState, useRef, useEffect } from 'react'
 // 轮次排期器房间 hook（#43 单2）——把服务器 /ws/rounds 的相位机镜像成 React 状态。
 // 服务器权威：相位/期号/开奖结果/结算全由 WS 广播驱动，前端零本地时钟、零本地开奖。
 //
-// 连 /ws/rounds?token=&game=<backendId>（token 必 encodeURIComponent，拼法照 playerApi.wsUrl 收口模式）。
+// 连 /ws/rounds?token=&game=<backendId>[&room=<房段>]（token 必 encodeURIComponent，拼法照 playerApi.wsUrl 收口模式）。
+// #42 单2：第三参 room —— 空/未传 = 该款【标准房】（与房化前同行为）；'15s' 等 = 该房。
+//   room 一变即断旧连新，且【同 tick 清空全部房相关状态】（防切房脏帧，见下方 effect 注释）。
 // 返回：
 //   phase        'connecting' | 'betting' | 'locked' | 'drawn' | 'settled' | 'idle'
-//   roundNo      服务器全局期号字符串（SG-YYYYMMDD-NNN）| null
+//   roundNo      服务器全局期号字符串（SG-YYYYMMDD-NNN / 快房 SG15-…）| null
+//   roundId      当期共享轮 id | null —— #42 下注时当【房凭证】传后端（后端据它定位该款哪个房）
 //   countdownMs  倒计时（ms）——由 endsAt - Date.now() 本地插值（每 500ms 重算，绝不本地累加），
 //                仅 betting/locked/idle 有意义；drawn/settled 归 0
 //   drawResult   本期开奖 { n } | null（drawn 后 & 快照 reveal 态；betting/locked 为 null）
@@ -14,28 +17,61 @@ import { useState, useRef, useEffect } from 'react'
 //                （仅本人有注才收到；【只存不动余额】——余额回写权在调用方动画层）
 //   commit       本期承诺/揭晓 { roundNo, serverSeedHash, clientSeed, nonce, serverSeed:string|null }
 //   connected    WS 是否 OPEN
+//   roomError    'invalid_room' | null —— 服务端 1008 拒房（?room= 认不出）；此时【不重连】，phase='error'
 //
 // 断线自动重连（指数退避，上限 10s）；重连 onopen 主动 {type:'sync'} 拉快照恢复相位。
 
-function buildRoundsWsUrl(token, game) {
+// #42 单2：room 为空/未传 → 不拼 &room=，服务端落该款【标准房】（与房化前逐字节同行为）。
+function buildRoundsWsUrl(token, game, room) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${window.location.host}/ws/rounds?token=${encodeURIComponent(token)}&game=${encodeURIComponent(game)}`
+  const base = `${proto}://${window.location.host}/ws/rounds?token=${encodeURIComponent(token)}&game=${encodeURIComponent(game)}`
+  return room ? `${base}&room=${encodeURIComponent(room)}` : base
 }
 
-export function useRoundRoom(playerToken, game) {
+export function useRoundRoom(playerToken, game, room) {
   const [phase, setPhase] = useState('connecting')
   const [roundNo, setRoundNo] = useState(null)
+  const [roundId, setRoundId] = useState(null)   // #42：当期轮 id —— 下注时当【房凭证】传给后端
   const [countdownMs, setCountdownMs] = useState(0)
   const [drawResult, setDrawResult] = useState(null)
   const [settleInfo, setSettleInfo] = useState(null)
   const [commit, setCommit] = useState(null)
   const [connected, setConnected] = useState(false)
+  const [roomError, setRoomError] = useState(null)   // #42：'invalid_room' —— 服务端 1008 拒房，禁重连
 
   const wsRef = useRef(null)
   const endsAtRef = useRef(null)          // 当前 timed 相位的结束时间戳（服务器 ms）；非 timed 相位为 null
   const reconnectAttemptRef = useRef(0)
   const reconnectTimerRef = useRef(null)
   const cdTimerRef = useRef(null)
+
+  // ============ #42 切房零脏帧：房一变就【在渲染中】重置房相关状态 ============
+  //
+  // 为什么必须在渲染中、而不是在 effect 里：
+  //   effect 版的时序是「房变 → 用【旧房状态】渲染 → paint（这一帧就是脏帧）→ effect 跑 → 重置 → 再渲染」。
+  //   也就是说 effect 里重置【必然先闪一帧旧房数据】——正是要防的东西。
+  //   渲染中 set 是 React 官方的「prop 变化时调整 state」范式：React 立刻重渲染且【不提交中间帧】，零脏帧。
+  //
+  // 要清的四处（D 段查证）：
+  //   · roundNo/roundId/drawResult/settleInfo/commit → 不清则新 tab 下挂着旧房的期号与开奖
+  //   · countdownMs → 不清则新 tab 上显示旧房的剩余秒
+  //   · endsAtRef（倒计时基准）→ 心跳是【独立 effect】（[] deps，永不随房重建），只读 endsAtRef；
+  //     不清就会拿旧房 endsAt 一直倒数（15s 房 tab 上跳 30s 房的秒），且【不会自愈】——最阴的一处。
+  //     ⚠ 它是 ref，React 禁止渲染期访问 → 放在下方 WS effect 顶部清（effect 紧跟 paint 执行，
+  //       而心跳 500ms 才跳一次，够不着这个窗口；渲染期的 setCountdownMs(0) 已保住首帧干净）。
+  //
+  // 与 BillDrawer 切 tab 脏帧同族，但处置相反：那边是「防御回落」，这边必须【显式清空】——
+  // 旧房数据看着完全合法，只是属于另一个房，回落防不住。
+  const roomSig = `${game}|${room ?? ''}`
+  const [prevRoomSig, setPrevRoomSig] = useState(roomSig)
+  if (prevRoomSig !== roomSig) {
+    setPrevRoomSig(roomSig)
+    setPhase('connecting')
+    setRoundNo(null); setRoundId(null)
+    setDrawResult(null); setSettleInfo(null); setCommit(null)
+    setRoomError(null); setConnected(false)
+    setCountdownMs(0)
+  }
 
   // 倒计时：单一 500ms 心跳，永远从 endsAt 重算剩余（不累加，避免漂移/后台节流误差）。
   useEffect(() => {
@@ -49,11 +85,16 @@ export function useRoundRoom(playerToken, game) {
   useEffect(() => {
     if (!playerToken) return undefined
     let cancelled = false
+    // #42 切房：清倒计时基准（ref 不能在渲染期碰，故落这里）。不清则心跳会拿旧房 endsAt 继续倒数。
+    endsAtRef.current = null
 
     // 应用一条「相位帧」（phase 广播 / snapshot 共用）到状态。
     function applyPhaseFrame(p, msg) {
       setPhase(p)
       if (msg.roundNo !== undefined) setRoundNo(msg.roundNo)
+      // #42：服务端 snapshot/phase 一直都带 roundId（buildSnapshot / runBetting 广播），
+      // 房化前没人用故一直被丢掉。现在它是下注的房凭证——后端按它在该款所有房里定位当期房。
+      if (msg.roundId !== undefined) setRoundId(msg.roundId)
 
       // 倒计时基准：timed 相位取 endsAt（快照可能只带 remainingMs，则由本地时钟折算）。
       if (p === 'betting' || p === 'locked' || p === 'idle') {
@@ -110,7 +151,7 @@ export function useRoundRoom(playerToken, game) {
     function connect() {
       if (cancelled) return
       if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return
-      const ws = new WebSocket(buildRoundsWsUrl(playerToken, game))
+      const ws = new WebSocket(buildRoundsWsUrl(playerToken, game, room))
       wsRef.current = ws
       ws.onopen = () => {
         if (cancelled) return
@@ -120,9 +161,13 @@ export function useRoundRoom(playerToken, game) {
         if (wasReconnect) ws.send(JSON.stringify({ type: 'sync' }))   // 重连补快照
       }
       ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data) } catch { return } dispatch(m) }
-      ws.onclose = () => {
+      ws.onclose = (e) => {
         if (cancelled) return
         setConnected(false)
+        // #42：1008 = 服务端显式拒房（roomNameOf 认不出 ?room= → close(1008,'invalid_room')）。
+        // 这是【永久性】拒绝，重连必然再被踢 → 无条件退避会陷入「连上就踢、退避、再连」死循环，
+        // 既刷爆服务端也永远不给用户任何反馈。故认死它：不重连，置 error 态让 UI 说话。
+        if (e?.code === 1008) { setRoomError('invalid_room'); setPhase('error'); return }
         const attempt = reconnectAttemptRef.current + 1
         reconnectAttemptRef.current = attempt
         reconnectTimerRef.current = setTimeout(connect, Math.min(10000, 1000 * Math.pow(2, attempt - 1)))
@@ -136,8 +181,8 @@ export function useRoundRoom(playerToken, game) {
       if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null }
       if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.onerror = null; wsRef.current.onmessage = null; wsRef.current.close() }
     }
-    // 相位/数值全由 WS 分发；重连只依赖 token + game
-  }, [playerToken, game])
+    // 相位/数值全由 WS 分发；重连只依赖 token + game + room（#42：room 一变即断旧连新）
+  }, [playerToken, game, room])
 
-  return { phase, roundNo, countdownMs, drawResult, settleInfo, commit, connected }
+  return { phase, roundNo, roundId, countdownMs, drawResult, settleInfo, commit, connected, roomError }
 }

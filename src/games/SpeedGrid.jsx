@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { Panel } from '../components/GameLayout'
-import { COLORS, RADIUS, LAYOUT, DERBY } from '../components/shell/tokens'
+import { COLORS, RADIUS, LAYOUT, DERBY, MONO } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
 import BetButton from '../components/shell/BetButton'
@@ -66,8 +66,17 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   const RAIL_MAXW = 670
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
-  // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
-  const room = useRoundRoom(playerToken, G.backendId)
+  // ---- #42 双订阅：两房各一条 WS（未选中的房也连——tab 上要显它的实时期号/倒计时）----
+  // ⚠ Rules of Hooks：这里【显式调两次】而不是 G.rooms.map(...)。房数在编译期由 registry 定死
+  //   （静态模块常量，运行时不可能变），map 出来的 hook 数量看着可变，既触 eslint 也会让后来者
+  //   误以为能动态增减房。speedgrid 是多房试点、固定两房；将来别的款要多房，照此显式写。
+  const ROOMS = G.rooms                                    // [{key:'30s',label},{key:'15s',label}]
+  const [selectedRoomKey, setSelectedRoomKey] = useState(ROOMS[0].key)
+  const roomA = useRoundRoom(playerToken, G.backendId, ROOMS[0].key)
+  const roomB = useRoundRoom(playerToken, G.backendId, ROOMS[1].key)
+  const roomsByKey = useMemo(() => ({ [ROOMS[0].key]: roomA, [ROOMS[1].key]: roomB }), [ROOMS, roomA, roomB])
+  // 选中房 = 舞台/盘口/注栏/公平抽屉的唯一真相来源（下方所有 room.* 读的都是它）
+  const room = roomsByKey[selectedRoomKey]
 
   const [bet, setBet] = useState(10)
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
@@ -84,13 +93,22 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   const [uiPhase, setUiPhase] = useState('betting')
   const [animChamp, setAnimChamp] = useState(null)     // 当前开奖动画的冠军车号
   const [lastChamp, setLastChamp] = useState(SEED_CHAMP)
-  const [road, setRoad] = useState(SEED_ROAD)
+  // #42 路珠按房存：两房开的是完全不同的局，共用一条路 = 混流（珠子对不上期号）。
+  // 各房的珠子来自各自 hook 的 drawResult 流 —— 选中房在动画演完时追加（保悬念，见 finishRound），
+  // 未选中房在 drawResult 一到就追加（没有动画可等）。
+  const [roadByRoom, setRoadByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_ROAD])))
+  const road = roadByRoom[selectedRoomKey] ?? SEED_ROAD
   const [roadTab, setRoadTab] = useState('BS')   // 珠盘路视角（手机/桌面共用一个 state）
   const [result, setResult] = useState(null)           // { champ, hits:Set, winTotal, perKeyOutcome }
   const [toasts, setToasts] = useState([])
 
   const picksRef = useRef(picks)
-  const betsRef = useRef(new Map())        // 本期已下注并落库的 {key: 累计注额}（供 stake chip/重复/余额校验）
+  // #42 注单暂存按房：{roomKey: Map<key, 累计注额>}。切走再切回【同一期】，已下的注还在 ——
+  // 这是刻意的：注是真金白银下进那一房的，切个 tab 就把它从 UI 抹掉，玩家会以为注没了。
+  // 只在【该房自己换期】时清（见下方 per-room 换期 effect），禁按 tab 切换一刀 clear。
+  const betsByRoomRef = useRef(Object.fromEntries(ROOMS.map((r) => [r.key, new Map()])))
+  const betsOf = (k) => betsByRoomRef.current[k] || new Map()
+  const betsRef = { get current() { return betsOf(selectedRoomKey) }, set current(m) { betsByRoomRef.current[selectedRoomKey] = m } }
   const lastBetsRef = useRef(new Map())
   const betRef = useRef(bet)
   const pendingRef = useRef(null)          // 只读表演：当前动画冠军车号（铁律不变）
@@ -98,8 +116,11 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   const timersRef = useRef([])
   const shownRoundRef = useRef(null)       // 已进入 betting 的当前期号（换期 reset 判定）
   const animatedRoundRef = useRef(null)    // 已启动开奖动画的期号（每期只演一次）
-  const settledRoundRef = useRef(null)     // 已回写余额的期号（每期只回写一次）
-  const settleInfoRef = useRef(null)       // 镜像 room.settleInfo，供动画结束时读取
+  // #42：余额/toast 的「本期已处理」判定改 Set —— 两房各自出期号（SG- / SG15-，天然不撞），
+  // 选中房走 finishRound、未选中房走后台结算 effect，两条路共用这一个 Set 防重（同期只回写一次）。
+  const settledRoundsRef = useRef(new Set())
+  const settleInfoRef = useRef(null)       // 镜像【选中房】settleInfo，供动画结束时读取
+  const betsResetRoundRef = useRef({})     // #42：{roomKey: 已清过注单的期号} —— 各房自己换期才清自己的注
 
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { settleInfoRef.current = room.settleInfo }, [room.settleInfo])
@@ -118,10 +139,10 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     const si = settleInfoRef.current
     const hadBet = si && si.roundNo === rnd
     // 余额回写（每期一次）：有注用后端 settleInfo.balanceAfter；无注不动钱。
-    if (hadBet && si.balanceAfter != null && settledRoundRef.current !== rnd) {
+    if (hadBet && si.balanceAfter != null && !settledRoundsRef.current.has(rnd)) {
       setServerBalance(Number(si.balanceAfter))
     }
-    settledRoundRef.current = rnd
+    settledRoundsRef.current.add(rnd)
     // 视觉结算仅当本期仍是当前展示期（若下一期 betting 已抢先，跳过不覆盖新期 UI）
     if (shownRoundRef.current !== rnd) return
     let hits, winTotal, perKeyOutcome = null
@@ -135,7 +156,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       hits = hitsOf(champ); winTotal = 0
     }
     setLastChamp(champ)
-    setRoad(h => [...h, champ].slice(-ROAD_CAP))   // 存整值 champ → 珠盘路多视角派生（判定走引擎）
+    // #42：追进【选中房】自己的路（动画演完才追，保悬念）。存整值 champ → 多视角派生（判定走引擎）
+    setRoadByRoom(m => ({ ...m, [selectedRoomKey]: [...(m[selectedRoomKey] || SEED_ROAD), champ].slice(-ROAD_CAP) }))
     setResult({ champ, hits, winTotal, perKeyOutcome })
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
@@ -144,19 +166,52 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   }
 
   // ---- 相位驱动 effects（全部只读 room，本地不产相位）----
-  // A. 新一期 betting：换期 reset（快照上期注单供「重复」→ 清盘 → 回 betting）
+
+  // A0. #42 各房换期清各房注单 —— 【两房都跑】，与当前选中哪个 tab 无关。
+  // 为什么必须按房独立：未选中的房也在自转，它换期时它的注单就作废了；若只在选中房跑，
+  // 切回去会看到上一期（甚至几期前）的注单挂在新期上——比不显示更糟（假注单）。
+  useEffect(() => {
+    for (const r of ROOMS) {
+      const rm = roomsByKey[r.key]
+      if (rm.phase !== 'betting' || !rm.roundNo) continue
+      if (betsResetRoundRef.current[r.key] === rm.roundNo) continue
+      betsResetRoundRef.current[r.key] = rm.roundNo
+      const m = betsOf(r.key)
+      if (m.size) {
+        // 「重复上期」只服务选中房（那是玩家眼前的盘）
+        if (r.key === selectedRoomKey) { lastBetsRef.current = new Map(m); setHasLast(true) }
+        betsByRoomRef.current[r.key] = new Map()
+        if (r.key === selectedRoomKey) setBetsPlaced(new Map())
+      }
+    }
+    // roomsByKey/betsOf 走 refs 与派生值，无需入依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomA.phase, roomA.roundNo, roomB.phase, roomB.roundNo, selectedRoomKey])
+
+  // A. 新一期 betting（【仅选中房】）：UI 清盘 → 回 betting。注单清理已由 A0 按房处理。
   useEffect(() => {
     if (room.phase === 'betting' && room.roundNo && room.roundNo !== shownRoundRef.current) {
       shownRoundRef.current = room.roundNo
-      if (betsRef.current.size) { lastBetsRef.current = new Map(betsRef.current); setHasLast(true) }
-      betsRef.current = new Map(); setBetsPlaced(new Map())
       picksRef.current = new Set(); setPicks(new Set())
+      setBetsPlaced(new Map(betsOf(selectedRoomKey)))   // 与该房的暂存对齐（切房回来时也走这条）
       setResult(null)
       setFeedBets(makeFeedBots())
       setNetErr(null)
       setUiPhase('betting')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.phase, room.roundNo])
+
+  // A1. #42 切房：把 UI 拉到新房的当前态（注单显该房暂存、清掉上一房的开奖结果与动画）。
+  // 舞台另有 key={selectedRoomKey} 强制重挂，这里只管数据面。
+  useEffect(() => {
+    setBetsPlaced(new Map(betsOf(selectedRoomKey)))
+    picksRef.current = new Set(); setPicks(new Set())
+    setResult(null); setAnimChamp(null); setNetErr(null)
+    shownRoundRef.current = null       // 让 A 对新房的当期重新跑一遍（回 betting UI）
+    animatedRoundRef.current = null
+    setUiPhase('betting')
+  }, [selectedRoomKey])
 
   // B. locked：封盘（尚在 betting UI 时切 locked；已进入 drawing 的动画不打断）
   useEffect(() => {
@@ -178,6 +233,41 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     // finishRound 走 refs，无需入依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.drawResult, room.roundNo])
+
+  // D. #42 未选中房的后台结算：余额 + WinToast + 路珠，全部立即应用。
+  //   · 为什么不等动画：你没在看那一房，没有动画可等 —— settleInfo 一到就是终局。
+  //   · 为什么余额也要写：钱是真扣真派的，不能因为「玩家切走了 tab」就不回写（切回来才发现
+  //     余额对不上，会被当成吞钱）。服务端 balanceAfter 是权威快照；两房近同时结算时
+  //     last-write 可接受，下一次任一房结算/刷新即自纠。
+  //   · toast 与选中 tab 无关：钱动了就该响。文案带房名，否则玩家不知道是哪一房中的。
+  //   · settledRoundsRef 与 finishRound 共用：同一期号只回写一次（两房期号前缀不同，天然不撞）。
+  useEffect(() => {
+    for (const r of ROOMS) {
+      if (r.key === selectedRoomKey) continue          // 选中房走 finishRound（动画演完才回写）
+      const rm = roomsByKey[r.key]
+      const si = rm.settleInfo
+      if (!si || !si.roundNo || settledRoundsRef.current.has(si.roundNo)) continue
+      settledRoundsRef.current.add(si.roundNo)
+      if (si.balanceAfter != null) setServerBalance(Number(si.balanceAfter))
+      const win = Number(si.totalPayout || 0)
+      if (win > 0) pushToast(`${r.label} 命中`, win)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomA.settleInfo, roomB.settleInfo, selectedRoomKey])
+
+  // E. #42 未选中房的路珠：drawResult 一到就追（无动画可等）。选中房在 finishRound 里追（保悬念）。
+  const bgRoadRoundRef = useRef({})
+  useEffect(() => {
+    for (const r of ROOMS) {
+      if (r.key === selectedRoomKey) continue
+      const rm = roomsByKey[r.key]
+      if (!rm.drawResult || !rm.roundNo || bgRoadRoundRef.current[r.key] === rm.roundNo) continue
+      bgRoadRoundRef.current[r.key] = rm.roundNo
+      const champ = rm.drawResult.n
+      setRoadByRoom(m => ({ ...m, [r.key]: [...(m[r.key] || SEED_ROAD), champ].slice(-ROAD_CAP) }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
 
   const betting = room.phase === 'betting'
   const drawing = uiPhase === 'drawing'
@@ -203,7 +293,9 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     if (serverBalance != null && total > serverBalance) { setNetErr('余额不足'); return false }
     setNetErr(null)
     try {
-      await api.apiPlay(G.backendId, { bets: Object.fromEntries(entries) })   // 返 balanceAfter → 自动回写扣款
+      // #42：带上当期 roundId 作【房凭证】—— 后端据它在该款所有房里定位当期 betting 房。
+      // 不传的话一律落标准房（房化前的行为），快房的注就跑到 30s 房去了。
+      await api.apiPlay(G.backendId, { bets: Object.fromEntries(entries), roundId: room.roundId })   // 返 balanceAfter → 自动回写扣款
       entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
       setBetsPlaced(new Map(betsRef.current))
       return true
@@ -258,13 +350,61 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
     }}>{phaseChip.text}</span>
   )
+  // ---- #42 速度 tab 条（形态A）：顶栏下 44px 行，双端同构 ----
+  // 每房显 label + 期号短号 + 【该房自己 hook 的】实时倒计时 —— 未选中的房也在连，故它的秒数是真的。
+  // 高度账（手机 700 档）：舞台是 height:150 的 flex:'0 0 auto' 锁顶段，本行 44px 全从
+  //   中滚区（flex:'1 1 0'）扣 → 舞台一像素不动，代价是盘口少露约一行半。
+  // 色值全走 tokens（DERBY.sel/selTint/strip/dim），零新 hex。
+  const roomTabs = ROOMS.length > 1 && (
+    <div style={{
+      flex: '0 0 auto', display: 'flex', gap: 6, height: 44, alignItems: 'center',
+      padding: isMobile ? '0 12px' : '0 18px', boxSizing: 'border-box',
+    }}>
+      {ROOMS.map((r) => {
+        const rm = roomsByKey[r.key]
+        const on = r.key === selectedRoomKey
+        const sec = Math.max(0, Math.ceil((rm.countdownMs || 0) / 1000))
+        const timed = rm.phase === 'betting' || rm.phase === 'locked' || rm.phase === 'idle'
+        // 期号短号：SG-20260717-1604 → #1604（只取序号段，长串在 44px 里塞不下）
+        const shortNo = rm.roundNo ? `#${String(rm.roundNo).split('-').pop()}` : '…'
+        return (
+          <button key={r.key} type="button" onClick={() => setSelectedRoomKey(r.key)} style={{
+            flex: '1 1 0', minWidth: 0, height: 34, borderRadius: RADIUS.pill, cursor: 'pointer',
+            background: on ? DERBY.sel : DERBY.strip,
+            border: `1px solid ${on ? DERBY.sel : COLORS.borderLight}`,
+            color: on ? '#0d2016' : DERBY.dim,
+            fontSize: 12, fontWeight: 900, letterSpacing: 0.2,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden',
+          }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</span>
+            <span style={{ fontFamily: MONO, opacity: on ? 0.75 : 0.6, flex: '0 0 auto' }}>{shortNo}</span>
+            <span style={{
+              fontFamily: MONO, flex: '0 0 auto',
+              color: on ? '#0d2016' : (timed ? DERBY.sel : DERBY.dim),
+            }}>{timed ? `${sec}s` : '—'}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
         roundId={room.roundNo || '连接中…'}
         phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onHistory={() => setHistoryOpen(true)} onFairness={() => setFairOpen(true)} />
+      {roomTabs}
+      {/* #42：服务端 1008 拒房（?room= 认不出）——hook 已停重连，这里给出口，否则页面白等 */}
+      {room.roomError === 'invalid_room' && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
+          background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
+        }}>该房不存在，请切回其它房</div>
+      )}
       {/* 断线重连提示（hook 自动指数退避重连；恢复后 sync 补相位） */}
-      {!room.connected && room.roundNo && (
+      {!room.connected && room.roundNo && room.roomError !== 'invalid_room' && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${DERBY.orange}`, borderRadius: 10,
@@ -297,7 +437,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       // 手机三段锁死：两相位舞台同高常驻(锁顶不跳)；桌面原样
       ...(isDesk ? {} : { height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center' }),
     }}>
-      <SpeedGridStage phase={uiPhase} roundNo={room.roundNo} drawResult={{ n: cur }} muted={muted} height={128} />
+      <SpeedGridStage key={selectedRoomKey} phase={uiPhase} roundNo={room.roundNo} drawResult={{ n: cur }} muted={muted} height={128} />
     </div>
   ) : (
     <div style={{
@@ -463,7 +603,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
         </div>
       </div>
       <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} game={G.backendId} drawResult={room.drawResult} onViewHistory={() => setHistoryOpen(true)} />
-      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} room={selectedRoomKey} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>

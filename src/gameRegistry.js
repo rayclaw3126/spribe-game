@@ -10,7 +10,8 @@
 //   venue       架空场馆名（仅部分游戏有，来自各 games/*.jsx 的 const VENUE；无则 null）
 //   desc/color/bg/cover/cat  卡片副文案 / 主题色 / 卡片渐变 / 封面图 / 分类
 //   cat         crash | pk | lotto | arcade（五大类先按此分，日后可调；Lobby tab 见下方映射）
-//   rooms       预留：多房间配置（暂空数组）
+//   rooms       多房配置 [{key,label}]（#42）：非空 → 该款页面渲染速度 tab 条、可切房；
+//               空数组 → 单房，tab 条不渲染（其余 20 款均如此）。key 对齐后端 ROOM_CONFIGS 的 room 段。
 //
 // 数据来源：Lobby.jsx GAMES 数组 + 各 games/*.jsx 的 const VENUE + SeedFairness/WS 现发 game id。
 // 全部机械抄录，未改任何值。
@@ -58,7 +59,11 @@ export const GAME_REGISTRY = [
   { id: 'HatTrick',     backendId: 'hattrick',    name: '帽子戏法',    displayName: '帽子戏法',    venue: '琥珀穹顶',   desc: '三颗骰子，押总点数！',   color: '#35d07f', bg: INSTANT_BG,                                 cover: coverTotalGoals,   cat: 'lotto',  rooms: [] },
   { id: 'DerbyDay',     backendId: 'derbyday',    name: '德比大战',    displayName: '德比大战',    venue: '翡翠竞技场', desc: '主客对决，押你的一方！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverDerbyDay,     cat: 'lotto',  rooms: [] },
   { id: 'LineUp',       backendId: 'lineup',      name: '首发阵容',    displayName: '首发阵容',    venue: '蓝宝石球场', desc: '五行 25 号，押各行和！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverLineUp,       cat: 'lotto',  rooms: [] },
-  { id: 'SpeedGrid',    backendId: 'speedgrid',   name: '极速方格',    displayName: '极速方格',    venue: '黄玉赛道',   desc: '24 车争先，一押到底！',  color: '#35d07f', bg: INSTANT_BG,                                 cover: coverSpeedGrid,    cat: 'pk',     rooms: [] },
+  { id: 'SpeedGrid',    backendId: 'speedgrid',   name: '极速方格',    displayName: '极速方格',    venue: '黄玉赛道',   desc: '24 车争先，一押到底！',  color: '#35d07f', bg: INSTANT_BG,                                 cover: coverSpeedGrid,    cat: 'pk',
+    // #42：多房试点。key = 后端 ROOM_CONFIGS 的 room 段（'30s' 标准房 / '15s' 快房）。
+    // ⚠ 只放 {key,label}，【不放 bettingMs】——节奏真源在服务端 ROOM_CONFIGS，
+    //   前端一旦存副本就是第二份手抄，且倒计时永远只认 WS 的 endsAt（零本地时钟铁律）。
+    rooms: [{ key: '30s', label: '标准 30秒' }, { key: '15s', label: '极速 15秒' }] },
   { id: 'WuXing',       backendId: 'wuxing',      name: '五行',        displayName: '五行',        venue: '石榴石殿',   desc: '二十球，五行归类！',     color: '#35d07f', bg: INSTANT_BG,                                 cover: coverWuXing,       cat: 'lotto',  rooms: [] },
   { id: 'RollingBall',  backendId: 'rollingball', name: '滚球',        displayName: '滚球',        venue: '尖晶石球场', desc: '三球滚动，逐球押注！',   color: '#35d07f', bg: INSTANT_BG,                                 cover: coverRollingBall,  cat: 'lotto',  rooms: [] },
   { id: 'DominoDuel',   backendId: 'dominoduel',  name: '骨牌对决',    displayName: '骨牌对决',    venue: '玛瑙竞技场', desc: '主客对决，骨牌定胜负！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverDominoDuel,   cat: 'lotto',  rooms: [] },

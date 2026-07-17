@@ -29,7 +29,10 @@ async function sha256Hex(str) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-export default function HistoryDrawer({ open, onClose, game, venue, playerToken, onLogout, pendingRound }) {
+// #42：room 可选 —— 多房款（speedgrid）必须传选中房，否则两房开奖混成一条流（路珠/历史全错乱）。
+//   不传 = 该款标准房（单房款照旧，20 款零改动）。拼进 query 交后端 COALESCE(room,'30s') 过滤。
+export default function HistoryDrawer({ open, onClose, game, room, venue, playerToken, onLogout, pendingRound }) {
+  const roomQS = room ? `&room=${encodeURIComponent(room)}` : ''
   const isMobile = useMediaQuery('(max-width: 640px)')
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)   // ≥1024 加宽，照 SeedFairness/HowToPlay 先例
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance: NOOP })
@@ -44,18 +47,18 @@ export default function HistoryDrawer({ open, onClose, game, venue, playerToken,
     if (!open || !game) return
     let cancelled = false
     setItems([]); setCursor(null); setErr(null); setFirstLoad(true); setLoading(true); setExpandedId(null)
-    api.apiGet(`/round/history/${game}?limit=20`)
+    api.apiGet(`/round/history/${game}?limit=20${roomQS}`)
       .then(d => { if (cancelled) return; setItems(d.items); setCursor(d.nextCursor) })
       .catch(e => { if (!cancelled) setErr(e?.message || '加载失败，请重试') })
       .finally(() => { if (!cancelled) { setLoading(false); setFirstLoad(false) } })
     return () => { cancelled = true }
-  }, [open, game])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, game, room])   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadMore() {
     if (!cursor || loading) return
     setLoading(true); setErr(null)
     try {
-      const d = await api.apiGet(`/round/history/${game}?limit=20&cursor=${cursor}`)
+      const d = await api.apiGet(`/round/history/${game}?limit=20&cursor=${cursor}${roomQS}`)
       setItems(prev => [...prev, ...d.items]); setCursor(d.nextCursor)
     } catch (e) { setErr(e?.message || '加载失败，请重试') } finally { setLoading(false) }
   }
@@ -104,7 +107,7 @@ export default function HistoryDrawer({ open, onClose, game, venue, playerToken,
           ) : err ? (
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
               <div style={{ color: COLORS.amber, fontSize: 13, marginBottom: 12 }}>{err}</div>
-              <button type="button" onClick={() => { setFirstLoad(true); setErr(null); setItems([]); setCursor(null); setLoading(true); api.apiGet(`/round/history/${game}?limit=20`).then(d => { setItems(d.items); setCursor(d.nextCursor) }).catch(e => setErr(e?.message || '加载失败，请重试')).finally(() => { setLoading(false); setFirstLoad(false) }) }} style={{
+              <button type="button" onClick={() => { setFirstLoad(true); setErr(null); setItems([]); setCursor(null); setLoading(true); api.apiGet(`/round/history/${game}?limit=20${roomQS}`).then(d => { setItems(d.items); setCursor(d.nextCursor) }).catch(e => setErr(e?.message || '加载失败，请重试')).finally(() => { setLoading(false); setFirstLoad(false) }) }} style={{
                 padding: '6px 16px', borderRadius: RADIUS.pill, cursor: 'pointer',
                 background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.text, fontSize: 12, fontWeight: 700,
               }}>重试</button>
