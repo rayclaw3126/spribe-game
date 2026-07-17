@@ -1,13 +1,13 @@
-// 单V3a/V3b 硬闸：模型A per-player 9 款（即时 6 + 多步 3）「同构化换血」的三段对拍。一次性验收工具（下划线前缀）。
+// 单V3a/b/c 硬闸：全 12 款「同构化换血」的三段对拍（即时 6 + 多步 3 + crash2/滚球）。一次性验收工具（下划线前缀）。
 //
 // 本单把 dice/plinko/limbo/keno/streakRoll/miniRoulette（V3a）+ mines/hilo/goal（V3b）的 `import crypto from 'crypto'`
 // 退役、改回引 lib/seededRng.js 的 hmacSha256Hex/sha256Hex（Node→原生 / 浏览器→纯 JS）。
 // 玩家在浏览器里跑的是纯 JS 分支，后端开奖跑的是 Node 分支——两者【逐位等价】是整单地基：
 // 差一个 bit，玩家本地重算就与库内 result 对不上，验证器不但没证明公平，反而制造冤案。
 //
-// 三段（单V3b 扩至 9 款：即时 6 + 多步 3 mines/hilo/goal）：
+// 三段（单V3c 扩至 12 款：+ aviator/momentum/rollingBall；余下 9 款轮次彩走 roundSpins，不在本线）：
 //   a) 纯 JS vs Node crypto 直算：10 万组随机 (seed,client,nonce) × 3 种消息形状 + 边界组 + 多块打靶
-//   b) 9 款换血前后：scratchpad 旧副本（自带 import crypto）vs 新版，同输入 1 万组全等 + 档位全覆盖
+//   b) 12 款换血前后：scratchpad 旧副本（自带 import crypto）vs 新版，同输入 1 万组全等 + 档位全覆盖
 //   c) dice 公式哨兵：测试内用 __hmacPure 就地手拼 dice 公式，vs 引擎 rollDice 1 万组全等
 //
 // 跑法：cd server && node scripts/_isocrypto_parity.mjs
@@ -128,11 +128,11 @@ function sectionA() {
   ok(xbad === 0, `hmacSha256Hex/sha256Hex 导出 5000 组 == Node 直算`, xbad ? `${xbad} 次不等` : '');
 }
 
-// ═══════════ b) 9 款换血前后同输入对拍 ═══════════
+// ═══════════ b) 12 款换血前后同输入对拍 ═══════════
 // 旧版 = scratchpad 临时副本（自带 import crypto，独立成链）；新版 = 现仓引擎。
 // 禁 git stash：引擎与 seededRng 是同一次改动的耦合件，stash 任一侧都构不成「老版」。
 async function sectionB() {
-  console.log('\n════════ b) 9 款换血前后同输入对拍（旧副本 vs 新版）════════');
+  console.log('\n════════ b) 12 款换血前后同输入对拍（旧副本 vs 新版）════════');
   let oldMods;
   try {
     oldMods = {
@@ -145,6 +145,9 @@ async function sectionB() {
       mines: await import(`${OLD_DIR}/mines.old.js`),
       hilo: await import(`${OLD_DIR}/hilo.old.js`),
       goal: await import(`${OLD_DIR}/goal.old.js`),
+      aviator: await import(`${OLD_DIR}/aviator.old.js`),
+      momentum: await import(`${OLD_DIR}/momentum.old.js`),
+      rollingBall: await import(`${OLD_DIR}/rollingBall.old.js`),
     };
   } catch (err) {
     ok(false, `旧副本加载失败 —— b 段无法对拍（记为失败，禁静默放行）`, err.message);
@@ -160,6 +163,9 @@ async function sectionB() {
     mines: await import('../src/game/mines.js'),
     hilo: await import('../src/game/hilo.js'),
     goal: await import('../src/game/goal.js'),
+    aviator: await import('../src/game/aviator.js'),
+    momentum: await import('../src/game/momentum.js'),
+    rollingBall: await import('../src/game/rollingBall.js'),
   };
 
   // 每款：派生函数 + hashSeed 都对拍。派生签名各异，逐款给 runner。
@@ -190,11 +196,23 @@ async function sectionB() {
       bucket: (n) => `col${n % 7}/b${1 + (n % 3)}`,
       run: (m, s, c, n) => [...m.deriveBombRows(s, c, n, n % 7, 1 + (n % 3))].sort().join(','),
     },
+    // —— 单V3c 收官 3 款 ——
+    // aviator：形状①（`c:n`，同 dice）。crashPoint 是整局唯一派生产物。
+    { name: 'aviator.generateCrash', run: (m, s, c, n) => m.generateCrash(s, c, n) },
+    // momentum：形状②（`c:n:barIdx`，同 hilo 的 step）。逐柱一条独立 HMAC，故 barIdx 各档必须采到。
+    { name: 'momentum.stepFactor', buckets: 31, bucket: (n) => n % 31, run: (m, s, c, n) => m.stepFactor(s, c, n, n % 31) },
+    // momentum.walkPath：整条 31 柱路径（含 bust 吸收分支）—— 逐柱对拍不等于整条对拍，
+    //   路径有状态累积（x *= f）+ 提前 break，得整条比才覆盖得到 bust 分支。
+    { name: 'momentum.walkPath', run: (m, s, c, n) => JSON.stringify(m.walkPath(s, c, n)) },
+    // rollingBall：派生层 drawBall(remaining, rng) 是【注入式】，用的就是共享 makeSeededRng ——
+    //   本就同构，无需对拍（对拍它等于对拍 makeSeededRng，那是 verify_rng_parity 的活）。
+    //   本单只换了它的 hashSeed，故只对拍 hashSeed（在下方 9→12 款 hashSeed 段统一覆盖）。
   ];
   const KEY = {
     'dice.rollDice': 'dice', 'plinko.derivePath': 'plinko', 'limbo.deriveMult': 'limbo',
     'keno.drawKeno': 'keno', 'streakRoll.drawStreak': 'streakRoll', 'miniRoulette.spinRoulette': 'miniRoulette',
     'mines.deriveMines': 'mines', 'hilo.deriveCard': 'hilo', 'goal.deriveBombRows': 'goal',
+    'aviator.generateCrash': 'aviator', 'momentum.stepFactor': 'momentum', 'momentum.walkPath': 'momentum',
   };
   const N = 10000;
   for (const cs of CASES) {
@@ -220,7 +238,7 @@ async function sectionB() {
       if (oldMods[k].hashSeed(seed) !== newMods[k].hashSeed(seed)) hbad++;
     }
   }
-  ok(hbad === 0, `9 款 hashSeed 旧 vs 新 各 2000 组全等`, hbad ? `${hbad} 组不等` : '');
+  ok(hbad === 0, `12 款 hashSeed 旧 vs 新 各 2000 组全等`, hbad ? `${hbad} 组不等` : '');
 }
 
 // ═══════════ c) dice 公式哨兵 ═══════════
@@ -252,7 +270,7 @@ async function sectionC() {
   ok(bad === 0, `dice 公式哨兵 ${N} 组全等（公式未被改动）`, bad ? `${bad} 组不等` : '');
 }
 
-console.log('_isocrypto_parity —— 单V3a/V3b 模型A per-player 9 款（即时6+多步3）同构化硬闸');
+console.log('_isocrypto_parity —— 单V3a/b/c 全 12 款同构化硬闸（即时6+多步3+crash2+滚球）');
 sectionA();
 await sectionB();
 await sectionC();

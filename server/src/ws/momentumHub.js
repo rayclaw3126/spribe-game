@@ -67,12 +67,15 @@ async function insertPendingRound() {
   }
 }
 // done 才写 result（整条已走柱 + crashBar + finalX）；running 期间 rounds.result 恒 NULL（无未来柱）。
-async function markRoundDone(roundId, walk) {
+// 单V3c：nonce 随 result 落库（照 V1 给轮次彩补 nonce 的先例）。原先 result 无 nonce、rounds 表也无
+// nonce 列 → 历史局重算三要素缺一，玩家事后翻旧局【永远验不了】。补落后新局历史可验；老局显「缺要素」。
+// done 时 serverSeed 本就已 reveal，落 nonce 不多泄露任何东西。
+async function markRoundDone(roundId, walk, nonce) {
   if (!roundId) return;
   try {
     await query(
       `UPDATE rounds SET status = 'settled', result = $1::jsonb WHERE id = $2`,
-      [JSON.stringify({ crashBar: walk.crashBar, finalX: walk.finalX, bars: walk.bars }), roundId],
+      [JSON.stringify({ crashBar: walk.crashBar, finalX: walk.finalX, bars: walk.bars, nonce }), roundId],
     );
   } catch (err) {
     console.error('[momentumHub] 更新 done round 失败：', err.message);
@@ -180,7 +183,7 @@ async function runDonePhase(wss) {
 
   // done 才 reveal serverSeed + 整条 walk —— 任何人可 walkPath() 重算校验。
   broadcast(wss, { type: 'done', roundId, crashBar: walk.crashBar, finalX: walk.finalX, bars: walk.bars, serverSeed, clientSeed, nonce });
-  await markRoundDone(roundId, walk);
+  await markRoundDone(roundId, walk, nonce);   // 单V3c：nonce 一并落库，供历史局重算
 
   // 未兑现注最终结算：survive(finalX>0)→按 finalX 结算（含 <1 半输照付）；bust(finalX=0)→全输分成。
   for (const [, bet] of state.bets) {

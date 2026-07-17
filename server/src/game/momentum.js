@@ -15,7 +15,13 @@
 //
 // ⚠️ 逐柱 reveal 铁律：walkPath 整条路径仅【后端内部 + 局末复算】用，betting/running 广播
 //    绝不含未来柱；serverSeed 保密到 done。同 Aviator crashPoint、RollingBall 按步现派。
-import crypto from 'crypto';
+// 单V3c 同构化：本文件原 `import crypto from 'crypto'` 已退役，hmac/sha256 回引
+// lib/seededRng.js 单一出处（Node→原生 crypto / 浏览器→纯 JS，逐位等价由
+// scripts/_isocrypto_parity.mjs 硬闸兜底）。前端本地重算直 import 本文件的派生函数——禁手抄公式。
+// 派生逻辑本身零改动，只换哈希调用点。
+// randomBytes（newServerSeed/newClientSeed）是 server-only，改函数体内惰性取 node:crypto，
+// 浏览器 import 本模块不触发、不抛。
+import { hmacSha256Hex, sha256Hex } from '../lib/seededRng.js';
 
 // 逐位照抄前端。
 export const CRASH_FLOOR = 0.05;   // X ≤ 0.05 → 崩 0
@@ -28,7 +34,7 @@ export function factorOf(u) {
 
 /** commit hash：开局广播 sha256(serverSeed)（不广播 serverSeed 本身），done reveal 后可校验。 */
 export function hashSeed(serverSeed) {
-  return crypto.createHash('sha256').update(serverSeed).digest('hex');
+  return sha256Hex(serverSeed);
 }
 
 /**
@@ -41,7 +47,7 @@ export function hashSeed(serverSeed) {
  * @returns {number} 该柱系数
  */
 export function stepFactor(serverSeed, clientSeed, nonce, barIdx) {
-  const hex = crypto.createHmac('sha256', serverSeed).update(`${clientSeed}:${nonce}:${barIdx}`).digest('hex');
+  const hex = hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}:${barIdx}`);
   const u = parseInt(hex.slice(0, 13), 16) / Math.pow(2, 52);
   return factorOf(u);
 }
@@ -73,10 +79,14 @@ export function walkPath(serverSeed, clientSeed, nonce) {
 
 /** 生成私密 serverSeed（reveal 前绝不广播/日志）。 */
 export function newServerSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(32).toString('hex');
 }
 
 /** 生成公开 clientSeed（开局随 commitHash 广播）。 */
 export function newClientSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(8).toString('hex');
 }

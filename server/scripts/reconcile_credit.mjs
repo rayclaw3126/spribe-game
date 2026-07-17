@@ -37,8 +37,13 @@ import { query } from '../src/db.js';
 //   agent 6 = ml_boss（多级测试根，基线 10100.00）
 // 其余 agent 基线 0（开户即 0，所有额度变动全部经 credit.js 落 credit_ledger）。
 // prod 用 env RECON_CREDIT_BASELINE 覆盖此默认值（见文件头 SOP）。
-const DEV_BASELINE = { 1: '2751.00', 6: '10100.00' };
-const BASELINE_DATE = '2026-07-13';
+// 2026-07-17 dev 注资 +50000（V3c 测试用）：boss(agent 1) 额度烧尽（跑到只剩 $68），
+// 而顶级代理无父级可授信、直改 credit_lines 会破守恒式 → 用「新增注资双写」：
+// credit_lines 抬 50000 的同时，本基线同额抬（2751 → 52751）。等式两边同抬，恒等式不变：
+//   Σcredit == Σ基线 + (Σwithdraw − Σdeposit)
+// 只影响 dev；prod 走 env RECON_CREDIT_BASELINE 覆盖，不受本行改动波及。
+const DEV_BASELINE = { 1: '52751.00', 6: '10100.00' };
+const BASELINE_DATE = '2026-07-17';
 
 // 解析基线：env RECON_CREDIT_BASELINE(JSON) 存在则覆盖 DEV 默认。校验 + 规范化每个值（防注入）：
 // key 必须是整数 agent_id，value 必须是有限数字，统一转 'N.NN' 字符串（后面内插进 SQL numeric literal）。

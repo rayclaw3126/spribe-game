@@ -17,13 +17,27 @@ import { spinRoulette } from '../src/game/miniRoulette.js';
 import { deriveMines } from '../src/game/mines.js';
 import { deriveCard } from '../src/game/hilo.js';
 import { deriveBombRows, TIERS } from '../src/game/goal.js';
+import { drawBall, remainingPool } from '../src/game/rollingBall.js';
+import { makeSeededRng } from '../src/lib/seededRng.js';
+import { generateCrash } from '../src/game/aviator.js';
+import { walkPath } from '../src/game/momentum.js';
 
 let fails = 0;
 const ok = (pass, label, detail = '') => {
   if (!pass) fails++;
   console.log(`  ${pass ? '✅' : '❌'} ${label}${detail ? `  —— ${detail}` : ''}`);
 };
-const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// 规范化深比：递归排序【对象键】，数组保原序。
+// ⚠ 必须规范化：result 是 JSONB，Postgres 回读时会重排对象键（按键长+字典序），
+//   例如 momentum 的 {barIdx,f,x} 存进去、回读变 {f,x,barIdx} —— 裸 JSON.stringify 会假红。
+//   数组【不排序】：goal 的 bombRows 存的是 Fisher-Yates 插入序、滚球 revealed 是开球顺序，
+//   排了反而把「顺序错了」这种真错误洗掉。与前端 LocalVerify/SeedFairness 的 canon 同口径。
+const canon = (v) => {
+  if (Array.isArray(v)) return v.map(canon);
+  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) o[k] = canon(v[k]); return o; }
+  return v;
+};
+const eq = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 
 // 状态口径：即时 6 款终态是 settled；多步 3 款（mines/hilo/goal）终态是 cashed/bust——【无 settled】。
 const SETTLED = ['settled'];
@@ -109,6 +123,79 @@ for (const g of GAMES) {
 {
   const n = (await query(`SELECT count(*) n FROM rounds WHERE game='goal' AND status='cashed' AND result ? 'bombRows'`)).rows[0].n;
   ok(Number(n) > 0, `goal: 补落生效 —— 已有 ${n} 条 cashed 局带 bombRows`, Number(n) === 0 ? '一条都没有 → 补落没生效' : '');
+}
+
+// —— 单V3c：滚球逐球重演 ——
+// 按步现派：每球一个 nonce（balls[i].nonce），从【当时的】剩余池无放回抽。
+// ⚠ 顺序铁律：remaining 必须随已开球逐球演化，不能一次去掉全部 revealed 再抽——池子不同球就不同。
+{
+  const rows = (await query(
+    `SELECT id, status, server_seed s, client_seed c, result FROM rounds
+      WHERE game='rollingball' AND server_seed IS NOT NULL
+        AND jsonb_array_length(COALESCE(result->'balls','[]'::jsonb)) > 0
+      ORDER BY jsonb_array_length(result->'balls') DESC, id DESC LIMIT 5`)).rows;
+  let bad = 0, maxBalls = 0;
+  for (const r of rows) {
+    const R = r.result;
+    maxBalls = Math.max(maxBalls, R.balls.length);
+    const got = [];
+    for (const b of R.balls) {
+      const rng = makeSeededRng(r.s, r.c, b.nonce);
+      got.push(drawBall(remainingPool(got), rng));
+    }
+    if (!eq(R.revealed, got)) { bad++; console.log(`    ❌ rollingball round#${r.id}: 库内 ${JSON.stringify(R.revealed)} ≠ 重算 ${JSON.stringify(got)}`); }
+  }
+  ok(rows.length > 0 && bad === 0, `rollingball: 最近 ${rows.length} 局逐球重演 == 库内 revealed（最多 ${maxBalls} 球全开）`,
+    rows.length === 0 ? '无样本' : (bad ? `${bad} 局不符` : ''));
+  ok(maxBalls >= 3, `rollingball: 样本含 3 球全开局`, maxBalls < 3 ? `最多只有 ${maxBalls} 球，需现打一条 3 球局` : '');
+}
+
+// —— 单V3c：crash 2 款历史局重算（nonce 补落后才可能）——
+// 补落前 result 无 nonce、rounds 表也无 nonce 列 → 三要素缺一，历史局永远验不了；
+// 补落后（aviatorHub markRoundCrashed / momentumHub markRoundDone 各加一个字段）新局可验。
+// ⚠ 只取 result 含 nonce 的局入样本：老局（补落上线前）没有靶，进来必假红，不是失败。
+//   dev 两个 hub 常驻自转，跑起来几分钟就攒够新局。
+for (const [game, field, re] of [
+  ['aviator', 'crashPoint', (R, s, c) => generateCrash(s, c, R.nonce)],
+  // momentum 比整条路径（含每柱 f + crashBar + finalX），不是只比 finalX ——
+  // 只比末值等于只验最后一步，中间柱被改了看不出来。
+  ['momentum', 'bars', (R, s, c) => walkPath(s, c, R.nonce).bars],
+]) {
+  const rows = (await query(
+    `SELECT id, status, server_seed s, client_seed c, result FROM rounds
+      WHERE game = $1 AND server_seed IS NOT NULL AND client_seed IS NOT NULL
+        AND result ? 'nonce' AND result ? $2
+      ORDER BY id DESC LIMIT 5`, [game, field])).rows;
+  if (rows.length === 0) {
+    ok(false, `${game}: 库内无含 nonce 的局 —— 补落未生效，或 hub 还没转出新局（等几分钟重跑）`);
+    continue;
+  }
+  let bad = 0;
+  for (const r of rows) {
+    const got = re(r.result, r.s, r.c);
+    if (!eq(r.result[field], got)) {
+      bad++;
+      console.log(`    ❌ ${game} round#${r.id} nonce=${r.result.nonce}: 库内 ${JSON.stringify(r.result[field]).slice(0, 60)} ≠ 重算 ${JSON.stringify(got).slice(0, 60)}`);
+    }
+  }
+  ok(bad === 0, `${game}: 最近 ${rows.length} 局 ${field} 重算 == 库内 result（nonce 补落后历史可验）`,
+    bad ? `${bad} 局不符` : `样例 round#${rows[0].id} nonce=${rows[0].result.nonce}`);
+}
+// momentum 补充：crashBar + finalX 也比（bars 全等已隐含，但显式断言更好读）
+{
+  const rows = (await query(
+    `SELECT id, server_seed s, client_seed c, result FROM rounds
+      WHERE game='momentum' AND server_seed IS NOT NULL AND result ? 'nonce'
+      ORDER BY id DESC LIMIT 5`)).rows;
+  let bad = 0;
+  for (const r of rows) {
+    const w = walkPath(r.s, r.c, r.result.nonce);
+    if (w.crashBar !== r.result.crashBar || w.finalX !== r.result.finalX) {
+      bad++;
+      console.log(`    ❌ momentum round#${r.id}: crashBar/finalX 库内 ${r.result.crashBar}/${r.result.finalX} ≠ 重算 ${w.crashBar}/${w.finalX}`);
+    }
+  }
+  if (rows.length > 0) ok(bad === 0, `momentum: 最近 ${rows.length} 局 crashBar + finalX 重算全等`, bad ? `${bad} 局不符` : '');
 }
 
 console.log(`\n${fails === 0 ? '✅ per-player 9 款真实局全部复现（含多步族牌序/雷行/补落闭环）' : `❌ ${fails} 项未复现`}`);

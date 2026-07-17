@@ -75,6 +75,12 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
   const [revealedSeed, setRevealedSeed] = useState(null) // done reveal
   const [fairClientSeed, setFairClientSeed] = useState('')  // 本期 clientSeed（betting/done 广播带）
   const [fairNonce, setFairNonce] = useState(null)          // 本期 nonce
+  // 单V3c：本期开奖产物（done 才有），供 CommitRevealFairness 本地重算比对。
+  // ⚠ 必须取 done 广播里的【权威 bars】（momentumHub:182 推 {bars,crashBar,finalX} 全带），
+  //   【不能】用页面累积的 barsRef —— 中途加入/断线重连时它是残缺的，拿残缺序列比整条
+  //   walkPath 会把好局判成作弊。done 快照（在 done 相位才进场）只给 crashBar/finalX 不给 bars，
+  //   注册表的 fields 对此有动态退化（只比 crashBar+finalX），仍是真比对。
+  const [fairDraw, setFairDraw] = useState(null)
   const [fairOpen, setFairOpen] = useState(false)           // 点角标 → 展开本期可验证公平抽屉
   const [netErr, setNetErr] = useState(null)
 
@@ -171,6 +177,7 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
     setPanels(panelsRef.current)
     roundIdRef.current = msg.roundId; setRoundId(msg.roundId)
     setCommitHash(msg.commitHash); setRevealedSeed(null); setFairClientSeed(msg.clientSeed || ''); setFairNonce(msg.nonce ?? null)
+    setFairDraw(null)   // 单V3c：新一期清掉上期开奖产物，防抽屉拿上期 bars 比本期种子（必假 ✗）
     setFeedBets(makeFeedBots())
     startCountdown(msg.remainingMs != null ? msg.remainingMs : (msg.waitMs || BETTING_MS))
     // 自动下注：两注位各自——本局 betting 开窗就发（若该注位勾了自动且本局未下注）
@@ -191,6 +198,8 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
     const bust = finalX <= 0
     setBusted(bust)
     setRevealedSeed(msg.serverSeed); setFairClientSeed(msg.clientSeed || ''); setFairNonce(msg.nonce ?? null)   // reveal（可用 walkPath 本地重算校验）
+    // 单V3c：存权威开奖产物（done 广播带全 bars/crashBar/finalX，与 walkPath 返回同形）
+    setFairDraw({ bars: msg.bars, crashBar: msg.crashBar ?? null, finalX: Number(msg.finalX) })
     if (bust) playCrash()
     const xs = [1, ...barsRef.current.map(b => b.x)]
     setLastRange({ min: Math.min(...xs), max: Math.max(...xs) })
@@ -234,6 +243,9 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
     } else {
       phaseRef.current = 'done'; setPhase('done')
       setCommitHash(msg.commitHash); setRevealedSeed(msg.serverSeed); setFairClientSeed(msg.clientSeed || ''); setFairNonce(msg.nonce ?? null)
+      // 单V3c：done 快照不带 bars（momentumHub:305），只有 crashBar/finalX ——
+      // 注册表 fields 会据此退化为只比这两项（仍是真比对，且避免拿空 bars 制造假 ✗）。
+      setFairDraw(msg.finalX != null ? { crashBar: msg.crashBar ?? null, finalX: Number(msg.finalX) } : null)
     }
     // 单S8：吃 S8 快照 bets[] 按 panel 归位，断线重连两注恢复（cashed/win 续算 + autoTarget 复原自动挡）。
     if (Array.isArray(msg.bets)) {
@@ -408,8 +420,12 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
             {(revealedSeed || commitHash || '……').slice(0, 10)}…
           </span>
         </div>
+        {/* 单V3c：补 game + drawResult 两个 prop（原先只传前三个，canRecalc 第一个条件就短路 →
+            本地重算钮永不出现）。drawResult 取 done 广播的权威产物，不用页面累积的 barsRef。 */}
         <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)}
           venue={G.venue ?? G.displayName}
+          game={G.backendId}
+          drawResult={fairDraw}
           round={{ roundNo: roundId, commitHash, clientSeed: fairClientSeed, nonce: fairNonce, serverSeed: revealedSeed }} />
         {netErr && (
           <div style={{

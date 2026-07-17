@@ -14,7 +14,13 @@
 //
 // 开奖不信前端：drawBall 用注入的 seededRng（HMAC 派生 [0,1)），floor(U×remaining.length) 偏差
 //    ≈ 75/2^52 可忽略，无需拒绝采样。结算一律用服务端 oddsFor（前端 odds 仅显示）。
-import crypto from 'crypto';
+// 单V3c 同构化：本文件原 `import crypto from 'crypto'` 已退役，sha256 回引
+// lib/seededRng.js 单一出处（Node→原生 crypto / 浏览器→纯 JS，逐位等价由
+// scripts/_isocrypto_parity.mjs 硬闸兜底）。前端本地重算直 import 本文件的派生函数——禁手抄公式。
+// 派生逻辑本身零改动，只换哈希调用点。
+// randomBytes（newServerSeed/newClientSeed）是 server-only，改函数体内惰性取 node:crypto，
+// 浏览器 import 本模块不触发、不抛。
+import { sha256Hex } from '../lib/seededRng.js';
 
 // 红号归类（逐位照抄前端）：((n-1)%4)<2。
 const RED = new Set(Array.from({ length: 75 }, (_, i) => i + 1).filter((n) => ((n - 1) % 4) < 2));
@@ -99,11 +105,15 @@ export function isValidKey(key) {
 export { isRed, R_BS, R_COMBO, R_SINGLE };
 
 export function hashSeed(serverSeed) {
-  return crypto.createHash('sha256').update(serverSeed).digest('hex');
+  return sha256Hex(serverSeed);
 }
 export function newServerSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(32).toString('hex');
 }
 export function newClientSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(8).toString('hex');
 }

@@ -921,8 +921,14 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
               {serverSeedReveal.slice(0, 10)}…（点开自动校验）
             </div>
           )}
+          {/* 单V3c：补 game + drawResult 两个 prop —— 抽屉本就挂着，但 canRecalc 要求
+              !!game && LOCAL_VERIFY_GAMES.has(game) && !!serverSeed && nonce != null && !!drawResult，
+              原先这两个是 undefined，第一个条件就短路 → 本地重算钮永不出现。
+              crashPoint 是本局唯一派生产物（引擎 generateCrash 的返回），crashed 相位由 WS 带回。 */}
           <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)}
             venue={G.venue ?? G.displayName}
+            game={G.backendId}
+            drawResult={crashPoint != null ? { crashPoint } : null}
             round={{ roundNo: roundMeta.roundId, commitHash: roundMeta.commitHash, clientSeed: roundMeta.clientSeed, nonce: roundMeta.nonce, serverSeed: serverSeedReveal }} />
 
           {/* 音乐/静音已并入 GameTopBar 内建钮（顶栏右侧），此处不再浮动挂钮 */}

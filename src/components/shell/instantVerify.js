@@ -23,6 +23,10 @@ import { spinRoulette } from '../../../server/src/game/miniRoulette.js';
 import { deriveMines } from '../../../server/src/game/mines.js';
 import { deriveCard } from '../../../server/src/game/hilo.js';
 import { deriveBombRows, TIERS } from '../../../server/src/game/goal.js';
+import { generateCrash } from '../../../server/src/game/aviator.js';
+import { walkPath } from '../../../server/src/game/momentum.js';
+import { drawBall, remainingPool } from '../../../server/src/game/rollingBall.js';
+import { makeSeededRng } from '../../../server/src/lib/seededRng.js';
 
 // backendId → { fields, needs, derive, manualOk? }
 // manualOk（默认 true）：能否走 SeedFairness 的【手填】路径（只给 seed/client/nonce + needs，无 result）。
@@ -98,5 +102,46 @@ export const INSTANT_VERIFY = {
   },
 };
 
-/** 取某局要比对的字段名：fields 可为定值数组，也可为 (result)=>string[]（形状随终局而变的款，如 goal）。 */
+// ───────── 单V3c 收官 3 款 ─────────
+
+// aviator（共享局 crash）：整局唯一派生产物 = crashPoint。
+//   消费面 = CommitRevealFairness（done reveal 后拿 serverSeed），【不走 roundId 路径】——
+//   共享局 rounds.player_id 恒 NULL，GET /:id 的归属校验一律 404，这是正确后果不是 bug。
+INSTANT_VERIFY.aviator = {
+  fields: ['crashPoint'], needs: [],
+  derive: (s, c, n) => ({ crashPoint: generateCrash(s, c, n) }),
+};
+
+// momentum（共享局 crash）：整条 31 柱路径。
+//   ⚠ 靶必须取 done 广播里的【权威 bars】（momentumHub:182 推 {bars, crashBar, finalX} 全带），
+//     【不能】用页面累积的 barsRef —— 中途加入/断线重连的玩家累积序列是残缺的，
+//     拿残缺序列比整条 walkPath 会把好局判成作弊（制造冤案，比不验更糟）。
+//   done 快照（在 done 相位才进场）只给 crashBar/finalX 不给 bars，故 fields 动态：
+//     有 bars → 整条比（含每柱 f）；无 bars → 退化为只比 crashBar+finalX（仍是真比对，不是展示）。
+INSTANT_VERIFY.momentum = {
+  fields: (r) => (Array.isArray(r?.bars) ? ['bars', 'crashBar', 'finalX'] : ['crashBar', 'finalX']),
+  needs: [],
+  derive: (s, c, n) => walkPath(s, c, n),   // 返回 { bars:[{barIdx,f,x}], crashBar, finalX }，与 done payload 同形
+};
+
+// rollingball（per-player 多球）：按步现派，每球一个 nonce、从剩余池无放回抽。
+//   派生层 drawBall(remaining, rng) 本就注入共享 makeSeededRng（单V3c 前就已同构）。
+//   逐球重演：remaining 随已开球演化 → 每球用自己的 balls[i].nonce 单抽 → 与 result.revealed 逐位比。
+//   ⚠ 顺序铁律：remaining 必须按【开球顺序】演化，不能一次性去掉全部 revealed 再抽 ——
+//     那样池子不同，抽出来的球也不同（无放回的本质）。
+//   消费面 = SeedFairness 验整局（RollingBall.jsx:706 已传 game；rounds.player_id 非空 → GET /:id 可用）。
+INSTANT_VERIFY.rollingball = {
+  fields: ['revealed'], needs: [{ key: 'balls', label: '本局球序（自动从记录取）' }],
+  derive: (s, c, n, x) => {
+    const balls = Array.isArray(x?.balls) ? x.balls : [];
+    const out = [];
+    for (const b of balls) {
+      const rng = makeSeededRng(s, c, b.nonce);          // 每球一把独立 rng（key 带该球自己的 nonce）
+      out.push(drawBall(remainingPool(out), rng));       // 池子按已开球演化
+    }
+    return { revealed: out };
+  },
+};
+
+/** 取某局要比对的字段名：fields 可为定值数组，也可为 (result)=>string[]（形状随终局而变的款，如 goal/momentum）。 */
 export const fieldsOf = (spec, result) => (typeof spec.fields === 'function' ? spec.fields(result) : spec.fields);

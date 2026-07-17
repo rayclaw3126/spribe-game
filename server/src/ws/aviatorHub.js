@@ -93,12 +93,16 @@ async function insertPendingRound() {
   }
 }
 
-async function markRoundCrashed(roundId, crashPoint) {
+// 单V3c：nonce 随 result 落库（照 V1 给轮次彩补 nonce 的先例）。原先 result 只有 {crashPoint}，
+// 而 rounds 表也无 nonce 列 → 历史局重算三要素缺一，玩家事后翻旧局【永远验不了】，
+// 只能验正在看的那一局（done 广播带 nonce）。补落后新局历史可验；老局无 nonce 显「缺要素」。
+// crashed 时 serverSeed 本就已 reveal，落 nonce 不多泄露任何东西。
+async function markRoundCrashed(roundId, crashPoint, nonce) {
   if (!roundId) return;
   try {
     await query(
       `UPDATE rounds SET status = 'crashed', payout = NULL, result = $1::jsonb WHERE id = $2`,
-      [JSON.stringify({ crashPoint }), roundId],
+      [JSON.stringify({ crashPoint, nonce }), roundId],
     );
   } catch (err) {
     console.error('[aviatorHub] 更新 crashed round 失败：', err.message);
@@ -213,7 +217,7 @@ async function runCrashedPhase(wss) {
     nonce,
   });
 
-  await markRoundCrashed(roundId, crashPoint);
+  await markRoundCrashed(roundId, crashPoint, nonce);   // 单V3c：nonce 一并落库，供历史局重算
   await settleRound(wss);
 
   timers.crashedTimeout = setTimeout(() => {
