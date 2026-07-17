@@ -27,6 +27,9 @@ import * as goldenBootEngine from '../game/goldenBoot.js';
 import * as halfTimeEngine from '../game/halfTime.js';
 import * as wuXingEngine from '../game/wuXing.js';
 import * as lineUpEngine from '../game/lineUp.js';
+// 单V2：9 款开奖派生 spin 抽到单一出处 roundSpins.js（本 ROOM_ENGINES.spin 回引它）；
+// 前端 LocalVerify 同 import 同一份——禁两处手抄。此为 import 等价搬家，结算逻辑零变。
+import { ROUND_SPINS } from '../game/roundSpins.js';
 
 // 相位时长（ms）。
 // 相位时长（ms）——每房独立。betting/locked 统一，idle（开奖后到下一期的停顿）按各款开奖舞台动画长度定制：
@@ -58,31 +61,28 @@ const ROOM_ENGINES = {
     MARKETS: speedGridEngine.MARKETS,
     isValidMarketKey: speedGridEngine.isValidMarketKey,
     hasPush: speedGridEngine.HAS_PUSH,
-    spin: (rng) => {
-      const n = speedGridEngine.drawCar(rng);
-      return { drawResult: { n }, hits: speedGridEngine.hitsOf(n), pushes: new Set() };
-    },
+    spin: ROUND_SPINS.speedgrid,   // 单V2：派生单一出处（原内联表达式已搬 roundSpins.js）
   },
   numberup: {
     prefix: 'NU',
     MARKETS: numberUpEngine.MARKETS,
     isValidMarketKey: numberUpEngine.isValidMarketKey,
     hasPush: numberUpEngine.HAS_PUSH,
-    spin: numberUpEngine.spin,
+    spin: ROUND_SPINS.numberup,
   },
   derbyday: {
     prefix: 'DD',
     MARKETS: derbyDayEngine.MARKETS,
     isValidMarketKey: derbyDayEngine.isValidMarketKey,
     hasPush: derbyDayEngine.HAS_PUSH,
-    spin: derbyDayEngine.spin,
+    spin: ROUND_SPINS.derbyday,
   },
   dominoduel: {
     prefix: 'DM',
     MARKETS: dominoDuelEngine.MARKETS,
     isValidMarketKey: dominoDuelEngine.isValidMarketKey,
     hasPush: dominoDuelEngine.HAS_PUSH,
-    spin: dominoDuelEngine.spin,
+    spin: ROUND_SPINS.dominoduel,
   },
   // —— 单3 批次2：HatTrick/GoldenBoot/HalfTime/WuXing/LineUp（均 HAS_PUSH=false；
   //    HalfTime.draw / WuXing.龙虎和局 是独立 hit/lose 市场——和局判【输】不退本金，
@@ -92,35 +92,35 @@ const ROOM_ENGINES = {
     MARKETS: hatTrickEngine.MARKETS,
     isValidMarketKey: hatTrickEngine.isValidMarketKey,
     hasPush: hatTrickEngine.HAS_PUSH,
-    spin: hatTrickEngine.spin,
+    spin: ROUND_SPINS.hattrick,
   },
   goldenboot: {
     prefix: 'GB',
     MARKETS: goldenBootEngine.MARKETS,
     isValidMarketKey: goldenBootEngine.isValidMarketKey,
     hasPush: goldenBootEngine.HAS_PUSH,
-    spin: goldenBootEngine.spin,
+    spin: ROUND_SPINS.goldenboot,
   },
   halftime: {
     prefix: 'HF',
     MARKETS: halfTimeEngine.MARKETS,
     isValidMarketKey: halfTimeEngine.isValidMarketKey,
     hasPush: halfTimeEngine.HAS_PUSH,
-    spin: halfTimeEngine.spin,
+    spin: ROUND_SPINS.halftime,
   },
   wuxing: {
     prefix: 'WX',
     MARKETS: wuXingEngine.MARKETS,
     isValidMarketKey: wuXingEngine.isValidMarketKey,
     hasPush: wuXingEngine.HAS_PUSH,
-    spin: wuXingEngine.spin,
+    spin: ROUND_SPINS.wuxing,
   },
   lineup: {
     prefix: 'LU',
     MARKETS: lineUpEngine.MARKETS,
     isValidMarketKey: lineUpEngine.isValidMarketKey,
     hasPush: lineUpEngine.HAS_PUSH,
-    spin: lineUpEngine.spin,
+    spin: ROUND_SPINS.lineup,
   },
 };
 

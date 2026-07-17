@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { COLORS, DERBY, RADIUS, LAYOUT } from './shell/tokens'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { shortRoundNo } from './drawFormatters'
+import { LOCAL_VERIFY_GAMES } from './shell/localVerifyGames'
+// 单V2：本地重算验证器懒加载（引擎+纯JS rng 独立 async chunk，主包不增重）。
+const LocalVerify = lazy(() => import('./shell/LocalVerify'))
 
 // 共享局「本期可验证公平」抽屉 —— 覆盖 crash 2 款（aviator/momentum inline commit-reveal）
 // + 轮次彩 9 款（useRoundRoom.commit）。与 SeedFairness（模型A·逐玩家轮换种子）并列，专供
@@ -21,16 +24,19 @@ async function sha256Hex(str) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-export default function CommitRevealFairness({ open, onClose, venue, round, onViewHistory }) {
+export default function CommitRevealFairness({ open, onClose, venue, round, onViewHistory, game, drawResult }) {
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const [verify, setVerify] = useState(null)   // null=未算 | 'checking' | 'match' | 'mismatch' | 'error'
   const [copied, setCopied] = useState('')
+  const [recalcOpen, setRecalcOpen] = useState(false)   // 单V2：本地重算面板开关
 
   const roundNo = round?.roundNo ?? null
   const commitHash = round?.commitHash || ''
   const clientSeed = round?.clientSeed || ''
   const nonce = round?.nonce
   const serverSeed = round?.serverSeed || ''
+  // 单V2：本期已揭晓(有 serverSeed) + nonce 非空 + 支持的排期款 → 显本地重算钮
+  const canRecalc = !!game && LOCAL_VERIFY_GAMES.has(game) && !!serverSeed && nonce != null && !!drawResult
 
   // 揭晓后自动比对：sha256(serverSeed) === commitHash ?
   useEffect(() => {
@@ -149,6 +155,21 @@ export default function CommitRevealFairness({ open, onClose, venue, round, onVi
               </div>
             )}
           </div>
+
+          {/* 单V2：本期本地重算钮（懒加载 LocalVerify）——已揭晓且三要素齐才显 */}
+          {canRecalc && (
+            <div>
+              <button type="button" onClick={() => setRecalcOpen(v => !v)} style={{
+                width: '100%', padding: '10px 14px', border: `1px solid ${COLORS.green}`, borderRadius: RADIUS.btn,
+                background: recalcOpen ? COLORS.greenTint : 'transparent', color: COLORS.green, fontSize: 13, fontWeight: 900, cursor: 'pointer',
+              }}>{recalcOpen ? '收起本地重算' : '🔁 本地重算（serverSeed+clientSeed+nonce → 开奖）'}</button>
+              {recalcOpen && (
+                <Suspense fallback={<div style={{ fontSize: 12, color: DERBY.dim, padding: '8px 2px' }}>加载重算器…</div>}>
+                  <LocalVerify game={game} serverSeed={serverSeed} clientSeed={clientSeed} nonce={nonce} drawResult={drawResult} />
+                </Suspense>
+              )}
+            </div>
+          )}
 
           <div style={{ color: DERBY.dim, fontSize: 11, lineHeight: 1.6 }}>
             原理：开奖前只公布 serverSeed 的哈希承诺（无法反推结果）；开奖后公开 serverSeed 明文，

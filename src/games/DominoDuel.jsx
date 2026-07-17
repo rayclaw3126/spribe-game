@@ -541,7 +541,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       </div>
 
       {/* 玩法说明抽屉（position:fixed 覆盖，桌面/移动两分支共用同一 gameCard）*/}
-      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setHistoryOpen(true)} />
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} game={G.backendId} drawResult={room.drawResult} onViewHistory={() => setHistoryOpen(true)} />
       <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
@@ -667,7 +667,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         </div>
       </div>
 
-      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setHistoryOpen(true)} />
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} game={G.backendId} drawResult={room.drawResult} onViewHistory={() => setHistoryOpen(true)} />
       <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />

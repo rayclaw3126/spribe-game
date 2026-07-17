@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { COLORS, RADIUS, DERBY, LAYOUT } from './shell/tokens'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlayerApi } from '../lib/playerApi'
 import { formatDraw, formatDrawDetail, shortRoundNo } from './drawFormatters'
+import { LOCAL_VERIFY_GAMES } from './shell/localVerifyGames'
+// 单V2：本地重算验证器懒加载（引擎+纯JS rng 打进独立 async chunk，主包不增重）。
+const LocalVerify = lazy(() => import('./shell/LocalVerify'))
 
 // 开奖历史抽屉（右侧滑入，照 BillDrawer 骨架）：拉 /round/history/:game 的公开开奖结果。
 // 行 = 期号 + 摘要 + 时间，可点开手风琴展开卡（同时只开一行）：
@@ -151,14 +154,17 @@ function HistoryRow({ it, game, isMobile, expanded, onToggle }) {
         <span style={{ flex: '0 0 auto', color: COLORS.textFaint, fontSize: 12, transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▾</span>
       </div>
       {/* 展开卡 */}
-      {expanded && <ExpandCard it={it} detail={detail} pending={pending} isMobile={isMobile} />}
+      {expanded && <ExpandCard it={it} detail={detail} pending={pending} isMobile={isMobile} game={game} />}
     </div>
   )
 }
 
-function ExpandCard({ it, detail, pending }) {
+function ExpandCard({ it, detail, pending, game }) {
   const [verify, setVerify] = useState(null)   // null | 'checking' | 'match' | 'mismatch' | 'error'
   const [copied, setCopied] = useState('')
+  const [recalcOpen, setRecalcOpen] = useState(false)   // 单V2：本地重算面板开关
+  // 仅【已揭晓(有 serverSeed) + nonce 已落库 + 支持的排期款】显示重算钮
+  const canRecalc = LOCAL_VERIFY_GAMES.has(game) && !!it.serverSeed && it.nonce != null && !pending
 
   useEffect(() => {
     if (!it.serverSeed || !it.serverSeedHash) { setVerify(pending ? 'pending' : null); return }
@@ -224,6 +230,20 @@ function ExpandCard({ it, detail, pending }) {
         {copyBox('客户端种子 · clientSeed', it.clientSeed)}
         {copyBox('服务器种子明文 · serverSeed', it.serverSeed)}
       </div>
+      {/* 单V2：本地重算钮（懒加载 LocalVerify）——三要素齐的已揭晓局才显 */}
+      {canRecalc && (
+        <div>
+          <button type="button" onClick={() => setRecalcOpen(v => !v)} style={{
+            width: '100%', padding: '9px 14px', border: `1px solid ${COLORS.green}`, borderRadius: RADIUS.btn,
+            background: recalcOpen ? COLORS.greenTint : 'transparent', color: COLORS.green, fontSize: 12.5, fontWeight: 900, cursor: 'pointer',
+          }}>{recalcOpen ? '收起本地重算' : '🔁 本地重算（serverSeed+clientSeed+nonce → 开奖）'}</button>
+          {recalcOpen && (
+            <Suspense fallback={<div style={{ fontSize: 12, color: COLORS.textMuted, padding: '8px 2px' }}>加载重算器…</div>}>
+              <LocalVerify game={game} serverSeed={it.serverSeed} clientSeed={it.clientSeed} nonce={it.nonce} drawResult={it.drawResult} />
+            </Suspense>
+          )}
+        </div>
+      )}
     </div>
   )
 }
