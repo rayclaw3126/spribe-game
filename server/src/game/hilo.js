@@ -10,7 +10,13 @@
 // HMAC-SHA256(serverSeed, `${clientSeed}:${nonce}:${step}`) 派生的确定性 1-13 号牌：
 // 只要事后公开 serverSeed，任何人都能用 clientSeed + nonce + step 重算出同一张牌，
 // 从而验证服务端在 reveal 前没有偷看/篡改牌序。
-import crypto from 'crypto';
+// 单V3b 同构化：本文件原 `import crypto from 'crypto'` 已退役，hmac/sha256 回引
+// lib/seededRng.js 单一出处（Node→原生 crypto / 浏览器→纯 JS，逐位等价由
+// scripts/_isocrypto_parity.mjs 硬闸兜底）。前端 LocalVerify 直 import 本文件的派生函数
+// 做本地重算——禁前端手抄第二份公式。派生逻辑本身零改动，只换哈希调用点。
+// randomBytes（newServerSeed/newClientSeed）是 server-only，改函数体内惰性取 node:crypto，
+// 浏览器 import 本模块不触发、不抛。
+import { hmacSha256Hex, sha256Hex } from '../lib/seededRng.js';
 
 export const RTP = 0.97;
 export const SKIPS_PER_ROUND = 3;   // 每局 skip 限次，逐位照抄前端 line 21
@@ -43,10 +49,7 @@ export function pLow(n) {
  * @returns {number} 1-13 的整数
  */
 export function deriveCard(serverSeed, clientSeed, nonce, step) {
-  const hex = crypto
-    .createHmac('sha256', serverSeed)
-    .update(`${clientSeed}:${nonce}:${step}`)
-    .digest('hex');
+  const hex = hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}:${step}`);
   return 1 + (parseInt(hex.slice(0, 8), 16) % 13);
 }
 
@@ -81,7 +84,7 @@ export function stepMult(dir, card) {
  * @returns {string} 64 位十六进制 sha256 摘要
  */
 export function hashSeed(serverSeed) {
-  return crypto.createHash('sha256').update(serverSeed).digest('hex');
+  return sha256Hex(serverSeed);
 }
 
 /**
@@ -90,6 +93,8 @@ export function hashSeed(serverSeed) {
  * @returns {string}
  */
 export function newServerSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(32).toString('hex');
 }
 
@@ -99,5 +104,7 @@ export function newServerSeed() {
  * @returns {string}
  */
 export function newClientSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(8).toString('hex');
 }

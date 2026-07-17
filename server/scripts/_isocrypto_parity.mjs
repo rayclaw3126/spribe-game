@@ -1,13 +1,13 @@
-// 单V3a 硬闸：即时 6 款「同构化换血」的三段对拍。一次性验收工具（下划线前缀）。
+// 单V3a/V3b 硬闸：模型A per-player 9 款（即时 6 + 多步 3）「同构化换血」的三段对拍。一次性验收工具（下划线前缀）。
 //
-// 本单把 dice/plinko/limbo/keno/streakRoll/miniRoulette 的 `import crypto from 'crypto'`
+// 本单把 dice/plinko/limbo/keno/streakRoll/miniRoulette（V3a）+ mines/hilo/goal（V3b）的 `import crypto from 'crypto'`
 // 退役、改回引 lib/seededRng.js 的 hmacSha256Hex/sha256Hex（Node→原生 / 浏览器→纯 JS）。
 // 玩家在浏览器里跑的是纯 JS 分支，后端开奖跑的是 Node 分支——两者【逐位等价】是整单地基：
 // 差一个 bit，玩家本地重算就与库内 result 对不上，验证器不但没证明公平，反而制造冤案。
 //
-// 三段：
-//   a) 纯 JS vs Node crypto 直算：10 万组随机 (seed,client,nonce) + 边界组 + 多块打靶
-//   b) 6 款换血前后：scratchpad 旧副本（自带 import crypto）vs 新版，同输入 1 万组全等
+// 三段（单V3b 扩至 9 款：即时 6 + 多步 3 mines/hilo/goal）：
+//   a) 纯 JS vs Node crypto 直算：10 万组随机 (seed,client,nonce) × 3 种消息形状 + 边界组 + 多块打靶
+//   b) 9 款换血前后：scratchpad 旧副本（自带 import crypto）vs 新版，同输入 1 万组全等 + 档位全覆盖
 //   c) dice 公式哨兵：测试内用 __hmacPure 就地手拼 dice 公式，vs 引擎 rollDice 1 万组全等
 //
 // 跑法：cd server && node scripts/_isocrypto_parity.mjs
@@ -35,8 +35,8 @@ const randHex = (n) => { let s = ''; for (let i = 0; i < n; i++) s += Math.floor
 function sectionA() {
   console.log('\n════════ a) 纯 JS vs Node crypto 直算 ════════');
 
-  // a1 主对拍：10 万组随机 (seed, client, nonce)，两种消息形状都打
-  console.log('  [a1] 主对拍 100000 组（两种消息形状：无counter / 带counter）…');
+  // a1 主对拍：10 万组随机 (seed, client, nonce)，三种消息形状都打
+  console.log('  [a1] 主对拍 100000 组（三种消息形状：无counter / 带counter / goal四段带col）…');
   let bad = 0;
   const N = 100000;
   for (let i = 0; i < N; i++) {
@@ -46,12 +46,15 @@ function sectionA() {
     // 形状①（dice/limbo/plinko/streakRoll）：`${clientSeed}:${nonce}`
     const m1 = `${client}:${nonce}`;
     if (__hmacPure(seed, m1) !== nodeHmac(seed, m1)) { bad++; if (bad <= 3) console.log(`    ❌ 形状① 不等 seed=${seed.slice(0, 12)}… msg=${m1}`); }
-    // 形状②（keno/miniRoulette）：`${clientSeed}:${nonce}:${counter}`
+    // 形状②（keno/miniRoulette 的 counter / mines 的 counter / hilo 的 step）：`${clientSeed}:${nonce}:${x}`
     const m2 = `${client}:${nonce}:${Math.floor(rnd() * 4)}`;
     if (__hmacPure(seed, m2) !== nodeHmac(seed, m2)) { bad++; if (bad <= 3) console.log(`    ❌ 形状② 不等 seed=${seed.slice(0, 12)}… msg=${m2}`); }
+    // 形状③（单V3b goal，四段带 col）：`${clientSeed}:${nonce}:${col}:${counter}`
+    const m3 = `${client}:${nonce}:${Math.floor(rnd() * 7)}:${Math.floor(rnd() * 3)}`;
+    if (__hmacPure(seed, m3) !== nodeHmac(seed, m3)) { bad++; if (bad <= 3) console.log(`    ❌ 形状③ 不等 seed=${seed.slice(0, 12)}… msg=${m3}`); }
     if ((i + 1) % 25000 === 0) console.log(`    …${i + 1}/${N} 组`);
   }
-  ok(bad === 0, `10 万组 × 2 形状 = 20 万次 HMAC 逐位全等`, bad ? `${bad} 次不等` : '');
+  ok(bad === 0, `10 万组 × 3 形状 = 30 万次 HMAC 逐位全等`, bad ? `${bad} 次不等` : '');
 
   // a2 边界组：HMAC key 的 >64/>128 字节分界（HMAC 标准要求 >BLOCK 的 key 先 hash）
   console.log('  [a2] 边界组…');
@@ -89,7 +92,9 @@ function sectionA() {
   //   要走到 counter=1 得连续拒绝 32 次（拒绝率 4/256 → 概率 ~1e-58），
   //   【喂随机种子给 drawKeno/spinRoulette 永远打不到第二块】。
   //   故多块场景只能在 hmac 这层按真实消息形状直接打靶 counter=0..K。
-  console.log('  [a3] 多块续熵打靶（counter=0..K 消息形状）…');
+  //   单V3b：mines(counter)/hilo(step) 同属形状②；goal 是形状③（每列各自一条 counter 链），
+  //   goal 的多块同样不可达（m=4/2 零拒绝，仅 m=3 有 1/256，到第二块需 ~30 次连续拒绝），故一并打靶。
+  console.log('  [a3] 多块续熵打靶（counter=0..K 消息形状，含 goal 四段形状）…');
   let cbad = 0, cn = 0;
   for (let t = 0; t < 200; t++) {
     const seed = randHex(64);
@@ -100,8 +105,16 @@ function sectionA() {
       cn++;
       if (__hmacPure(seed, msg) !== nodeHmac(seed, msg)) { cbad++; if (cbad <= 3) console.log(`    ❌ counter=${counter} 不等`); }
     }
+    // 形状③：7 列 × counter 0..5，覆盖 goal 每列独立熵链的续熵形状
+    for (let col = 0; col < 7; col++) {
+      for (let counter = 0; counter <= 5; counter++) {
+        const msg = `${client}:${nonce}:${col}:${counter}`;
+        cn++;
+        if (__hmacPure(seed, msg) !== nodeHmac(seed, msg)) { cbad++; if (cbad <= 3) console.log(`    ❌ goal col=${col} counter=${counter} 不等`); }
+      }
+    }
   }
-  ok(cbad === 0, `多块打靶 ${cn} 次（200 组 × counter 0..40）全等`, cbad ? `${cbad} 次不等` : '');
+  ok(cbad === 0, `多块打靶 ${cn} 次（200 组 × [counter 0..40 + 7列×counter 0..5]）全等`, cbad ? `${cbad} 次不等` : '');
 
   // a4 环境切导出本身（产品实际调用的是这两个，不是 __hmacPure）
   console.log('  [a4] 环境切导出 vs Node 直算…');
@@ -115,11 +128,11 @@ function sectionA() {
   ok(xbad === 0, `hmacSha256Hex/sha256Hex 导出 5000 组 == Node 直算`, xbad ? `${xbad} 次不等` : '');
 }
 
-// ═══════════ b) 6 款换血前后同输入对拍 ═══════════
+// ═══════════ b) 9 款换血前后同输入对拍 ═══════════
 // 旧版 = scratchpad 临时副本（自带 import crypto，独立成链）；新版 = 现仓引擎。
 // 禁 git stash：引擎与 seededRng 是同一次改动的耦合件，stash 任一侧都构不成「老版」。
 async function sectionB() {
-  console.log('\n════════ b) 6 款换血前后同输入对拍（旧副本 vs 新版）════════');
+  console.log('\n════════ b) 9 款换血前后同输入对拍（旧副本 vs 新版）════════');
   let oldMods;
   try {
     oldMods = {
@@ -129,6 +142,9 @@ async function sectionB() {
       keno: await import(`${OLD_DIR}/keno.old.js`),
       streakRoll: await import(`${OLD_DIR}/streakRoll.old.js`),
       miniRoulette: await import(`${OLD_DIR}/miniRoulette.old.js`),
+      mines: await import(`${OLD_DIR}/mines.old.js`),
+      hilo: await import(`${OLD_DIR}/hilo.old.js`),
+      goal: await import(`${OLD_DIR}/goal.old.js`),
     };
   } catch (err) {
     ok(false, `旧副本加载失败 —— b 段无法对拍（记为失败，禁静默放行）`, err.message);
@@ -141,6 +157,9 @@ async function sectionB() {
     keno: await import('../src/game/keno.js'),
     streakRoll: await import('../src/game/streakRoll.js'),
     miniRoulette: await import('../src/game/miniRoulette.js'),
+    mines: await import('../src/game/mines.js'),
+    hilo: await import('../src/game/hilo.js'),
+    goal: await import('../src/game/goal.js'),
   };
 
   // 每款：派生函数 + hashSeed 都对拍。派生签名各异，逐款给 runner。
@@ -151,21 +170,49 @@ async function sectionB() {
     { name: 'keno.drawKeno', run: (m, s, c, n) => m.drawKeno(s, c, n).join(',') },
     { name: 'streakRoll.drawStreak', run: (m, s, c, n) => { const r = m.drawStreak(s, c, n, n % 2 ? 'high' : 'normal'); return `${r.idx}:${r.landed}`; } },
     { name: 'miniRoulette.spinRoulette', run: (m, s, c, n) => m.spinRoulette(s, c, n) },
+    // —— 单V3b 多步 3 款 ——
+    // 各档位必须采到，否则等于没验：mines 走全 mineCount 1..24（熵消耗随雷数变）、
+    // hilo 走 step 0..19（每步一条独立 HMAC）、goal 走 7 列 × 3 档 bombs（拒绝采样分支随 bombs 变）。
+    // bucket()：把本组用到的档位记下来，跑完【断言档位全覆盖】——只写 n%24 而不验覆盖，
+    // 万一随机没采到某档就是静默漏测（绿得假）。
+    {
+      name: 'mines.deriveMines', buckets: 24,
+      bucket: (n) => 1 + (n % 24),
+      run: (m, s, c, n) => m.deriveMines(s, c, n, 1 + (n % 24)).join(','),
+    },
+    {
+      name: 'hilo.deriveCard', buckets: 20,
+      bucket: (n) => n % 20,
+      run: (m, s, c, n) => m.deriveCard(s, c, n, n % 20),
+    },
+    {
+      name: 'goal.deriveBombRows', buckets: 21,   // 7 列 × 3 档 bombs
+      bucket: (n) => `col${n % 7}/b${1 + (n % 3)}`,
+      run: (m, s, c, n) => [...m.deriveBombRows(s, c, n, n % 7, 1 + (n % 3))].sort().join(','),
+    },
   ];
-  const KEY = { 'dice.rollDice': 'dice', 'plinko.derivePath': 'plinko', 'limbo.deriveMult': 'limbo', 'keno.drawKeno': 'keno', 'streakRoll.drawStreak': 'streakRoll', 'miniRoulette.spinRoulette': 'miniRoulette' };
+  const KEY = {
+    'dice.rollDice': 'dice', 'plinko.derivePath': 'plinko', 'limbo.deriveMult': 'limbo',
+    'keno.drawKeno': 'keno', 'streakRoll.drawStreak': 'streakRoll', 'miniRoulette.spinRoulette': 'miniRoulette',
+    'mines.deriveMines': 'mines', 'hilo.deriveCard': 'hilo', 'goal.deriveBombRows': 'goal',
+  };
   const N = 10000;
   for (const cs of CASES) {
     const k = KEY[cs.name];
     let bad = 0;
+    const seen = new Set();
     for (let i = 0; i < N; i++) {
       const seed = randHex(64), client = randHex(16), nonce = Math.floor(rnd() * 1e9);
+      if (cs.bucket) seen.add(cs.bucket(nonce));
       const a = String(cs.run(oldMods[k], seed, client, nonce));
       const b = String(cs.run(newMods[k], seed, client, nonce));
       if (a !== b) { bad++; if (bad <= 2) console.log(`    ❌ ${cs.name} 不等：旧=${a} 新=${b}（seed=${seed.slice(0, 10)}… nonce=${nonce}）`); }
     }
     ok(bad === 0, `${cs.name} 旧 vs 新 ${N} 组全等`, bad ? `${bad} 组不等` : '');
+    // 档位覆盖断言（只对声明了 buckets 的多步 3 款）：漏档 = 静默漏测，必须判红
+    if (cs.buckets) ok(seen.size === cs.buckets, `${cs.name} 档位全覆盖（${cs.buckets} 档）`, `实采 ${seen.size}/${cs.buckets}`);
   }
-  // hashSeed 六款一起对拍
+  // hashSeed 九款一起对拍
   let hbad = 0;
   for (const k of Object.keys(newMods)) {
     for (let i = 0; i < 2000; i++) {
@@ -173,7 +220,7 @@ async function sectionB() {
       if (oldMods[k].hashSeed(seed) !== newMods[k].hashSeed(seed)) hbad++;
     }
   }
-  ok(hbad === 0, `6 款 hashSeed 旧 vs 新 各 2000 组全等`, hbad ? `${hbad} 组不等` : '');
+  ok(hbad === 0, `9 款 hashSeed 旧 vs 新 各 2000 组全等`, hbad ? `${hbad} 组不等` : '');
 }
 
 // ═══════════ c) dice 公式哨兵 ═══════════
@@ -205,7 +252,7 @@ async function sectionC() {
   ok(bad === 0, `dice 公式哨兵 ${N} 组全等（公式未被改动）`, bad ? `${bad} 组不等` : '');
 }
 
-console.log('_isocrypto_parity —— 单V3a 即时 6 款同构化硬闸');
+console.log('_isocrypto_parity —— 单V3a/V3b 模型A per-player 9 款（即时6+多步3）同构化硬闸');
 sectionA();
 await sectionB();
 await sectionC();

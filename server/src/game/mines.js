@@ -9,7 +9,13 @@
 //     部分 Fisher-Yates 抽样：只要事后公开 serverSeed，任何人都能用
 //     clientSeed + nonce + mineCount 重算出同一组雷位置，从而验证服务端在
 //     reveal 前没有偷看/篡改布雷。
-import crypto from 'crypto';
+// 单V3b 同构化：本文件原 `import crypto from 'crypto'` 已退役，hmac/sha256 回引
+// lib/seededRng.js 单一出处（Node→原生 crypto / 浏览器→纯 JS，逐位等价由
+// scripts/_isocrypto_parity.mjs 硬闸兜底）。前端 LocalVerify 直 import 本文件的派生函数
+// 做本地重算——禁前端手抄第二份公式。派生逻辑本身零改动，只换哈希调用点。
+// randomBytes（newServerSeed/newClientSeed）是 server-only，改函数体内惰性取 node:crypto，
+// 浏览器 import 本模块不触发、不抛。
+import { hmacSha256Hex, sha256Hex } from '../lib/seededRng.js';
 
 const RTP = 0.97;
 export const GRID = 25;          // 5x5
@@ -51,10 +57,7 @@ export function deriveMines(serverSeed, clientSeed, nonce, mineCount) {
   let counter = 0;
   const nextByte = () => {
     if (hex.length < 2) {
-      hex = crypto
-        .createHmac('sha256', serverSeed)
-        .update(`${clientSeed}:${nonce}:${counter++}`)
-        .digest('hex');
+      hex = hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}:${counter++}`);
     }
     const b = parseInt(hex.slice(0, 2), 16);
     hex = hex.slice(2);
@@ -75,7 +78,7 @@ export function deriveMines(serverSeed, clientSeed, nonce, mineCount) {
  * @returns {string} 64 位十六进制 sha256 摘要
  */
 export function hashSeed(serverSeed) {
-  return crypto.createHash('sha256').update(serverSeed).digest('hex');
+  return sha256Hex(serverSeed);
 }
 
 /**
@@ -84,6 +87,8 @@ export function hashSeed(serverSeed) {
  * @returns {string}
  */
 export function newServerSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(32).toString('hex');
 }
 
@@ -93,5 +98,7 @@ export function newServerSeed() {
  * @returns {string}
  */
 export function newClientSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(8).toString('hex');
 }

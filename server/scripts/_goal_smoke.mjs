@@ -68,6 +68,11 @@ const detail = await getDetail(s3.json.roundId);
 const keys = Object.keys(detail.result || {});
 check('GET /:id playing: result 只有白名单字段（无 bombs/未来雷）', keys.every(k => ['tier', 'picks', 'cum', 'step', 'nonce', 'status'].includes(k)) && !keys.includes('bombs'), `result_keys=${keys.join(',')}`);
 check('GET /:id 无 server_seed 明文', !('server_seed' in detail), '');
+// 单V3b 补落守门：已走列雷行 bombRows 落库供终局验证，活局期【必须】被白名单剥除。
+// 两条一起断言才有意义——只断言「GET 没有」的话，字段压根没写进库也会绿（假绿）。
+const r3db = await dbRound(s3.json.roundId);
+check('单V3b: playing 局【库里】已落 bombRows（已走 1 列）', Array.isArray(r3db.result?.bombRows) && r3db.result.bombRows.length === 1, `db.bombRows=${JSON.stringify(r3db.result?.bombRows)}`);
+check('单V3b: playing 局【GET】被白名单剥掉 bombRows（补落安全的前提）', !keys.includes('bombRows'), `result_keys=${keys.join(',')}`);
 await cleanup();
 
 // ===== 4. 可复算：库内 server_seed 逐列重算走过的列 == 实际 =====

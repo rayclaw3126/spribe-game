@@ -4,10 +4,26 @@
 // ⚠ 轻量约束：本文件必须保持【零引擎 import】——一旦 import 引擎，主包就会被拖进 HMAC/引擎代码。
 //   故白名单是手写字符串而非从注册表派生，与 LocalVerify.jsx 的 ROUND_SPINS/INSTANT_VERIFY 两处
 //   需保持同步（新增游戏时改两处）。
+//
+// ⚠ 预埋（单V3b 查明）：本白名单只被 HistoryDrawer / CommitRevealFairness 消费，而这两个只挂在
+//   【轮次彩 9 款】页面上；per-player 9 款（即时6+多步3）的页面只挂 SeedFairness，走
+//   「验整局 by roundId」路径，不经过本白名单。故下方 per-player 9 条目前【不生效】，
+//   是为「per-player 历史局抽屉」（待办池，方案1）预留 —— 那个抽屉接入后本表即自动生效。
+//   保留不删：删了将来接抽屉还得再加一遍；不再扩：新增 per-player 款走注册表即可。
 export const LOCAL_VERIFY_GAMES = new Set([
   // 排期器 9 款（单V2，走 ROUND_SPINS 路径）
   'speedgrid', 'numberup', 'derbyday', 'dominoduel', 'hattrick',
   'goldenboot', 'halftime', 'wuxing', 'lineup',
   // 即时 6 款（单V3a，走 INSTANT_VERIFY 注册表路径）
   'dice', 'plinko', 'limbo', 'keno', 'streak', 'roulette',
+  // 多步 3 款（单V3b，同注册表；goal 老局无 bombRows 会显「缺要素」）
+  'mines', 'hilo', 'goal',
+]);
+
+// 单V3b：per-player 9 款 —— 账单行显本局编号 #roundId 小字，供 SeedFairness「验整局」取用。
+// 与 instantVerify.js 的 INSTANT_VERIFY 键集同步；此处手写字符串而非从注册表派生，
+// 是为了守住本文件【零引擎 import】的轻量约束（BillDrawer 引它，一旦拖进引擎就是主包增重）。
+// 轮次彩不列：它们的本地重算走抽屉内的 LocalVerify，不需要玩家手动拿 roundId。
+export const PER_PLAYER_VERIFY_GAMES = new Set([
+  'dice', 'plinko', 'limbo', 'keno', 'streak', 'roulette', 'mines', 'hilo', 'goal',
 ]);

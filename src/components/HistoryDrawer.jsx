@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
-import { COLORS, RADIUS, DERBY, LAYOUT } from './shell/tokens'
+import { COLORS, RADIUS, DERBY, LAYOUT, MONO } from './shell/tokens'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlayerApi } from '../lib/playerApi'
 import { formatDraw, formatDrawDetail, shortRoundNo } from './drawFormatters'
@@ -15,7 +15,6 @@ const LocalVerify = lazy(() => import('./shell/LocalVerify'))
 // keyset 分页（nextCursor），只读 GET 走 playerApi.apiGet。色值全走 tokens，禁新 hex。
 
 const NOOP = () => {}   // apiGet 不写余额，setServerBalance 传稳定 noop，保 usePlayerApi memo 不抖
-const MONO = "ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono', monospace"
 
 function fmtTime(iso) {
   if (!iso) return ''

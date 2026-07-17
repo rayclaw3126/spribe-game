@@ -449,3 +449,10 @@ export const CHIP_COLORS = [
   { v: 25, base: '#2ea862', edge: '#86d6a6' },   // 绿
   { v: 50, base: '#f2b829', edge: '#ffe08a' },   // 金
 ]
+
+// 等宽字体栈 —— 单一出处（单V3b 提取）。
+// 原为 4 份逐字节相同的手抄（HistoryDrawer / CommitRevealFairness / LocalVerify / SeedFairness），
+// BillDrawer 要显本局编号 #id 时本可能变第 5 份 —— 就地并成一份。值照抄原手抄，一个字符没动。
+// 用途：hash / seed / roundId 等长串对齐可读。
+// ⚠ Aviator/Momentum 里的裸 `fontFamily: 'monospace'` 是【另一个值】（非本栈），不在本单归并范围。
+export const MONO = "ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono', monospace"

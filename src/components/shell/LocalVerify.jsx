@@ -3,19 +3,22 @@
 // 派生用 ROUND_SPINS（server/src/game/roundSpins.js，与 roundHub 结算同一份）——前端【不手抄】第二份逻辑。
 // 输入 serverSeed+clientSeed+nonce → 本地重算 drawResult，与实际开奖逐字段 ✓/✗ 比对。
 //
-// 单V3a：即时 6 款（dice/plinko/limbo/keno/streakRoll/miniRoulette）并入本件。
-// 两类游戏派生形状不同，故走两条路径：
+// 单V3a/V3b：per-player 款（即时 6 + 多步 3）并入本件。两类游戏派生形状不同，故走两条路径：
 //   · 排期器 9 款：ROUND_SPINS[game](rng) → drawResult，逐字段比（原路径，零改动）。
-//   · 即时 6 款：各引擎派生签名各异（rollDice/derivePath/drawKeno/…），走 INSTANT_VERIFY
+//   · per-player 9 款：各引擎派生签名各异（rollDice/deriveMines/drawKeno/…），走 INSTANT_VERIFY
 //     注册表按款适配（./instantVerify.js，同样直 import 引擎导出，禁手抄公式）。
 //     注册表独立成文件是为了让静态 import 它的 SeedFairness 不被牵连拖进 roundSpins——详见该文件。
+//
+// ⚠ 预埋（单V3b 查明）：本件只被 HistoryDrawer / CommitRevealFairness 渲染，而那两个只挂在
+//   【轮次彩 9 款】页面上 → 下方 INSTANT_VERIFY 分支目前【不可达】。per-player 9 款的本地重算
+//   实际走 SeedFairness 的「验整局 by roundId」路径（同一份注册表，故逻辑不会分叉）。
+//   本分支为「per-player 历史局抽屉」（待办池）预留：那个抽屉接入后即自动生效，无需再改本件。
 import { useMemo } from 'react';
 import { makeSeededRng } from '../../../server/src/lib/seededRng.js';
 import { ROUND_SPINS } from '../../../server/src/game/roundSpins.js';
-import { INSTANT_VERIFY } from './instantVerify';
-import { COLORS, RADIUS } from './tokens';
+import { INSTANT_VERIFY, fieldsOf } from './instantVerify';
+import { COLORS, RADIUS, MONO } from './tokens';
 
-const MONO = "ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono', monospace";
 
 // 顺序无关规范化深比（对象键递归排序；数组保原序——与后端 A补/psql 口径一致）。
 function canon(v) {
@@ -41,12 +44,13 @@ export default function LocalVerify({ game, serverSeed, clientSeed, nonce, drawR
         got = spin(rng).drawResult;
         fields = Object.keys(drawResult);
       } else {
-        // 即时 6 款：result 里混着玩家输入与结算产物，只比 fields 列的派生产物；
-        // needs（plinko rows / streak risk）从 result 回显值取——它们是派生的【输入】不是产物。
+        // 模型A per-player 款（即时 6 + 多步 3）：result 里混着玩家输入与结算产物，
+        // 只比 fields 列的派生产物；needs（plinko rows / streak risk / mines mineCount /
+        // hilo step / goal tier）从 result 回显值取——它们是派生的【输入】不是产物。
         const missing = inst.needs.filter((nd) => drawResult[nd.key] == null);
         if (missing.length) return { error: `缺少重算要素（${missing.map((m) => m.key).join('/')}）` };
         got = inst.derive(serverSeed, clientSeed ?? '', nonce, drawResult);
-        fields = inst.fields;
+        fields = fieldsOf(inst, drawResult);   // goal 的靶随终局形状变（cashed/bust），故走 fieldsOf
       }
       const rows = fields.map((k) => ({ k, want: drawResult[k], got: got[k], ok: deepEq(drawResult[k], got[k]) }));
       return { rows, allOk: rows.length > 0 && rows.every((r) => r.ok), got };

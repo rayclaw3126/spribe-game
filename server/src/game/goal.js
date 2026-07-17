@@ -4,13 +4,26 @@
 //    RTP 焊死——改一处必须改两处，一个数都别动别重算。
 //
 // 雷行不信前端：deriveBombRows 用 HMAC-SHA256(serverSeed, `${clientSeed}:${nonce}:${col}:${counter}`)
-// 【按列独立】派生本列雷行（key 带列号 col，每列一把新熵），只算某一列、绝不一次算全盘——
-// 这样 result 里永不落未来列雷位，从根上消除「GET /:id 看雷位=提款机」的风险。
+// 【按列独立】派生本列雷行（key 带列号 col，每列一把新熵），只算某一列、绝不一次算全盘。
+//
+// ⚠ 不变量（单V3b 改版，原为「result 里永不落任何雷位」）：
+//   · 【未来列】雷行永不落库 —— 这是「GET /:id 看雷位=提款机」的根治，一个字都不能松。
+//   · 【已走列】雷行终局补落（round.js /goal/pick 的 bombRows），供玩家本地重算比对：
+//     原先 cashed 局只存玩家选行、不存雷行，导致一列都验不了。已走列属"过去"，无提款机价值；
+//     各列熵独立（key 带 col），知道前面列推不出后面列。
+//   · 活局期由 safeResultForView 的 goal 白名单剥除 bombRows（白名单【禁】收录本字段）
+//     —— 这是补落安全的前提，改白名单前先想清楚这一行。
 //
 // 无偏：挑雷行是 [0,1,2,3] 上的部分 Fisher-Yates。bombs=1 只用 %4(256%4=0 无偏)，但 bombs=2/3
 // 会用到 %3(256%3≠0 有模偏)。玩家挑行可套利，且前端用无偏 Math.random——故这里用拒绝采样消除
 // 模偏（与 Keno 同款处理），保证各行/各子集严格等概率、与前端分布一致。
-import crypto from 'crypto';
+// 单V3b 同构化：本文件原 `import crypto from 'crypto'` 已退役，hmac/sha256 回引
+// lib/seededRng.js 单一出处（Node→原生 crypto / 浏览器→纯 JS，逐位等价由
+// scripts/_isocrypto_parity.mjs 硬闸兜底）。前端 LocalVerify 直 import 本文件的派生函数
+// 做本地重算——禁前端手抄第二份公式。派生逻辑本身零改动，只换哈希调用点。
+// randomBytes（newServerSeed/newClientSeed）是 server-only，改函数体内惰性取 node:crypto，
+// 浏览器 import 本模块不触发、不抛。
+import { hmacSha256Hex, sha256Hex } from '../lib/seededRng.js';
 
 const RTP = 0.97;
 export const COLS = 7;   // 7 列
@@ -47,10 +60,7 @@ export function deriveBombRows(serverSeed, clientSeed, nonce, col, bombs) {
   let counter = 0;
   const nextByte = () => {
     if (hex.length < 2) {
-      hex = crypto
-        .createHmac('sha256', serverSeed)
-        .update(`${clientSeed}:${nonce}:${col}:${counter++}`)
-        .digest('hex');
+      hex = hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}:${col}:${counter++}`);
     }
     const b = parseInt(hex.slice(0, 2), 16);
     hex = hex.slice(2);
@@ -72,15 +82,19 @@ export function deriveBombRows(serverSeed, clientSeed, nonce, col, bombs) {
 
 /** 对 serverSeed 做 commit hash（与其它游戏一致，reveal 前只广播 hash）。 */
 export function hashSeed(serverSeed) {
-  return crypto.createHash('sha256').update(serverSeed).digest('hex');
+  return sha256Hex(serverSeed);
 }
 
 /** 新私密 serverSeed（32 字节随机，hex）。 */
 export function newServerSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(32).toString('hex');
 }
 
 /** 新公开 clientSeed（8 字节随机，hex）。 */
 export function newClientSeed() {
+  // server-only：浏览器永不调用本函数；惰性取避免 import 期触碰 node:crypto
+  const crypto = process.getBuiltinModule('node:crypto');
   return crypto.randomBytes(8).toString('hex');
 }

@@ -2885,6 +2885,11 @@ router.post('/goal/pick', requireAuth, requireType('player'), async (req, res, n
       const newStep = step + 1;
       const newCum = r.cum * goalStepMult(tier);
       const newPicks = [...(r.picks || []), rowNum];
+      // 单V3b：已走列的雷行追加落库，供本地重算比对（cashed 局原本一列雷行都没有 → 无验证靶）。
+      // 不变量：【未来列】雷行永不落库（本列此刻已走完，属"过去"，无提款机价值；各列熵独立，
+      //   知道前面列推不出后面列）。活局期由 safeResultForView 的 goal 白名单剥除本字段
+      //   —— 白名单【禁】加 bombRows，那是本补落安全的前提。
+      const newBombRows = [...(r.bombRows || []), [...bombSet]];
 
       if (newStep >= GOAL_COLS) {
         // 走满 7 列自动结算（钳制 cap——别漏！照 mines 揭满后门教训）
@@ -2900,14 +2905,14 @@ router.post('/goal/pick', requireAuth, requireType('player'), async (req, res, n
           idempotencyKey: `goal-cash-${round.id}`,
           roundId: round.id,
         });
-        const newResult = { ...r, picks: newPicks, cum: newCum, step: newStep, status: 'cashed' };
+        const newResult = { ...r, picks: newPicks, cum: newCum, step: newStep, bombRows: newBombRows, status: 'cashed' };
         await client.query(`UPDATE rounds SET status = 'cashed', result = $2::jsonb, payout = $3::numeric WHERE id = $1`, [round.id, JSON.stringify(newResult), payout]);
         await client.query(`UPDATE bets SET outcome = 'win' WHERE round_id = $1`, [round.id]);
         return { safe: true, cleared: true, col: step, mult: newCum, cum: newCum, payout, balanceAfter, serverSeedHash: round.result_hash, clientSeed: round.client_seed, nonce: r.nonce, roundId: round.id };
       }
 
-      // 未走满：只落地进度（不 reveal 本列雷）
-      const newResult = { ...r, picks: newPicks, cum: newCum, step: newStep };
+      // 未走满：只落地进度（本列雷行随 bombRows 落库，但活局期被白名单剥除，前端看不到）
+      const newResult = { ...r, picks: newPicks, cum: newCum, step: newStep, bombRows: newBombRows };
       await client.query(`UPDATE rounds SET result = $2::jsonb WHERE id = $1`, [round.id, JSON.stringify(newResult)]);
       return { safe: true, cleared: false, col: step, mult: newCum, cum: newCum, step: newStep };
     });
@@ -3052,9 +3057,15 @@ router.get('/history/:game', requireAuth, async (req, res, next) => {
 // ------------------------------------------------------------------
 // GET /round/:id —— 查询单局详情
 // ------------------------------------------------------------------
+// 归属校验（单V3b）：只给【本人】的局。原先 WHERE 只按 id 查，任何登录玩家都能拉任意人的局
+//   —— 终态局给全 result（雷位/牌序全在里面），等于随便翻别人的账。
+//   他人局/不存在一律回同一句 404（不区分，防按 id 枚举探测他人局是否存在）。
+//   agent 类 token 也走本分支：其 sub 是 agent_id，与 rounds.player_id 天然对不上 → 一律 404，
+//   代理要看局请走 /agent/* 报表路径，不从玩家局详情端点绕。
 router.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
+    const playerId = req.user.sub;
     // 模型 A：绝不吐 server_seed 明文（只给 result_hash）。明文要走 /seed/rotate 才 reveal。
     const result = await query(
       `SELECT r.id, r.game, r.player_id, r.bet_amount, r.payout, r.status, r.result,
@@ -3062,8 +3073,8 @@ router.get('/:id', requireAuth, async (req, res, next) => {
               b.id AS bet_id, b.outcome AS bet_outcome, b.idempotency_key
          FROM rounds r
          LEFT JOIN bets b ON b.round_id = r.id
-        WHERE r.id = $1`,
-      [id]
+        WHERE r.id = $1 AND r.player_id = $2`,
+      [id, playerId]
     );
     if (result.rowCount === 0) {
       return res.status(404).json({ error: '该局不存在' });

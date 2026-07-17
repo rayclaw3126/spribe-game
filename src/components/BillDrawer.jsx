@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { COLORS, RADIUS } from './shell/tokens'
+import { COLORS, RADIUS, MONO } from './shell/tokens'
+import { PER_PLAYER_VERIFY_GAMES } from './shell/localVerifyGames'   // 零引擎 import 的轻量白名单
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlayerApi } from '../lib/playerApi'
 import { GAME_BY_BACKEND_ID, GAME_BY_ID, GAME_REGISTRY } from '../gameRegistry'
@@ -303,7 +304,18 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
                       {summary && (
                         <div style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</div>
                       )}
-                      <div style={smallMuted}>注 {money(it.amount)} · {fmtTime(it.created_at)}</div>
+                      <div style={smallMuted}>
+                        注 {money(it.amount)} · {fmtTime(it.created_at)}
+                        {/* 单V3b：per-player 款显本局编号，点击复制 —— 拿去「⚖ 可验证公平 → 验整局」验这一局。
+                            轮次彩不显（那些款在自己的抽屉里就能重算，不需要玩家手抄编号）。 */}
+                        {PER_PLAYER_VERIFY_GAMES.has(it.game) && it.round_id != null && (
+                          <span
+                            onClick={() => navigator.clipboard?.writeText(String(it.round_id))}
+                            title="点击复制本局编号，用于「可验证公平 → 验整局」"
+                            style={{ marginLeft: 6, fontFamily: MONO, cursor: 'pointer', textDecoration: 'underline dotted' }}
+                          >#{it.round_id}</span>
+                        )}
+                      </div>
                     </div>
                     <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
                       <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: RADIUS.pill, fontSize: 11, fontWeight: 900, color: badge.c, background: badge.bg }}>{badge.t}</span>

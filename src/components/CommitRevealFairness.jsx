@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
-import { COLORS, DERBY, RADIUS, LAYOUT } from './shell/tokens'
+import { COLORS, DERBY, RADIUS, LAYOUT, MONO } from './shell/tokens'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { shortRoundNo } from './drawFormatters'
 import { LOCAL_VERIFY_GAMES } from './shell/localVerifyGames'
@@ -16,7 +16,6 @@ const LocalVerify = lazy(() => import('./shell/LocalVerify'))
 //   serverSeed = 开奖(crashed/done/drawn)后 reveal 的明文；未揭晓时缺省。
 // 揭晓后本地 crypto.subtle SHA-256(serverSeed) 比对 commitHash（后端算法：sha256(纯 serverSeed) 无拼接，
 //   见 game/aviator.js|momentum.js hashSeed + ws/roundHub.js:209，逐位一致）→ 显 ✓承诺一致 / ✗不符。
-const MONO = "ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono', monospace"
 
 // 浏览器就地算 sha256(hex)，与后端 crypto.createHash('sha256').update(serverSeed).digest('hex') 同口径。
 async function sha256Hex(str) {

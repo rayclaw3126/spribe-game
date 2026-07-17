@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { COLORS, DERBY, RADIUS, LAYOUT } from './tokens'
+import { COLORS, DERBY, RADIUS, LAYOUT, MONO } from './tokens'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
-import { INSTANT_VERIFY } from './instantVerify'
+import { INSTANT_VERIFY, fieldsOf } from './instantVerify'
+import { sha256Hex } from '../../../server/src/lib/seededRng.js'
 
 // 可验证公平抽屉 — 共享件。壳（定位/圆角/动画/遮罩/抓手/标题行）1:1 抄 HowToPlay.jsx，
 // 暗色皮同取 DERBY 系（球场绿卡底 + 金顶边/段标 + 浅绿正文），禁自编 hex。
@@ -14,8 +15,9 @@ import { INSTANT_VERIFY } from './instantVerify'
 // 手抄件与引擎迟早分叉，分叉时验证器不但证明不了公平，还会把好局判成作弊。
 // 注册表的 derive 是【同步】的（纯 JS HMAC-SHA256，非 crypto.subtle），故 doVerify 不再 await。
 //
-// 等宽字体 MONO 为【新增约定值】（tokens.js 无等宽定义，非抄袭）：用于 hash/seed 长串对齐可读。
-const MONO = "ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono', monospace"
+// 等宽字体 MONO 已提进 tokens.js 做单一出处（单V3b）——原为本文件等 4 处逐字节相同的手抄。
+// 终局状态（与后端 round.js TERMINAL_STATUSES 同口径）：只有终局才给全 result，才谈得上整局重算。
+const TERMINAL = new Set(['settled', 'cashed', 'bust'])
 
 // 手填「后端开出值」的输入提示（按款主字段的实际形状给例）。
 const PLACEHOLDER = {
@@ -77,10 +79,15 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
   const [vLocal, setVLocal] = useState(null)     // { 字段名: 重算值 } | 'ERR'
   const [vBusy, setVBusy] = useState(false)
   const [vExtra, setVExtra] = useState({})       // 单V3a：plinko rows / streak risk 等派生额外输入
+  // 单V3b「验整局」：填 roundId → GET /round/:id → 局内 client_seed/nonce/needs 自动喂注册表
+  const [wRid, setWRid] = useState('')
+  const [wBusy, setWBusy] = useState(false)
+  const [wOut, setWOut] = useState(null)         // { rows, allOk, game, status } | { error }
 
-  // 单V3a：支持面 = INSTANT_VERIFY 注册表（即时 6 款）。不在表里的（mines/hilo/goal/aviator…）仍标"尚在开发中"。
+  // 单V3a/V3b：支持面 = INSTANT_VERIFY 注册表（即时 6 + 多步 3）。不在表里的（aviator…）仍标"尚在开发中"。
   const spec = INSTANT_VERIFY[game]
   const verifierSupported = !!spec
+  const manualSupported = !!spec && spec.manualOk !== false   // goal 的靶在 result 里，手填无意义
 
   const loadCurrent = useCallback(async () => {
     setLoading(true); setError('')
@@ -137,9 +144,42 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
     finally { setVBusy(false) }
   }
 
+  // 单V3b「验整局」：按 roundId 拉本局记录（后端已加归属校验：他人局 404），
+  // 用【局内】的 client_seed/nonce/needs 喂注册表 —— 玩家一个字段都不用手抄，也就无从抄错。
+  // serverSeed 仍取上方轮换揭晓的明文（vSeed）：先用 result_hash 校验这把种子确实是本局承诺的那把，
+  // 再重算 —— 否则「种子对不上」会被误读成「服务端作弊」。
+  async function doVerifyWhole() {
+    const rid = wRid.trim()
+    if (!rid) return
+    const seed = vSeed.trim()
+    if (!seed) { setWOut({ error: '请先「轮换种子」拿到 serverSeed 明文（或在上方手填）' }); return }
+    setWBusy(true); setWOut(null)
+    try {
+      const row = await seedApi(`/round/${encodeURIComponent(rid)}`, { token: playerToken })
+      const sp = INSTANT_VERIFY[row.game]
+      if (!sp) { setWOut({ error: `本局是 ${row.game}，该游戏暂不支持本地重算` }); return }
+      if (!TERMINAL.has(row.status)) { setWOut({ error: `本局还在进行中（${row.status}），终局后才可验（活局的未开区域按设计不落库/不下发）` }); return }
+      const R = row.result || {}
+      if (R.nonce == null) { setWOut({ error: '本局记录缺 nonce，无法重算（补落 nonce 之前的老局）' }); return }
+      // 承诺校验：sha256(明文种子) 必须等于本局落库的 result_hash
+      if (row.result_hash && sha256Hex(seed) !== row.result_hash) {
+        setWOut({ error: '这把 serverSeed 不是本局承诺的那把（sha256 与本局 result_hash 不符）—— 本局属于另一轮种子，请用对应的揭晓明文' })
+        return
+      }
+      const missing = sp.needs.filter((nd) => R[nd.key] == null)
+      if (missing.length) { setWOut({ error: `本局记录缺重算要素（${missing.map((m) => m.key).join('/')}）` }); return }
+      const got = sp.derive(seed, row.client_seed ?? '', R.nonce, R)
+      const rows = fieldsOf(sp, R).map((f) => ({ f, want: R[f], got: got[f], ok: deepEq(R[f], got[f]) }))
+      setWOut({ rows, allOk: rows.length > 0 && rows.every((r) => r.ok), game: row.game, status: row.status, nonce: R.nonce })
+    } catch (e) {
+      setWOut({ error: e.message === '该局不存在' ? '该局不存在（或不属于你）' : (e.message || '重算异常') })
+    } finally { setWBusy(false) }
+  }
+
   const canSetClient = current && current.nonce === 0
-  // 主字段 = spec.fields[0]（dice→roll / keno→drawn / roulette→n / plinko→path / limbo→finalMult / streak→idx）
-  const mainField = spec ? spec.fields[0] : null
+  // 主字段 = 本款第一个靶（dice→roll / keno→drawn / roulette→n / plinko→path / limbo→finalMult / streak→idx）
+  // fieldsOf：goal 的靶随终局形状变，故不能直接取 spec.fields[0]（那是个函数）
+  const mainField = spec ? fieldsOf(spec, vExtra)[0] : null
   const vLocalOk = vLocal != null && vLocal !== 'ERR'
   const expected = vLocalOk ? parseExpected(vBackend, vLocal[mainField]) : undefined
   const vMatch = vLocalOk && expected !== undefined && deepEq(expected, vLocal[mainField])
@@ -282,8 +322,50 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
             </div>
             {verifierSupported ? (
               <>
+                {/* 单V3b 验整局：主路径 —— 只填 roundId，其余全从本局记录自动取 */}
+                <div style={{ marginBottom: 14, padding: '10px 12px', background: DERBY.strip, borderRadius: RADIUS.input, border: `1px solid ${DERBY.sel}` }}>
+                  <div style={{ color: DERBY.sel, fontSize: 12, fontWeight: 900, marginBottom: 6 }}>◆ 验整局（推荐）</div>
+                  <div style={{ color: DERBY.dim, fontSize: 11.5, lineHeight: 1.6, marginBottom: 8 }}>
+                    填本局编号即可：clientSeed / nonce / 局内参数全部从你的这局记录自动读取，无需手抄。
+                    先用上方「轮换种子」拿到 serverSeed 明文，再验此前任意一局（只能验你自己的局）。
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input type="text" value={wRid} onChange={e => setWRid(e.target.value)} spellCheck={false}
+                      placeholder="本局编号 roundId（账单里可查）" style={{ ...input, flex: 1 }} />
+                    <button type="button" onClick={doVerifyWhole} disabled={wBusy || !wRid.trim()} style={{
+                      padding: '8px 16px', border: `1px solid ${DERBY.sel}`, borderRadius: RADIUS.btn,
+                      background: DERBY.selTint, color: DERBY.sel, fontSize: 13, fontWeight: 900, whiteSpace: 'nowrap',
+                      cursor: wBusy || !wRid.trim() ? 'default' : 'pointer', opacity: wBusy || !wRid.trim() ? 0.6 : 1, flex: '0 0 auto',
+                    }}>{wBusy ? '重算中…' : '验整局'}</button>
+                  </div>
+                  {wOut?.error && <div style={{ marginTop: 8, color: '#ff8a9a', fontSize: 11.5, fontWeight: 700, lineHeight: 1.5 }}>{wOut.error}</div>}
+                  {wOut?.rows && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{
+                        display: 'inline-block', fontSize: 12, fontWeight: 900, borderRadius: RADIUS.pill, padding: '3px 12px', marginBottom: 8,
+                        color: wOut.allOk ? '#0d2016' : '#ff8a9a', background: wOut.allOk ? DERBY.sel : 'rgba(196,24,54,0.18)',
+                      }}>
+                        {wOut.allOk ? '✓ 本局完全复现 · 开奖由种子决定，服务端未作弊' : '✗ 有字段对不上，请核对种子是否为本局那把'}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: DERBY.dim, marginBottom: 6 }}>{wOut.game} · {wOut.status} · nonce {wOut.nonce}</div>
+                      {wOut.rows.map((r) => (
+                        <div key={r.f} style={{ display: 'flex', gap: 8, fontSize: 11, fontFamily: MONO, marginBottom: 4, alignItems: 'flex-start' }}>
+                          <span style={{ flex: '0 0 auto', color: r.ok ? DERBY.sel : '#ff8a9a', fontWeight: 900 }}>{r.ok ? '✓' : '✗'}</span>
+                          <span style={{ flex: '0 0 auto', color: DERBY.dim, minWidth: 62 }}>{r.f}</span>
+                          <span style={{ flex: '1 1 auto', color: DERBY.text, wordBreak: 'break-all' }}>
+                            {fmtVal(r.want)}
+                            {!r.ok && <span style={{ color: '#ff8a9a' }}> ≠ 重算 {fmtVal(r.got)}</span>}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {manualSupported ? (
+                <>
                 <div style={{ color: DERBY.dim, fontSize: 12, lineHeight: 1.6, marginBottom: 8 }}>
-                  贴入已揭晓的 serverSeed + 当时的 clientSeed / nonce，本地 HMAC-SHA256 重算该局 {spec.fields.join(' / ')}，与后端开出的比对。
+                  ◇ 手填（备用）：贴入已揭晓的 serverSeed + 当时的 clientSeed / nonce，本地 HMAC-SHA256 重算该局 {fieldsOf(spec, vExtra).join(' / ')}，与后端开出的比对。
                 </div>
                 <div style={{ marginBottom: 8 }}>
                   <div style={fieldLabel}>serverSeed（明文，轮换后带入）</div>
@@ -327,7 +409,7 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
                 {vLocalOk && (
                   <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6, background: DERBY.strip, borderRadius: RADIUS.input, padding: '10px 12px' }}>
                     {/* 多字段款（streak→idx+landed）逐字段列出重算值 */}
-                    {spec.fields.map((f) => (
+                    {fieldsOf(spec, vExtra).map((f) => (
                       <div key={f} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
                         <span style={{ color: DERBY.dim, flex: '0 0 auto' }}>本地重算 {f}</span>
                         <span style={{ fontFamily: MONO, color: DERBY.text, fontWeight: 800, wordBreak: 'break-all', textAlign: 'right' }}>{fmtVal(vLocal[f])}</span>
@@ -342,6 +424,12 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
                         {vMatch ? '✓ 一致 · 本局公平已验证' : '✗ 不一致 · 请核对输入'}
                       </div>
                     )}
+                  </div>
+                )}
+                </>
+                ) : (
+                  <div style={{ color: DERBY.dim, fontSize: 11.5, lineHeight: 1.6 }}>
+                    ◇ 本款无手填路径：要比对的雷行就存在本局记录里，手填等于自己抄答案再对答案——请用上方「验整局」。
                   </div>
                 )}
               </>
