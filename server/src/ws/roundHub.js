@@ -127,20 +127,55 @@ const ROOM_ENGINES = {
   },
 };
 
-// 本轮启动的房间列表（backendId = room key）。单3 全 9 款轮次上排期器。
-const ROOMS_TO_START = ['speedgrid', 'numberup', 'derbyday', 'dominoduel', 'hattrick', 'goldenboot', 'halftime', 'wuxing', 'lineup'];
+// ============ #42 单1：房配置（一款可多房）============
+//
+// roomKey 与 gameName 解耦：
+//   · 标准房 roomKey === gameName（裸 backendId）—— 向后兼容：旧 WS 连接（只带 ?game=）、
+//     getRoomState('speedgrid') 等既有调用一律照旧命中，部署后玩家无感。
+//   · 附加房 roomKey = `${gameName}:${room}`（如 'speedgrid:15s'）。
+//
+// room 字段 = 落 rounds.room 的值。标准房也【显式】落值（'30s'）而非 NULL —— 让试点两房在库里
+//   都有明确房标识；其余 8 款 room:null → 落 NULL（= 该款标准房，读侧 COALESCE 归一）。
+//
+// prefix = 期号前缀，【每房独立】。recoverSeq 靠 `round_no LIKE '<prefix>-日期-%'` 发号，
+//   前缀不同即天然分房，不依赖 room 列（D 段实证）。⚠ 前缀不能有包含关系陷阱：
+//   'SG15-…' 不匹配 'SG-2026…'（第二段被日期占死），故 SG / SG15 安全共存。
+//
+// timings = 覆盖 DEFAULT_TIMINGS 的字段。⚠ idleMs 两房都保 5000：它是【动画长度约束】
+//   （≥ 前端 DRAW_ANIM_MS，否则下一期 betting 会切断开奖动画），砍它会砍出画面 bug；
+//   15s 房只砍 betting 段。
+const ROOM_CONFIGS = [
+  // —— speedgrid 试点：两房 ——
+  { key: 'speedgrid', gameName: 'speedgrid', room: '30s', prefix: 'SG', timings: {} },                        // 标准房（key 裸 gameName，向后兼容）
+  { key: 'speedgrid:15s', gameName: 'speedgrid', room: '15s', prefix: 'SG15', timings: { bettingMs: 15000 } }, // 快房：只砍 betting，idle 仍 5000
+  // —— 其余 8 款：各一标准房，room 落 NULL，prefix/timings 沿用 ROOM_ENGINES/ROOM_TIMINGS ——
+  ...['numberup', 'derbyday', 'dominoduel', 'hattrick', 'goldenboot', 'halftime', 'wuxing', 'lineup']
+    .map((g) => ({ key: g, gameName: g, room: null, prefix: null, timings: {} })),
+];
 
-// 模块级房间表：gameName → room。round.js 的下注端点通过 getRoomState() 读同一活对象判相位。
+// 某款的所有房 key（下注相位闸按 roundId 在该款所有房里定位当期房用）
+const roomKeysOfGame = (gameName) => ROOM_CONFIGS.filter((c) => c.gameName === gameName).map((c) => c.key);
+// 该款的标准房 key（= 裸 gameName）
+const defaultRoomKeyOf = (gameName) => gameName;
+// 本轮启动的房 key 列表
+const ROOMS_TO_START = ROOM_CONFIGS.map((c) => c.key);
+// recoverOrphans 扫描面：按【款】扫（引擎按 game 命中），两房孤儿一起收
+const GAMES_TO_RECOVER = [...new Set(ROOM_CONFIGS.map((c) => c.gameName))];
+
+// 模块级房间表：roomKey → room。round.js 的下注端点通过 getRoomState() 读同一活对象判相位。
 const rooms = new Map();
 let started = false;
 
 // 私密字段（serverSeed）只活在 room 内存里，reveal 前不出现在任何广播/快照/日志。
-function makeRoom(gameName) {
+function makeRoom(cfg) {
+  const { key, gameName, room, prefix, timings } = cfg;
   const engine = ROOM_ENGINES[gameName];
   return {
+    roomKey: key,
     gameName,
-    engine,
-    timings: timingsFor(gameName), // { bettingMs, lockedMs, idleMs }（idle 按各款舞台动画长度）
+    room,                                   // 落 rounds.room 的值（null = 该款标准房）
+    engine: prefix ? { ...engine, prefix } : engine,   // 房级 prefix 覆盖引擎默认（每房独立发号）
+    timings: { ...timingsFor(gameName), ...timings },  // 房级节奏覆盖（15s 房砍 bettingMs）
     phase: 'idle', // 'betting' | 'locked' | 'drawn' | 'settled' | 'idle'
     dateKey: null, // 'YYYYMMDD'，跨零点重置期号序号
     seq: 0, // 当日期号序号（NNN）
@@ -196,7 +231,7 @@ async function recoverSeq(gameName, prefix, dateKey) {
 
 // —— betting：生成本期种子 + INSERT 共享 round(status='betting', result/server_seed 都不落) + 广播承诺 ——
 async function runBetting(room) {
-  const { engine, gameName } = room;
+  const { engine, gameName, roomKey } = room;
 
   // 跨零点：日期变了则序号从 0 重置。
   const dk = dateKeyNow();
@@ -223,19 +258,21 @@ async function runBetting(room) {
   // 共享 round 行：betting 阶段先落，bets 才有 round_id 可挂。
   // 只落承诺 result_hash + client_seed；server_seed 与 result 一律 NULL（drawn 才 reveal）。
   try {
+    // #42：room 一并落库（null = 该款标准房；试点 speedgrid 两房显式落 '30s'/'15s'）。
+    // game 恒为款名不含房——ledger 类型/引擎表/风控/注册表全部按 game 命中，房化对它们无感。
     const ins = await query(
-      `INSERT INTO rounds (game, player_id, round_no, client_seed, result_hash, status)
-       VALUES ($1, NULL, $2, $3, $4, 'betting')
+      `INSERT INTO rounds (game, player_id, round_no, client_seed, result_hash, status, room)
+       VALUES ($1, NULL, $2, $3, $4, 'betting', $5)
        RETURNING id`,
-      [gameName, roundNo, clientSeed, serverSeedHash],
+      [gameName, roundNo, clientSeed, serverSeedHash, room.room],
     );
     room.roundId = ins.rows[0].id;
   } catch (err) {
     // 落库失败：本期无 roundId → 下注端点会因 phase 判定/roundId 缺失兜住；短暂跳到 idle 再重试。
-    console.error(`[roundHub:${gameName}] betting round 落库失败：`, err.message);
+    console.error(`[roundHub:${roomKey}] betting round 落库失败：`, err.message);
     room.phase = 'idle';
     room.endsAt = Date.now() + room.timings.idleMs;
-    room.timer = setTimeout(() => { room.nonce += 1; runBetting(room).catch(logLoopErr(gameName)); }, room.timings.idleMs);
+    room.timer = setTimeout(() => { room.nonce += 1; runBetting(room).catch(logLoopErr(roomKey)); }, room.timings.idleMs);
     return;
   }
 
@@ -268,12 +305,12 @@ function runLocked(room) {
     endsAt: room.endsAt,
     durationMs: room.timings.lockedMs,
   });
-  room.timer = setTimeout(() => { runDrawn(room).catch(logLoopErr(room.gameName)); }, room.timings.lockedMs);
+  room.timer = setTimeout(() => { runDrawn(room).catch(logLoopErr(room.roomKey)); }, room.timings.lockedMs);
 }
 
 // —— drawn：一次 spin 开奖 → reveal（广播 serverSeed + UPDATE 落 result/server_seed）→ 结算全员 → settled ——
 async function runDrawn(room) {
-  const { engine, gameName } = room;
+  const { engine, roomKey } = room;
   room.phase = 'drawn';
 
   const rng = makeSeededRng(room.serverSeed, room.clientSeed, room.nonce);
@@ -290,7 +327,7 @@ async function runDrawn(room) {
       [JSON.stringify({ drawResult, nonce: room.nonce }), room.serverSeed, room.roundId],
     );
   } catch (err) {
-    console.error(`[roundHub:${gameName}] drawn 落库失败：`, err.message);
+    console.error(`[roundHub:${roomKey}] drawn 落库失败：`, err.message);
   }
 
   // reveal 广播：任何人可用 sha256(serverSeed) 校验 == betting 期广播的 serverSeedHash。
@@ -308,7 +345,7 @@ async function runDrawn(room) {
   try {
     await query(`UPDATE rounds SET status = 'settled' WHERE id = $1`, [room.roundId]);
   } catch (err) {
-    console.error(`[roundHub:${gameName}] settled 落库失败：`, err.message);
+    console.error(`[roundHub:${roomKey}] settled 落库失败：`, err.message);
   }
   room.phase = 'settled';
   broadcast(room, { type: 'phase', phase: 'settled', roundNo: room.roundNo, roundId: room.roundId });
@@ -321,7 +358,7 @@ async function runDrawn(room) {
 // 再 credit（幂等键 rgs-<roundId>-<playerId>-<betId>，#P0 后为每注行粒度；ledger 唯一键兜底）。
 // 单玩家失败记日志继续结其他人。
 async function settleRound(room, hits, pushes) {
-  const { engine, gameName, roundId } = room;
+  const { engine, gameName, roundId, roomKey } = room;
   const maxPayout = String(maxPayoutFor(gameName));
 
   let bets;
@@ -331,7 +368,7 @@ async function settleRound(room, hits, pushes) {
       [roundId],
     )).rows;
   } catch (err) {
-    console.error(`[roundHub:${gameName}] 读本期 bets 失败：`, err.message);
+    console.error(`[roundHub:${roomKey}] 读本期 bets 失败：`, err.message);
     return;
   }
 
@@ -417,7 +454,7 @@ async function settleRound(room, hits, pushes) {
           : settled);
       }
     } catch (err) {
-      console.error(`[roundHub:${gameName}] 结算玩家 ${playerId} 失败（跳过，靠幂等键下次补结）：`, err.message);
+      console.error(`[roundHub:${roomKey}] 结算玩家 ${playerId} 失败（跳过，靠幂等键下次补结）：`, err.message);
     }
   }
 
@@ -452,12 +489,12 @@ function runIdle(room) {
   });
   room.timer = setTimeout(() => {
     room.nonce += 1;
-    runBetting(room).catch(logLoopErr(room.gameName));
+    runBetting(room).catch(logLoopErr(room.roomKey));
   }, room.timings.idleMs);
 }
 
-function logLoopErr(gameName) {
-  return (err) => console.error(`[roundHub:${gameName}] 相位循环异常：`, err.message);
+function logLoopErr(roomKey) {
+  return (err) => console.error(`[roundHub:${roomKey}] 相位循环异常：`, err.message);
 }
 
 // 当前局公开快照（新连接/主动 sync）。严守：betting/locked 不带 serverSeed；drawn/settled/idle 已 reveal 可带。
@@ -497,20 +534,55 @@ async function fetchPlayerBalance(playerId) {
  * @param {string} gameName
  * @returns {{phase:string, roundNo:string|null, roundId:number|null, endsAt:number|null}|null}
  */
-export function getRoomState(gameName) {
-  const room = rooms.get(gameName);
+// 按 roomKey 取房态。#42：标准房 roomKey === 裸 gameName，故既有调用 getRoomState('speedgrid')
+// 一律照旧命中标准房 —— 前端零碰、旧客户端无感。
+export function getRoomState(roomKey) {
+  const room = rooms.get(roomKey);
   if (!room) return null;
-  return { phase: room.phase, roundNo: room.roundNo, roundId: room.roundId, endsAt: room.endsAt };
+  return { phase: room.phase, roundNo: room.roundNo, roundId: room.roundId, endsAt: room.endsAt, roomKey: room.roomKey };
 }
 
-// 从 WS 升级请求的 query 解析目标房间（?game=<backendId>）。缺省/非法 → 兜底 speedgrid（向后兼容旧连接）。
-function roomNameOf(req) {
-  try {
-    const g = new URL(req.url, 'http://localhost').searchParams.get('game');
-    return g && rooms.has(g) ? g : 'speedgrid';
-  } catch {
-    return 'speedgrid';
+// #42：按 roundId 在【该款所有房】里定位「当期且正在 betting」的那一房。
+// 为什么按 roundId 而不是让客户端报房名：roundId 是服务端发的、且必须等于某房【此刻】的当期轮
+// —— 客户端谎报房名没用（房名对不上 roundId 就找不到），谎报 roundId 也没用（不是当期就找不到）。
+// 找不到 → 调用方走原 round_locked 路径，与旧行为一致。
+export function findBettingRoomByRoundId(gameName, roundId) {
+  for (const key of roomKeysOfGame(gameName)) {
+    const room = rooms.get(key);
+    if (room && room.phase === 'betting' && room.roundId != null && String(room.roundId) === String(roundId)) {
+      return { phase: room.phase, roundNo: room.roundNo, roundId: room.roundId, endsAt: room.endsAt, roomKey: key };
+    }
   }
+  return null;
+}
+
+// 从 WS 升级请求的 query 解析目标房 key（?game=<backendId>&room=<房段>）。
+// 返回 roomKey | null（null = 显式非法，调用方拒绝连接）。
+//
+// #42 三条口径：
+//   1) 缺 room 参 → 该款【标准房】（roomKey = 裸 gameName）。旧客户端只带 ?game= → 原样落标准房，
+//      部署后玩家无感（单2 才教前端带 room）。
+//   2) 显式 room 但拼不出合法房 → null → 拒绝关闭。【绝不兜底】：旧代码把非法值默默丢进
+//      speedgrid，房化后那意味着 15s 房的玩家被塞进 30s 房——他看着别人的局下注，
+//      比直接断连恶劣得多。宁可拒。
+//   3) game 本身缺省/非法 → 仍兜底 speedgrid（保持旧行为，向后兼容旧连接）。
+function roomNameOf(req) {
+  let g, r;
+  try {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    g = q.get('game');
+    r = q.get('room');
+  } catch {
+    return defaultRoomKeyOf('speedgrid');   // URL 都解不出：按旧行为兜底标准 speedgrid 房
+  }
+  const gameName = g && ROOM_CONFIGS.some((c) => c.gameName === g) ? g : 'speedgrid';
+  if (r == null || r === '') return defaultRoomKeyOf(gameName);   // 缺 room → 标准房
+  const key = `${gameName}:${r}`;
+  if (rooms.has(key)) return key;
+  // 显式带了 room 却拼不出房：可能是 ?room=30s（标准房的房段名）——也放行，语义等价
+  const std = ROOM_CONFIGS.find((c) => c.gameName === gameName && c.room === r);
+  if (std) return std.key;
+  return null;   // 显式非法 → 拒
 }
 
 // ============ 孤儿注恢复（启动时一次性，早于任何新开局）============
@@ -537,7 +609,10 @@ async function recoverOrphans() {
       `SELECT id, game, round_no, status, result FROM rounds
         WHERE game = ANY($1) AND status IN ('betting', 'drawn')
         ORDER BY id`,
-      [ROOMS_TO_START],
+      // #42：按【款】扫，不是按房 key —— ROOMS_TO_START 现在装的是 roomKey（含 'speedgrid:15s'），
+      //   拿它查 rounds.game 一条都扫不到（game 列恒为裸款名）。GAMES_TO_RECOVER 是去重后的款名，
+      //   两房的孤儿一起收；复算走 settleDerive 按 game 命中引擎，房维度对恢复天然无感。
+      [GAMES_TO_RECOVER],
     )).rows;
   } catch (err) {
     console.error('[roundHub:recover] 扫孤儿轮失败（跳过恢复，不阻断启动）：', err.message);
@@ -654,16 +729,23 @@ export async function startRoundHub(wss) {
   }
   started = true;
 
-  // 建所有房间对象（先 set 进 rooms，roomNameOf 才能识别合法 game）。
-  for (const gameName of ROOMS_TO_START) {
-    rooms.set(gameName, makeRoom(gameName));
+  // 建所有房间对象（先 set 进 rooms，roomNameOf 才能识别合法 roomKey）。
+  for (const cfg of ROOM_CONFIGS) {
+    rooms.set(cfg.key, makeRoom(cfg));
   }
 
-  // 单一 connection handler 按 ?game= 路由到对应房间（各房独立 clients 集合，广播互不串扰）。
+  // 单一 connection handler 按 ?game=&room= 路由到对应房间（各房独立 clients 集合，广播互不串扰）。
   wss.on('connection', (ws, req) => {
     // 未认证的连接已被 index.js 握手 handler close，ws.playerId 不会挂上；显式跳过。
     if (!ws.playerId) return;
-    const room = rooms.get(roomNameOf(req));
+    const key = roomNameOf(req);
+    // #42：显式非法 room → 拒绝并关闭（不再静默兜底）。旧行为把非法值默默落到 speedgrid，
+    // 房化后那等于把 15s 房的玩家丢进 30s 房——错房比断连危险得多（他看的是别人的局）。
+    if (key === null) {
+      try { ws.close(1008, 'invalid_room'); } catch { /* 连接已异常 */ }
+      return;
+    }
+    const room = rooms.get(key);
     if (!room) return;
 
     room.clients.add(ws);
@@ -689,13 +771,15 @@ export async function startRoundHub(wss) {
   await recoverOrphans();
 
   // 每房恢复当日期号序号后各自起循环（防重启撞号）。
-  for (const gameName of ROOMS_TO_START) {
-    const room = rooms.get(gameName);
-    recoverSeq(gameName, room.engine.prefix, dateKeyNow()).then((mx) => {
+  // #42：recoverSeq 签名不动 —— 它按 `game=$1 AND round_no LIKE '<prefix>-日期-%'` 发号，
+  //   同款两房 prefix 不同（SG / SG15），LIKE 天然互不匹配 → 各房独立递增，不依赖 room 列。
+  for (const key of ROOMS_TO_START) {
+    const room = rooms.get(key);
+    recoverSeq(room.gameName, room.engine.prefix, dateKeyNow()).then((mx) => {
       room.dateKey = dateKeyNow();
       room.seq = mx; // 首个 runBetting 会 +1
-      console.log(`[roundHub:${gameName}] 排期器启动（前缀 ${room.engine.prefix}），当日已用序号 ${mx}，下一期 ${mx + 1}`);
-      runBetting(room).catch(logLoopErr(gameName));
+      console.log(`[roundHub:${key}] 排期器启动（前缀 ${room.engine.prefix}-，betting ${room.timings.bettingMs}ms/idle ${room.timings.idleMs}ms），当日已用序号 ${mx}，下一期 ${mx + 1}`);
+      runBetting(room).catch(logLoopErr(key));
     });
   }
 }

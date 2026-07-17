@@ -62,7 +62,7 @@ import { stepMult as goalStepMult, deriveBombRows, TIERS as GOAL_TIERS, COLS as 
 import { drawStreak, streakPayout, PATTERNS as STREAK_PATTERNS } from '../game/streakRoll.js';
 import { spinRoulette, rouletteWinMult, isValidBetKey } from '../game/miniRoulette.js';
 import { makeSeededRng } from '../lib/seededRng.js';
-import { getRoomState } from '../ws/roundHub.js';
+import { getRoomState, findBettingRoomByRoundId } from '../ws/roundHub.js';
 import * as speedGridEngine from '../game/speedGrid.js';
 import * as numberUpEngine from '../game/numberUp.js';
 import * as hatTrickEngine from '../game/hatTrick.js';
@@ -1242,7 +1242,9 @@ function makeScheduledRoundHandler(gameName) {
   return async (req, res, next) => {
     try {
       const playerId = req.user.sub;
-      const { bets, idempotencyKey } = req.body || {};
+      // #42 多房：roundId 【可选】——不传=该款标准房当期轮（旧客户端/前端零碰期，行为与房化前一致）；
+      //   传了=按 roundId 在该款所有房里定位当期 betting 房。
+      const { bets, idempotencyKey, roundId: wantRoundId } = req.body || {};
 
       if (!idempotencyKey) {
         return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
@@ -1287,7 +1289,13 @@ function makeScheduledRoundHandler(gameName) {
       }
 
       // 相位闸（在 debit 之前）：只有当前房间处于 betting 才收注；否则 409 round_locked。
-      const rs = getRoomState(gameName);
+      // #42 多房：roundId 是【可选】的 ——
+      //   · 不传（旧客户端/前端零碰期）→ 该款【标准房】的当期轮，与房化前完全一致。
+      //   · 传了 → 在该款所有房里找「当期正在 betting 且 roundId 相符」的房。谎报也闸得住：
+      //     roundId 是服务端发的，且必须等于某房【此刻】的当期轮，对不上就找不到 → 同一条 409。
+      const rs = wantRoundId != null
+        ? findBettingRoomByRoundId(gameName, wantRoundId)
+        : getRoomState(gameName);
       if (!rs || rs.phase !== 'betting' || !rs.roundId) {
         return res.status(409).json({ error: 'round_locked' });
       }
@@ -3016,6 +3024,14 @@ const HISTORY_GAMES = new Set([
   'speedgrid', 'numberup', 'derbyday', 'dominoduel', 'hattrick',
   'goldenboot', 'halftime', 'wuxing', 'lineup',
 ]);
+// #42 多房：?room=<房段> 可选。
+//   · 不传 → 该款【标准房】单流（COALESCE(room,'30s') = '30s'）——旧前端零碰，行为与房化前一致。
+//   · 传了 → 该房单流。
+//   ⚠ 两房永不混流：本端点是右栏近期开奖 / HistoryDrawer / 多桌珠盘路的【单一数据源】
+//     （GameSideRail 注明），混流 = 路珠错乱，是房化最硬的连带面（D 段 g 表唯一的外部硬骨头）。
+//   ⚠ COALESCE 归一不可省：老局 room IS NULL（房化前落的），裸 `room = '30s'` 会把它们全漏掉，
+//     右栏一上线就空一半。
+const DEFAULT_ROOM = '30s';
 router.get('/history/:game', requireAuth, async (req, res, next) => {
   try {
     const { game } = req.params;
@@ -3025,13 +3041,20 @@ router.get('/history/:game', requireAuth, async (req, res, next) => {
     const rawLimit = parseInt(req.query.limit, 10);
     const limit = Number.isFinite(rawLimit) ? Math.min(50, Math.max(1, rawLimit)) : 20;
     const cursor = /^\d+$/.test(String(req.query.cursor ?? '')) ? String(req.query.cursor) : null;
+    // room 参：只收短标识（防注入 + 防拿它当任意过滤器）；缺省=标准房
+    const rawRoom = String(req.query.room ?? '').trim();
+    const room = /^[a-z0-9]{1,8}$/.test(rawRoom) ? rawRoom : DEFAULT_ROOM;
     const result = await query(
       `SELECT id, round_no, result, result_hash, client_seed, server_seed, created_at
          FROM rounds
         WHERE game = $1 AND status = 'settled' AND round_no IS NOT NULL
+          AND COALESCE(room, $4) = $5
           AND ($2::bigint IS NULL OR id < $2)
         ORDER BY id DESC LIMIT $3`,
-      [game, cursor, limit],
+      // $4 = 默认房【常量】，$5 = 请求的房。
+      // ⚠ 两者必须分开传：写成 COALESCE(room,$4)=$4 的话，room IS NULL 时 COALESCE 返回 $4、
+      //   恒等于 $4 → 老局匹配【任何】房，?room=15s 会把老局全捞进来 —— 正是要防的混流。
+      [game, cursor, limit, DEFAULT_ROOM, room],
     );
     // settled 局 = 已揭晓，可出 server_seed 明文（照 GET /:id 的 settled 白名单口径）+ 承诺/公开种子，
     // 供前端行内 commit-reveal 验证（sha256(serverSeed)==serverSeedHash）。禁出任何注单/资金字段。
