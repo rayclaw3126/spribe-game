@@ -30,6 +30,9 @@ import * as lineUpEngine from '../game/lineUp.js';
 // 单V2：9 款开奖派生 spin 抽到单一出处 roundSpins.js（本 ROOM_ENGINES.spin 回引它）；
 // 前端 LocalVerify 同 import 同一份——禁两处手抄。此为 import 等价搬家，结算逻辑零变。
 import { ROUND_SPINS } from '../game/roundSpins.js';
+// 孤儿注恢复的复算走 settleDerive 单一出处（与 scripts/repair_stuck_bets.mjs 同一份判定）；
+// round2 本文件 53 行已有，不重复引入。
+import { computeDetail, capPayout, drawOf } from '../game/settleDerive.js';
 
 // 相位时长（ms）。
 // 相位时长（ms）——每房独立。betting/locked 统一，idle（开奖后到下一期的停顿）按各款开奖舞台动画长度定制：
@@ -315,7 +318,8 @@ async function runDrawn(room) {
 
 // —— 结算：SELECT 本期全部 pending bets → 逐玩家逐 key 三态 → 赢/push credit、全输 distributeLoss ——
 // 幂等/恰好一次：每玩家事务内先「守 pending 翻转 outcome」（rowCount=0 即已结算，跳过），
-// 再 credit（幂等键 rgs-<roundId>-<playerId>，ledger 唯一键兜底）。单玩家失败记日志继续结其他人。
+// 再 credit（幂等键 rgs-<roundId>-<playerId>-<betId>，#P0 后为每注行粒度；ledger 唯一键兜底）。
+// 单玩家失败记日志继续结其他人。
 async function settleRound(room, hits, pushes) {
   const { engine, gameName, roundId } = room;
   const maxPayout = String(maxPayoutFor(gameName));
@@ -509,13 +513,141 @@ function roomNameOf(req) {
   }
 }
 
+// ============ 孤儿注恢复（启动时一次性，早于任何新开局）============
+//
+// 病因：进程在 betting/drawn 相位被杀（kill -9/崩溃/重启），相位机是纯内存态、随进程蒸发，DB 里
+//   留下「轮没终态 + 注还 pending + 钱在下注时已扣走」的孤儿注——玩家钱没了，局却永远不会结。
+//   注：'locked' 只是内存相位，从不落库（见 194/286/306 三处 status 写入），故不在扫描范围。
+//
+// 两条路径，定调「玩家不吃亏」：
+//   a) drawn（result 已落库、开奖已公开）：按已公开的 draw 复算补结算。幂等键沿用正常结算的原键
+//      rgs-<roundId>-<playerId>-<betId>——若 settleRound 其实已派过，这里撞 idx_ledger_idempotency_key
+//      即被 ledger 唯一键挡下，绝不重复派彩（双保险：外层还有守 pending 翻转）。
+//   b) betting（未开奖、无 result，本期结果永不存在）：全额退本金 + 轮置 void。
+//      ⚠ 禁在此处补 spin 造结果：serverSeed 明文只活在内存、随进程蒸发（commit-reveal 铁律），
+//        任何「补开」都是新造的一局，不是玩家当时下注面对的那一局——只能退钱。
+//
+// 复算走 settleDerive 单一出处（与 scripts/repair_stuck_bets.mjs 同一份），禁手写第二份判定。
+// 韧性：整体 try/catch 兜底，单轮失败记日志继续下一轮，恢复失败绝不阻断排期器启动
+//   （失败的轮下次启动会再被扫到——幂等键保证重试安全）。
+async function recoverOrphans() {
+  let orphans;
+  try {
+    orphans = (await query(
+      `SELECT id, game, round_no, status, result FROM rounds
+        WHERE game = ANY($1) AND status IN ('betting', 'drawn')
+        ORDER BY id`,
+      [ROOMS_TO_START],
+    )).rows;
+  } catch (err) {
+    console.error('[roundHub:recover] 扫孤儿轮失败（跳过恢复，不阻断启动）：', err.message);
+    return;
+  }
+  if (orphans.length === 0) {
+    console.log('[roundHub:recover] 无孤儿轮，跳过');
+    return;
+  }
+
+  const stat = { settled: 0, payout: 0, refund: 0, refundSum: 0, voidEmpty: 0, err: 0 };
+  for (const round of orphans) {
+    try {
+      const bets = (await query(
+        `SELECT id, player_id, amount, selections FROM bets WHERE round_id = $1 AND outcome = 'pending'`,
+        [round.id],
+      )).rows;
+      if (round.status === 'drawn') await recoverDrawnRound(round, bets, stat);
+      else await recoverBettingRound(round, bets, stat);
+    } catch (err) {
+      stat.err++;
+      console.error(`[roundHub:recover] ❌ round#${round.id} ${round.game} ${round.round_no} (${round.status}) 恢复失败（跳过，下次启动重试）：`, err.message);
+    }
+  }
+  console.log(`[roundHub:recover] 收口：孤儿轮 ${orphans.length} → 补结算 ${stat.settled} 注（派彩 $${round2(stat.payout)}）/ 退款 ${stat.refund} 注（$${round2(stat.refundSum)}）/ 空轮置 void ${stat.voidEmpty} 轮 / 失败 ${stat.err} 轮`);
+}
+
+// a) drawn 轮：result 已公开 → settleDerive 复算 → 逐注补结算（与 settleRound 同构：win 走原键 credit，
+//    lose 走 distributeLoss 链式分成）→ 轮改 settled。缺 result 即抛（drawOf 铁律，禁默认 0）。
+async function recoverDrawnRound(round, bets, stat) {
+  const draw = drawOf(round);   // 缺 result/drawResult → 抛 → 上层记错跳过，轮留 drawn 待人工核
+  for (const bet of bets) {
+    const det = computeDetail(round.game, bet.selections, draw);
+    const capped = await capPayout(round.game, det.rawTotalPayout);
+    const win = Number(capped) > 0;
+    const done = await withTransaction(async (client) => {
+      // 守 pending 翻转（与 settleRound 同一护栏）：rowCount=0 即已被正常结算，跳过，绝不重复派彩
+      const flip = await client.query(
+        `UPDATE bets SET outcome = $2, settle_detail = $3 WHERE id = $1 AND outcome = 'pending' RETURNING id`,
+        [bet.id, win ? 'win' : 'lose', JSON.stringify(det.yourResult)],
+      );
+      if (flip.rowCount === 0) return false;
+      if (win) {
+        await credit(client, {
+          playerId: bet.player_id,
+          amount: capped,
+          type: `${round.game}_payout`,
+          idempotencyKey: `rgs-${round.id}-${bet.player_id}-${bet.id}`,   // 原键：与 settleRound 撞键即证明已派
+          roundId: round.id,
+        });
+      } else {
+        // 全输：注额进链式分成（补上这一局本该发生的分成），玩家钱包在下注时已扣，此处不动。
+        // 口径：drawn 轮结算从未启动，分成确定为零 → 完整重放含分成
+        //   —— 与 repair_stuck_bets（仅解卡）刻意不对称
+        const pr = await client.query('SELECT agent_id FROM players WHERE id = $1', [bet.player_id]);
+        const agentId = pr.rows[0]?.agent_id;
+        if (agentId) await distributeLoss(client, { playerId: bet.player_id, agentId, roundId: round.id, lossAmount: bet.amount });
+      }
+      return true;
+    });
+    if (done) {
+      stat.settled++;
+      stat.payout = round2(stat.payout + Number(capped));
+      console.log(`[roundHub:recover] ${win ? '💰' : '·'} 补结算 bet#${bet.id} ${round.game} ${round.round_no} 注$${bet.amount} → ${win ? 'win' : 'lose'} 派$${round2(Number(capped))}`);
+    }
+  }
+  // 全注处理完才置终态；中途抛异常 → 轮留 drawn，下次启动重试（幂等键保证安全）
+  await query(`UPDATE rounds SET status = 'settled' WHERE id = $1 AND status = 'drawn'`, [round.id]);
+}
+
+// b) betting 轮：本期结果永不存在 → 逐 pending 注全额退本金（outcome='refund'）→ 轮置 void。
+//    无注的空轮不打单行日志，只进聚合计数。
+async function recoverBettingRound(round, bets, stat) {
+  for (const bet of bets) {
+    // settle_detail 与正常结算同构（[{key,outcome,payout}]），三态外新增 refund：逐 key 原样退注额。
+    // selections 缺失（防御：非排期器格式）→ 空数组，前端 betDetail 回落摘要，退款金额仍按注行本金走。
+    const detail = Object.entries(bet.selections || {}).map(([key, amt]) => ({ key, outcome: 'refund', payout: Number(amt) }));
+    const done = await withTransaction(async (client) => {
+      const flip = await client.query(
+        `UPDATE bets SET outcome = 'refund', settle_detail = $2 WHERE id = $1 AND outcome = 'pending' RETURNING id`,
+        [bet.id, JSON.stringify(detail)],
+      );
+      if (flip.rowCount === 0) return false;   // 已被处理过（重复启动/并发），跳过，绝不重复退款
+      await credit(client, {
+        playerId: bet.player_id,
+        amount: bet.amount,
+        type: `${round.game}_refund`,
+        idempotencyKey: `refund-${bet.id}`,
+        roundId: round.id,
+      });
+      return true;
+    });
+    if (done) {
+      stat.refund++;
+      stat.refundSum = round2(stat.refundSum + Number(bet.amount));
+      console.log(`[roundHub:recover] ↩ 退注 bet#${bet.id} ${round.game} ${round.round_no} player#${bet.player_id} 退$${bet.amount}`);
+    }
+  }
+  if (bets.length === 0) stat.voidEmpty++;
+  await query(`UPDATE rounds SET status = 'void' WHERE id = $1 AND status = 'betting'`, [round.id]);
+}
+
 /**
  * 启动轮次排期器：为 ROOMS_TO_START 每款各建一个独立房间（独立相位循环 + 独立期号前缀），
  * 恢复各自当日期号、挂新连接快照（按 ?game= 路由到对应房间）、起各房相位循环。
  * 模块级单例，重复调用忽略（避免起两个并行循环）。
+ * 起循环前先 await recoverOrphans()（上次进程被杀留下的孤儿注补结算/退款），确保恢复早于任何新开局。
  * @param {import('ws').WebSocketServer} wss - /ws/rounds 的 WSS
  */
-export function startRoundHub(wss) {
+export async function startRoundHub(wss) {
   if (started) {
     console.error('[roundHub] startRoundHub 被重复调用，已忽略');
     return;
@@ -549,6 +681,12 @@ export function startRoundHub(wss) {
       if (msg.type === 'sync') sendJSON(ws, buildSnapshot(room)); // 断线重连/中途加入补当前快照
     });
   });
+
+  // 起任何新局之前，先把上次进程被杀留下的孤儿注收干净（drawn 补结算 / betting 退款置 void）。
+  // 位置铁律：必须在 wss.on('connection') 注册【之后】（恢复期间进来的连接不能丢），且在下面
+  // runBetting 循环【之前】（新局一开，孤儿轮的 pending 注会混进新一期的结算视野）。
+  // recoverOrphans 内部全兜底不抛，故调用方 index.js 维持 fire-and-forget 不需改。
+  await recoverOrphans();
 
   // 每房恢复当日期号序号后各自起循环（防重启撞号）。
   for (const gameName of ROOMS_TO_START) {

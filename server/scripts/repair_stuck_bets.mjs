@@ -12,62 +12,15 @@
 // 用法：node scripts/repair_stuck_bets.mjs [--dry-run|--execute]
 import { query, pool, withTransaction } from '../src/db.js';
 import { credit } from '../src/lib/wallet.js';
-import { maxPayoutFor } from '../src/lib/risk.js';
-import * as speedGrid from '../src/game/speedGrid.js';
-import * as numberUp from '../src/game/numberUp.js';
-import * as hatTrick from '../src/game/hatTrick.js';
-import * as halfTime from '../src/game/halfTime.js';
-import * as wuXing from '../src/game/wuXing.js';
-import * as lineUp from '../src/game/lineUp.js';
-import * as derbyDay from '../src/game/derbyDay.js';
-import * as goldenBoot from '../src/game/goldenBoot.js';
-import * as dominoDuel from '../src/game/dominoDuel.js';
+// 复算四件（ENGINES/computeDetail/capPayout/drawOf）+ round2 抽到 src/game/settleDerive.js 单一出处，
+// 与 roundHub recoverOrphans（孤儿注恢复）共用同一份判定，禁在本脚本回抄副本。
+import { ENGINES, computeDetail, capPayout, drawOf, round2 } from '../src/game/settleDerive.js';
 
-const round2 = (x) => Math.round(x * 100) / 100;
 const EXECUTE = process.argv.includes('--execute');
 const MODE = EXECUTE ? 'EXECUTE（动钱）' : 'DRY-RUN（只读）';
 
-// gameName(DB 小写) → { e:引擎, hp:(drawResult)=>{hits,pushes} 用引擎 deriveX re-derive }
-const ENGINES = {
-  speedgrid: { e: speedGrid, hp: (d) => ({ hits: speedGrid.hitsOf(d.n), pushes: new Set() }) },
-  numberup: { e: numberUp, hp: (d) => ({ hits: numberUp.hitsOf(numberUp.deriveNum(d.num)), pushes: new Set() }) },
-  hattrick: { e: hatTrick, hp: (d) => ({ hits: hatTrick.hitsOf(hatTrick.deriveRoll(d.dice)), pushes: new Set() }) },
-  halftime: { e: halfTime, hp: (d) => ({ hits: halfTime.hitsOf(halfTime.deriveRound(d.balls)), pushes: new Set() }) },
-  wuxing: { e: wuXing, hp: (d) => ({ hits: wuXing.hitsOf(wuXing.deriveRound(d.balls)), pushes: new Set() }) },
-  lineup: { e: lineUp, hp: (d) => ({ hits: lineUp.hitsOf(lineUp.deriveRound(d.grid)), pushes: new Set() }) },
-  derbyday: { e: derbyDay, hp: (d) => { const r = derbyDay.deriveMatch({ home20: d.home20, away20: d.away20 }); return { hits: derbyDay.hitsOf(r), pushes: derbyDay.pushesOf(r) }; } },
-  goldenboot: { e: goldenBoot, hp: (d) => ({ hits: goldenBoot.hitsOf(goldenBoot.deriveRace(d.ranking)), pushes: new Set() }) },
-  dominoduel: { e: dominoDuel, hp: (d) => { const r = dominoDuel.deriveRound(d.tiles); return { hits: dominoDuel.hitsOf(r), pushes: dominoDuel.pushesOf(r) }; } },
-};
 const GAMES = Object.keys(ENGINES);
 
-// 逐 key 三态复算（与 settleRound 341-354 逐字节同口径）：返回 { yourResult, rawTotalPayout }
-function computeDetail(gameName, selections, drawResult) {
-  const { e, hp } = ENGINES[gameName];
-  const { hits, pushes } = hp(drawResult);
-  const yourResult = [];
-  let raw = 0;
-  for (const [key, amt] of Object.entries(selections || {})) {
-    const a = Number(amt);
-    if (!e.isValidMarketKey(key)) continue;
-    if (hits.has(key)) { const p = round2(a * e.MARKETS[key].odds); yourResult.push({ key, outcome: 'hit', payout: p }); raw += p; }
-    else if (e.HAS_PUSH && pushes.has(key)) { yourResult.push({ key, outcome: 'push', payout: a }); raw += a; }
-    else { yourResult.push({ key, outcome: 'lose', payout: 0 }); }
-  }
-  return { yourResult, rawTotalPayout: raw };
-}
-// 钳制：与 settleRound 同一 SQL LEAST(round(raw,2), maxPayout)，保分毫一致
-async function capPayout(gameName, raw) {
-  const maxP = String(maxPayoutFor(gameName));
-  const r = await query('SELECT LEAST(round($1::numeric, 2), $2::numeric) AS payout', [String(raw), maxP]);
-  return r.rows[0].payout; // string
-}
-// settled 轮取 result.drawResult；缺失即抛（禁默认 0）
-function drawOf(round) {
-  const res = round.result;
-  if (!res || !res.drawResult) { const err = new Error(`round ${round.id} settled 但 result/drawResult 缺失`); err.stuck = true; throw err; }
-  return res.drawResult;
-}
 // 明细数组对拍（key→{outcome,payout} 归一）
 function detailEq(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
@@ -153,6 +106,8 @@ async function repairStuck(gatePassed) {
         });
       }
     } else {
+      // 口径：settled 轮分成可能已发生（P0 回滚逐行不可知），禁自动补写，人工核
+      //   —— 与 recoverOrphans（drawn 轮分成确定未发生，自动补发）是刻意不对称，见 settleDerive 单
       nLose++; loseRows.push({ id: b.id, username: b.username, game: b.game, round_no: b.round_no, amount: b.amount });
       if (EXECUTE && gatePassed) {
         await withTransaction(async (client) => {

@@ -61,8 +61,11 @@ const LABEL_BY_BE_KEY = (() => {
 const labelOf = (be, key) => LABEL_BY_BE_KEY[`${be}:${key}`] ?? extraLabelOf(be, key) ?? key
 
 // #S2 三态标记：hit→✓ / lose→✗ / push→退（色走 tokens）
+// 孤儿注恢复：refund（betting 相位被杀、本期永不开奖 → 全额退本金）复用 push 的「退」样式——
+// 对玩家而言两者同义：这一注没赌成，钱原样回来。
 const MARK = {
   hit: { t: '✓', c: COLORS.green }, lose: { t: '✗', c: COLORS.slate }, push: { t: '退', c: COLORS.amber },
+  refund: { t: '退', c: COLORS.amber },
 }
 // #S2 注单明细：settle_detail=[{key,outcome,payout}] 合法非空才走子行；防 null/形状异常/切 tab 脏帧全回落 null。
 // 行头派彩改显 round2(Σ本行 detail 派彩)（与子行永远对齐）；Σ > 本行 payout(轮总聚合,钳制后) → 触顶标记。
@@ -79,7 +82,9 @@ function betDetail(it) {
     }))
   if (rows.length === 0) return null
   const sum = round2(rows.reduce((s, r) => s + r.payout, 0))
-  const capped = sum > Number(it.payout)   // 钳制前 Σ > 钳制后轮总 → 触顶（多行场景 Σ本行<轮总，天然不误报）
+  // 退注行短路：refund 的钱走 <game>_refund 流水，而 it.payout 的 LATERAL 只聚合 <game>_payout →
+  // payout 恒 0（void 轮 r.payout 也是 NULL），Σ退款 > 0 会让每张退注单假挂触顶标记。
+  const capped = sum > Number(it.payout) && it.outcome !== 'refund'
   return { rows, sum, capped }
 }
 
@@ -88,6 +93,11 @@ function ledgerMeta(type) {
   if (!type) return { name: '—', up: false, kind: '' }   // 防御：切 tab 脏帧下 type 可能暂缺
   if (type === 'deposit') return { name: '充值', up: true, kind: '充值' }
   if (type === 'withdraw') return { name: '提现', up: false, kind: '提现' }
+  // 孤儿注退款 <game>_refund：入账为正，类型词「退注」（与派彩区分——不是赢来的，是原路退回）
+  if (type.endsWith('_refund')) {
+    const g = GAME_BY_BACKEND_ID[type.replace(/_refund$/, '')]
+    return { name: g ? g.displayName : '退注', up: true, kind: '退注' }
+  }
   const isPay = type.endsWith('_payout') || type === 'payout'
   const backendId = type.replace(/_(bet|payout)$/, '')
   const g = GAME_BY_BACKEND_ID[backendId]
@@ -277,7 +287,11 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
             items.map(it => {
               const g = GAME_BY_BACKEND_ID[it.game]
               const won = it.outcome === 'win'
-              const badge = won ? { t: '赢', c: COLORS.green, bg: COLORS.greenTint } : it.outcome === 'lose' ? { t: '输', c: COLORS.slate, bg: COLORS.slateTint } : { t: '进行中', c: COLORS.amber, bg: COLORS.amberTint }
+              // 徽章四态：赢/输/已退注（孤儿注恢复退本金，中性色——非输非赢）/ 其余=进行中
+              const badge = won ? { t: '赢', c: COLORS.green, bg: COLORS.greenTint }
+                : it.outcome === 'lose' ? { t: '输', c: COLORS.slate, bg: COLORS.slateTint }
+                  : it.outcome === 'refund' ? { t: '已退注', c: COLORS.slate, bg: COLORS.slateTint }
+                    : { t: '进行中', c: COLORS.amber, bg: COLORS.amberTint }
               const detail = betDetail(it)                          // #S2 有明细→子行；无（老数据/其他范式）→ null 回落
               const summary = detail ? null : betSummary(it)        // 有明细不显裸 key×n 摘要（子行取代）
               const headPayout = detail ? detail.sum : Number(it.payout)   // #S2 行头派彩：有明细显 round2(Σ本行detail)

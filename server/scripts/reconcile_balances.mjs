@@ -3,7 +3,7 @@
 //   ① 每个 wallets：balance == 该 player 最新 ledger.balance_after
 //   ② 链连续：每行 balance_before == 前一行(同 player 按 id 升序).balance_after（LAG 窗口）
 //   ③ 每行 (balance_after - balance_before) == 有符号预期额：
-//        credit(+)= 后缀 _payout / 'payout' / 'deposit'；debit(−)= 后缀 _bet / 'bet' / 'withdraw'
+//        credit(+)= 后缀 _payout / _refund / 'payout' / 'deposit'；debit(−)= 后缀 _bet / 'bet' / 'withdraw'
 //        白名单外的 type → UNKNOWN_TYPE（算 FAIL）
 // 用法：node scripts/reconcile_balances.mjs [--since <ledger_id>]
 //   不传 --since = 全量；传了 = 只核 id > since 的行（②的跨界首行不复验，见下方注释）。
@@ -47,6 +47,7 @@ const rowsSql = `
            (ba - bb) AS actual_delta,
            CASE
              WHEN type = 'deposit' OR type = 'payout' OR type LIKE '%#_payout' ESCAPE '#' THEN amount
+             WHEN type LIKE '%#_refund' ESCAPE '#' THEN amount   -- 孤儿注退款（roundHub recoverOrphans 退本金，入账为正）
              WHEN type = 'withdraw' OR type = 'bet' OR type LIKE '%#_bet' ESCAPE '#' THEN -amount
              ELSE NULL
            END AS expected_delta
