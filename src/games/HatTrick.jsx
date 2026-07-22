@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, HATTRICK, MONO } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
@@ -13,7 +13,7 @@ import CommitRevealFairness from '../components/CommitRevealFairness'
 import BetButton from '../components/shell/BetButton'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
-import { useRoundRoom } from '../hooks/useRoundRoom'
+import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import HatTrickStage from './stages/HatTrickStage'
 import HatTrickMarkets, { DieFace } from './markets-ui/HatTrickMarkets'   // #41 单15：盘口区切件（DieFace 随件，舞台/mobile 回用）
 import HatTrickRoad from './markets-ui/HatTrickRoad'                       // #41 单15：珠盘路墙
@@ -69,22 +69,20 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const [historyOpen, setHistoryOpen] = useState(false)   // 开奖历史抽屉
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
-  const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [roadTab, setRoadTab] = useState('TOTAL')
   const [userAcc, setUserAcc] = useState({ total: true, triple: true, double: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开）；纯 UI，不动下注 state
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
 
   // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
-  // ---- #42 双订阅：两房各一条 WS（未选中的房也连——tab 上要显它的实时期号/倒计时）----
-  // ⚠ Rules of Hooks：显式调两次而非 G.rooms.map(...)。房数由 registry 编译期定死，
-  //   map 出来的 hook 数量看着可变，既触 eslint 也误导后来者以为能动态增减房。照母本写法。
-  const ROOMS = G.rooms                                    // [{key:'30s',label},{key:'15s',label}]
-  const [selectedRoomKey, setSelectedRoomKey] = useState(ROOMS[0].key)
-  const roomA = useRoundRoom(playerToken, G.backendId, ROOMS[0].key)
-  const roomB = useRoundRoom(playerToken, G.backendId, ROOMS[1].key)
-  const roomsByKey = useMemo(() => ({ [ROOMS[0].key]: roomA, [ROOMS[1].key]: roomB }), [ROOMS, roomA, roomB])
-  // 选中房 = 舞台/盘口/注栏/公平抽屉的唯一真相来源（下方所有 room.* 读的都是它）
-  const room = roomsByKey[selectedRoomKey]
+  // ---- #42 速度房骨架（单5 抽件）：双订阅 / 选中房 / per-room 注单 / A0 / D / tab 条 ----
+  // 逐款不同的部分仍在本文件：上局三骰/近5期和值/路珠 三份 xxxByRoom、E 段追三份、A 段换期清盘、切房演出态清理（见下方 handleRoomSwitch）、舞台 key 挂点。
+  const {
+    ROOMS, selectedRoomKey, roomsByKey, room, roomA, roomB,
+    betsRef, betsOf, betsPlaced, setBetsPlaced, hasLast, lastBetsRef,
+    shownRoundRef, animatedRoundRef, settleInfoRef,
+    commitSettle, resetRoomView, renderRoomTabs,
+  } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
+
 
   // ---- 本地「表演」状态机（仅动画层；相位真相在 room）----
   const [uiPhase, setUiPhase] = useState('betting')       // betting | locked | drawing | settled
@@ -103,32 +101,17 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const [settleFx, setSettleFx] = useState(false)         // 结算演出开关（飞金 + 命中/未中标签动画）
   const [suspense, setSuspense] = useState(null)          // 块A：{ keys:Set, msg } 最后一颗揪心窗
   const [nearMiss, setNearMiss] = useState(() => new Set()) // 块B：就差1点的未中注 key 集合
-  const [hasLast, setHasLast] = useState(false)           // 是否有上局注单快照（重复钮亮灭）
 
   const picksRef = useRef(picks)
-  // #42 注单暂存按房：{roomKey: Map<key, 累计注额>}。切走再切回【同一期】，已下的注还在 ——
-  // 注是真金白银下进那一房的，切个 tab 就抹掉，玩家会以为注没了。只在该房自己换期时清（见 A0）。
-  const betsByRoomRef = useRef(Object.fromEntries(ROOMS.map((r) => [r.key, new Map()])))
-  const betsOf = (k) => betsByRoomRef.current[k] || new Map()
-  const betsRef = { get current() { return betsOf(selectedRoomKey) }, set current(m) { betsByRoomRef.current[selectedRoomKey] = m } }
-  const lastBetsRef = useRef(new Map())   // 上局注单快照（重复投注用）
   const betRef = useRef(bet)
   const pendingRef = useRef(null)         // 只读表演：当前动画骰面派生（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
-  const shownRoundRef = useRef(null)      // 已进入 betting 的当前期号（换期 reset 判定）
-  const animatedRoundRef = useRef(null)   // 已启动开奖动画的期号（每期只演一次）
-  const settledRoundsRef = useRef(new Set())   // #42：「本期已处理」判定改 Set —— 两房各自出期号
-                                               // （HT- / HT15-，天然不撞）；选中房走 finishRound、
-                                               // 未选中房走 D 段，两条路共用这一个 Set 防重。
-  const betsResetRoundRef = useRef({})         // #42：{roomKey: 已清过注单的期号}
-  const settleInfoRef = useRef(null)      // 镜像 room.settleInfo，供动画结束时读取
   const audioRef = useRef({ ctx: null, muted: false })
   const cardShakeRef = useRef(null)
 
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { audioRef.current.muted = muted }, [muted])
-  useEffect(() => { settleInfoRef.current = room.settleInfo }, [room.settleInfo])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
 
   // ---------- SFX（WebAudio 合成器，muted 门控；全部在结果已定后触发）----------
@@ -172,15 +155,8 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     const si = settleInfoRef.current
     const hadBet = si && si.roundNo === rnd
     // 余额回写（每期一次）：有注用后端 settleInfo.balanceAfter；无注不动钱。
-    // ⚠ add 必须收在 hadBet 内：切房时旧房的动画定时器仍会到点跑到这里，那时 settleInfoRef
-    //   已换成新房的 → hadBet=false → 本函数没消费这期；若仍 add，就把期号钉成「已处理」，
-    //   D 段便会跳过它 → 该期余额回写与 toast 双双丢失。不 add 才能让 D 接住。
-    if (hadBet) {
-      if (si.balanceAfter != null && !settledRoundsRef.current.has(rnd)) {
-        setServerBalance(Number(si.balanceAfter))
-      }
-      settledRoundsRef.current.add(rnd)
-    }
+    // 坑1 修正语义（add 收在 hadBet 内）已收进抽件的 commitSettle，此处只调用，勿再自行 add。
+    commitSettle(rnd, si, hadBet)
     // 视觉结算仅当本期仍是当前展示期（若下一期 betting 已抢先，跳过不覆盖新期 UI）
     if (shownRoundRef.current !== rnd) return
     let hits, winTotal
@@ -220,25 +196,6 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   }
 
   // ---- 相位驱动 effects（全部只读 room，本地不产相位）----
-  // A0. #42 各房换期清各房注单 —— 【两房都跑】，与当前选中哪个 tab 无关。
-  // 未选中的房也在自转，它换期时它的注单就作废了；若只在选中房跑，切回去会看到上一期
-  // （甚至几期前）的注单挂在新期上——比不显示更糟（假注单）。
-  useEffect(() => {
-    for (const r of ROOMS) {
-      const rm = roomsByKey[r.key]
-      if (rm.phase !== 'betting' || !rm.roundNo) continue
-      if (betsResetRoundRef.current[r.key] === rm.roundNo) continue
-      betsResetRoundRef.current[r.key] = rm.roundNo
-      const m = betsOf(r.key)
-      if (m.size) {
-        if (r.key === selectedRoomKey) { lastBetsRef.current = new Map(m); setHasLast(true) }   // 「重复上期」只服务选中房
-        betsByRoomRef.current[r.key] = new Map()
-        if (r.key === selectedRoomKey) setBetsPlaced(new Map())
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomA.phase, roomA.roundNo, roomB.phase, roomB.roundNo, selectedRoomKey])
-
   // A. 新一期 betting（【仅选中房】）：UI 清盘 → 回 betting。注单清理已由 A0 按房处理。
   useEffect(() => {
     if (room.phase === 'betting' && room.roundNo && room.roundNo !== shownRoundRef.current) {
@@ -253,22 +210,17 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.phase, room.roundNo])
 
-  // A1. #42 切房：把 UI 拉到新房的当前态。舞台另有 key={selectedRoomKey} 强制重挂，这里只管数据面。
-  // ⚠ 帽子戏法要清【四份】演出态，是本单最多的一款（母本号码王只有 preHits）：
-  //   · preHits  掷骰收尾的命中预亮 —— 不清则上一房的预亮挂在新房盘口上，像是中了奖
-  //   · settleFx 结算演出开关（命中飞金 / 未中碎裂）—— 不清则上一房的飞金直接演在新房盘面上
-  //   · nearMiss 「就差1点」标签集 —— 不清则上一房的差1点标签挂在新房的注上
-  //   · suspense 最后一颗揪心窗（自带 setTimeout）—— 旧定时器只会再 setSuspense(null)，无害，
-  //     但仍显式清，避免切房瞬间悬念条一闪
+  // A1. #42 切房：把 UI 拉到新房的当前态（注单显该房暂存、清掉上一房的开奖结果与动画）。
+  // ⚠ 位置必须保持在 A 之后 —— 抽件不代管本 effect，正是为了保住这个顺序（见 hook 内注释）。
+  // 舞台另有 key={selectedRoomKey} 强制重挂，这里只管数据面。
   useEffect(() => {
-    setBetsPlaced(new Map(betsOf(selectedRoomKey)))
+    resetRoomView()   // 抽件：注单与该房暂存对齐 + shownRound/animatedRound 置空
     picksRef.current = new Set(); setPicks(new Set())
     setResult(null); setPreHits(null); setSettleFx(false); setSuspense(null); setNearMiss(new Set())
     setNetErr(null)
     pendingRef.current = null          // 断开上一房的三骰对象（舞台三元据它判分支）
-    shownRoundRef.current = null       // 让 A 对新房当期重跑一遍（回 betting UI）
-    animatedRoundRef.current = null
     setUiPhase('betting')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRoomKey])
 
   // B. locked：封盘（尚在 betting UI 时切 locked；已进入 drawing 的动画不打断）
@@ -290,26 +242,6 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     // finishRound 走 refs，无需入依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.drawResult, room.roundNo])
-
-  // D. #42 未选中房的后台结算：余额 + WinToast，立即应用。
-  //   · 不等动画：你没在看那一房，没有动画可等 —— settleInfo 一到就是终局。
-  //   · 余额必须写：钱是真扣真派的，不能因为玩家切走了 tab 就不回写（切回来发现余额对不上
-  //     会被当成吞钱）。服务端 balanceAfter 是权威快照；两房近同时结算 last-write 可接受，
-  //     下一次任一房结算/刷新即自纠。
-  //   · toast 文案带房名，否则玩家不知道是哪一房中的。
-  useEffect(() => {
-    for (const r of ROOMS) {
-      if (r.key === selectedRoomKey) continue          // 选中房走 finishRound（动画演完才回写）
-      const rm = roomsByKey[r.key]
-      const si = rm.settleInfo
-      if (!si || !si.roundNo || settledRoundsRef.current.has(si.roundNo)) continue
-      settledRoundsRef.current.add(si.roundNo)
-      if (si.balanceAfter != null) setServerBalance(Number(si.balanceAfter))
-      const win = Number(si.totalPayout || 0)
-      if (win > 0) pushToast(`${r.label} 命中`, win)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomA.settleInfo, roomB.settleInfo, selectedRoomKey])
 
   // E. #42 未选中房的三份累积：drawResult 一到就追（无动画可等）。选中房在 finishRound 里追。
   // ⚠ 帽子戏法的 drawResult 字段是 .dice（三骰点数），派生走 deriveRoll；路珠存 dice 三元组、
@@ -538,41 +470,8 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     }}>{phaseChip.text}</span>
   )
   const subRowNode = <HatTrickPodium lastRoll={lastRoll} recent={recent} isMobile={isMobile} compact={hasRail} />   // 上局信息条（切件）；单S6：≥1280 右栏压窄启紧凑档防裁
-  // ---- #42 速度 tab 条（形态A）：顶栏下 44px 行，双端同构 ----
-  // 每房显 label + 期号短号 + 【该房自己 hook 的】实时倒计时（未选中房也在连，秒数是真的）。
-  // topBar 被 gameCard / mobileCard 两分支共用，故一处插入两端生效；44px 从中滚区扣，舞台不动。
-  const roomTabs = ROOMS.length > 1 && (
-    <div style={{
-      flex: '0 0 auto', display: 'flex', gap: 6, height: 44, alignItems: 'center',
-      padding: isMobile ? '0 12px' : '0 18px', boxSizing: 'border-box',
-    }}>
-      {ROOMS.map((r) => {
-        const rm = roomsByKey[r.key]
-        const on = r.key === selectedRoomKey
-        const sec = Math.max(0, Math.ceil((rm.countdownMs || 0) / 1000))
-        const timed = rm.phase === 'betting' || rm.phase === 'locked' || rm.phase === 'idle'
-        const shortNo = rm.roundNo ? `#${String(rm.roundNo).split('-').pop()}` : '…'   // HT-20260722-1604 → #1604
-        return (
-          <button key={r.key} type="button" onClick={() => setSelectedRoomKey(r.key)} style={{
-            flex: '1 1 0', minWidth: 0, height: 34, borderRadius: RADIUS.pill, cursor: 'pointer',
-            background: on ? HATTRICK.sel : HATTRICK.strip,
-            border: `1px solid ${on ? HATTRICK.sel : 'rgba(255,255,255,0.16)'}`,
-            color: on ? '#083a1b' : HATTRICK.dim,
-            fontSize: 12, fontWeight: 900, letterSpacing: 0.2,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden',
-          }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</span>
-            <span style={{ fontFamily: MONO, opacity: on ? 0.75 : 0.6, flex: '0 0 auto' }}>{shortNo}</span>
-            <span style={{
-              fontFamily: MONO, flex: '0 0 auto',
-              color: on ? '#083a1b' : (timed ? HATTRICK.sel : HATTRICK.dim),
-            }}>{timed ? `${sec}s` : '—'}</span>
-          </button>
-        )
-      })}
-    </div>
-  )
+  // #42 速度 tab 条（形态A，抽件渲染）：色值传本款 tokens，件内零硬编码主题色。
+  const roomTabs = renderRoomTabs({ tokens: { sel: HATTRICK.sel, strip: HATTRICK.strip, dim: HATTRICK.dim }, isMobile })
 
   const topBar = (
     <>
