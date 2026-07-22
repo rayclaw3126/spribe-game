@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import GameLayout, { Panel } from '../components/GameLayout'
 import { COLORS, RADIUS, LAYOUT, MOMENTUM } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
@@ -225,7 +225,10 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
   function onCashoutOk(msg) {
     const i = msg.panel ?? 0
     const b = panelsRef.current[i].playerBet
-    if (b) updatePanel(i, { playerBet: { ...b, cashed: true, win: Number(msg.payout) } })
+    // #45 单10：多存一个【纯展示】字段 mult —— 投注流「你」行要显兑现倍数。
+    // 不用 win/amount 反推：payout 已被后端四舍五入到两位，反推可能与下方 toast 显示的
+    // msg.multiplier 差 0.01，同屏两处倍数对不上会被当成 bug。本字段不参与任何金额计算。
+    if (b) updatePanel(i, { playerBet: { ...b, cashed: true, win: Number(msg.payout), mult: Number(msg.multiplier) } })
     if (msg.balanceAfter != null) setServerBalance(Number(msg.balanceAfter))
     pushToast(`${Number(msg.multiplier).toFixed(2)}×`, Number(msg.payout))
     playCash()
@@ -336,6 +339,34 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
 
   // ---------- derived ----------
   const X = bars.length ? bars[bars.length - 1].x : 1
+  // #45 单10：投注流「你」行（照 Aviator displayPlayers 同款；双注位各一行，置顶）。
+  // 纯展示：只读 panels/phase/busted，钱层零碰；新局 playerBet 清空后本行自然消失。
+  //
+  // ⚠ 爆点判定必须三条件 `!cashed && phase==='done' && busted`，不能照抄飞机的单条件：
+  //   本款不是纯 crash —— 未爆完场时后端会补发 final cashout_ok（见 onDoneMsg 注释），
+  //   存在「done 了、没爆、cashout_ok 未到」的窗口；只判 done 会在该窗口闪一下红「爆」
+  //   再转绿，是假的失败提示。该窗口保持「进行中」才对。
+  //
+  // ⚠ 倍数取 playerBet.mult（兑现时存的权威值）；断线重连快照不带 multiplier 字段，
+  //   此时回退 win/amount 反推（同屏无 toast 可对照，0.01 的误差不可见）。
+  const displayBets = useMemo(() => {
+    const you = panels.flatMap((p, i) => {
+      const b = p.playerBet
+      if (!b) return []
+      const mult = b.cashed ? (b.mult ?? (b.amount > 0 ? b.win / b.amount : null)) : null
+      return [{
+        id: `you-${roundId}-${i}`,
+        name: '你',
+        bet: b.amount,
+        target: mult,
+        status: b.cashed ? 'cashed' : (phase === 'done' && busted) ? 'crashed' : 'live',
+        payout: b.cashed ? b.win : null,
+        you: true,
+      }]
+    })
+    return [...you, ...feedBets]
+  }, [panels, phase, busted, roundId, feedBets])
+
   const statusText = phase === 'betting' ? '等待下一局'
     : phase === 'running' ? '进行中'
       : busted ? '被绝杀' : '完场'
@@ -569,7 +600,7 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
       }}>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
-            <BetFeed bets={feedBets} myBets={[]} online={914} fill />
+            <BetFeed bets={displayBets} myBets={[]} online={914} fill />
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: 12, gap: 10 }}>
             <div style={{ flex: 1, minHeight: 0 }}>
