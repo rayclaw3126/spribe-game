@@ -5,9 +5,10 @@
 // 手机三段锁死的内联 2 行路珠留在 LineUp.jsx（分毫不变），与本件同读 lineupRoadViews.ROAD_VIEWS（单一出处）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { ROAD_VIEWS } from './lineupRoadViews'
+import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
 
-export default function LineUpRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, style }) {
-  const roadBead = isMobile ? 18 : 14   // 移动端珠子大一档（可辨），桌面压一档保总高（同 Derby）
+export default function LineUpRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, style }) {
+  const roadBead = bead ?? (isMobile ? 18 : 14)   // #47：可选 bead，默认原值（移动端大一档，桌面压一档保总高）
   const curView = ROAD_VIEWS.find(v => v.key === tab) || ROAD_VIEWS[0]   // 路珠视角（切了两端一致）
   const beads = history.slice(-(cols * rows))
   return (
@@ -25,6 +26,7 @@ export default function LineUpRoad({ history = [], tab, onTab, isMobile = false,
           )
         })}
       </div>
+      <style>{ROAD_FX_CSS}</style>
       <div style={{
         overflowX: 'auto', borderRadius: 10,
         background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
@@ -38,8 +40,10 @@ export default function LineUpRoad({ history = [], tab, onTab, isMobile = false,
             // road 存整局 total；按当前视角 curView.judge 派生（同一份函数，桌面/手机共用）
             const n = beads[i]
             const d = n != null ? curView.judge(n) : null
+            // #47 动效：新珠弹入（仅 WS 真新珠）／下一空格呼吸游标（只此一格）
+            const cls = i === freshIndex ? ROAD_FX_FRESH : (d == null && i === beads.length ? ROAD_FX_NEXT : undefined)
             return (
-              <span key={i} style={{
+              <span key={i} className={cls} style={{
                 width: roadBead, height: roadBead, borderRadius: '50%',
                 background: d ? d.c : 'rgba(255,255,255,0.05)',
                 border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',

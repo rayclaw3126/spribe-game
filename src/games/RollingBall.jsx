@@ -13,6 +13,7 @@ import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { ROLLINGBALL_LABEL as RL } from '../lib/betKeyLabels'   // #S3 档位中文名单一出处（搬家回引，视觉零变）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口 + 动效（共用）
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
 // X2：连开 3 球引擎 + 剩余池动态赔率 + 逐球结算状态机（前 19 卡无此结构）。
@@ -117,7 +118,15 @@ const TICK_MS = 500
 const BET_T = 20       // 10s 每球押注窗
 const DRAW_T = 4       // 2s 开球（静态占位，开奖舞台走后续单）
 const SETTLE_T = 6     // 3s 结算展示
-const ROAD_CAP = 120
+// #47 终批·刀2：路珠升统一视觉规格 —— 列对齐滑动窗口，右端恒留 2 空列。
+// 可用容量 = (30−2)×6 = 168；显示长度 L ≡ N (mod 6) 且 L ≤ 168 → 163–168 浮动。
+// ⚠ B 豁免只免「真历史灌满」，不免视觉规格：数据源仍是【本人实玩累积】，珠子随开局变多。
+const ROAD_CAP = 168
+const DESK_ROAD = { cols: 30, rows: 6 }   // 模块级：进组件内每渲染重建
+
+// ⚠ 手机段专用容量，钉回原值 120：手机竖版珠格走 road.slice(-CAP)[i] 从【头部】取，
+//   CAP 一变手机珠子整体前移。桌面 CAP 改动不得穿到手机。
+const MOBILE_ROAD_CAP = 120
 
 // ---------- 静态种子数据 ----------
 const G = GAME_BY_ID['RollingBall']
@@ -304,8 +313,16 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   // 单S9 扩档：原 S4c 只治 ≥1280（有右栏中栏被压那档）；实测 1024–1279 无右栏窄桌面截断更狠（赔率整丢），
   // 遂把门控从 isDesk(≥1280) 放宽到 isDesk(≥1024) 桌面全档。RAIL_MAXW=700 是 maxWidth 语义，
   // 窄档自适应天然安全（宽档才被 700 收）。手机 <1024 一律走原分支逐位不动；≥1280 与放宽前逐位一致。
-  const RAIL_MAXW = 700
+  // #47 终批·四区对表硬指标：700→800（舞台/盘口/路珠/筹码同一条宽度线）。
+  // ⚠ 门控沿用既有 isDesk(≥1024) 语义不改（见上方 S9 说明）：maxWidth 语义下 1024–1279 视口
+  //   本就够不着 800，行为与 700 时逐位一致；只有 ≥1415（中栏内容宽 ≥800）才真正吃到 800。
+  const RAIL_MAXW = 800
+
+  // #47 三区放大门控：与另九款同档取 hasRail(≥1280)，【不】用 isDesk —— 1024–1279 无右栏窄桌面
+  //   中栏实宽仅 664，此档放大必挤爆赔率（S9 当年正是治这档的截断）。手机 <768 永为 false。
+  const hasRail = useMediaQuery('(min-width: 1280px)')
   const [acc, setAcc] = useState({ comboRow: true, col: true, num: false })   // 手机手风琴折叠态（默认组合/列注展开、单号收起）；纯 UI，不动任何下注 state
+  const [freshIdx, setFreshIdx] = useState(-1)   // #47 动效：新珠索引（本款无速度房，单值即可）
   const [roadView, setRoadView] = useState('1big')   // 珠盘路视角（手机 pill 选，默认 1球大小）；纯显示，零请求零 state 污染
   const [bet, setBet] = useState(10)
   const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
@@ -509,7 +526,11 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
           if (rid != null && roadRecordedRef.current !== rid) {
             roadRecordedRef.current = rid
             const balls = pendingRef.current.slice()
-            setRoad(r => [...r, balls].slice(-ROAD_CAP))
+            setRoad(r => {
+              const next = roadWindow([...r, balls], DESK_ROAD)   // #47：整列丢最旧，增量与全量同构
+              setFreshIdx(next.length - 1)                        // 真新珠 → 弹入（首挂无珠，天然不触发）
+              return next
+            })
           }
         }
         roundIdRef.current = null
@@ -630,12 +651,12 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       boxSizing: 'border-box', position: 'relative',
     }
   }
-  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
-  const secHead = { color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
+  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : hasRail ? 15 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : hasRail ? 11 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : hasRail ? 14.5 : 12, fontWeight: 900 }
+  const secHead = { color: DERBY.gold, fontSize: hasRail ? 12 : 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
   const secBox = {
-    flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
+    flex: '0 0 auto', borderRadius: 12, padding: hasRail ? 5 : isDesk ? 3 : 4,
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', boxSizing: 'border-box',
   }
   const stakeChip = key => betsPlaced.has(key) && (
@@ -715,7 +736,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   )
 
   // ---- ① 开奖区：当前球大字 + 3 球槽 + 上局回顾 ----
-  const slotSz = isMobile ? 40 : 44
+  const slotSz = isMobile ? 40 : hasRail ? 53 : 44   // #47 放大：×1.2（drawZone 双挂 gameCard/mobileCard，靠此门控隔离手机）
   const drawZone = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
@@ -825,17 +846,18 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
             background: active ? DERBY.sel : done ? 'rgba(53,208,127,0.14)' : 'rgba(0,0,0,0.35)',
             color: active ? '#083a1b' : done ? DERBY.sel : DERBY.dim,
             border: `1px solid ${active ? DERBY.sel : done ? 'rgba(53,208,127,0.45)' : 'rgba(255,255,255,0.2)'}`,
-            fontSize: 11, fontWeight: 900, letterSpacing: 0.3, whiteSpace: 'nowrap',
+            fontSize: hasRail ? 13 : 11, fontWeight: 900, letterSpacing: 0.3, whiteSpace: 'nowrap',
           }}>第{i + 1}球{done && drawnBalls[i] != null ? ` ${String(drawnBalls[i]).padStart(2, '0')}` : active ? ' ◀ 押注中' : ''}</span>
         )
       })}
-      {/* 剩余池收缩可视化：75→74→73 每球定后跳动（key 由值驱动，CSS 无 rAF） */}
-      <span style={{
+      {/* 剩余池收缩可视化：75→74→73 每球定后跳动（key 由值驱动，CSS 无 rAF）
+          #47 刀1：桌面放大档改挂主盘【组头】行（见 poolBadge）；手机仍留在球次条内，逐位不动。 */}
+      {!hasRail && <span style={{
         marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
         padding: '3px 10px', borderRadius: RADIUS.pill,
         background: 'rgba(0,0,0,0.35)', border: `1px solid ${DERBY.gold}`,
         color: DERBY.gold, fontSize: 10, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>剩余池 <span key={75 - ballIdx} style={{ display: 'inline-block', animation: 'rbPoolBump 0.4s ease-out', fontFamily: "'Space Grotesk', sans-serif", fontSize: 12 }}>{75 - ballIdx}</span></span>
+      }}>剩余池 <span key={75 - ballIdx} style={{ display: 'inline-block', animation: 'rbPoolBump 0.4s ease-out', fontFamily: "'Space Grotesk', sans-serif", fontSize: 12 }}>{75 - ballIdx}</span></span>}
       {ballIdx > 0 && (
         <span style={{ color: DERBY.orange, fontSize: 9, fontWeight: 800, whiteSpace: 'nowrap' }}>
           赔率已按剩余池重算
@@ -843,9 +865,25 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       )}
     </div>
   )
+  // #47 刀1：剩余池徽标（桌面放大档随组头走）
+  const poolBadge = (
+    <span style={{
+      marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '3px 10px', borderRadius: RADIUS.pill,
+      background: 'rgba(0,0,0,0.35)', border: `1px solid ${DERBY.gold}`,
+      color: DERBY.gold, fontSize: 10, fontWeight: 900, whiteSpace: 'nowrap',
+    }}>剩余池 <span key={75 - ballIdx} style={{ display: 'inline-block', animation: 'rbPoolBump 0.4s ease-out', fontFamily: "'Space Grotesk', sans-serif", fontSize: 12 }}>{75 - ballIdx}</span></span>
+  )
+  // 组头行：桌面放大档把徽标并到组头右端；手机/窄桌面走原纯组头（逐位不动）
+  const headRow = (text, badge = null) => (
+    hasRail
+      ? <div style={{ ...secHead, display: 'flex', alignItems: 'center', gap: 8 }}>{text}{badge}</div>
+      : <div style={secHead}>{text}</div>
+  )
+
   const mainBoard = (
     <div style={secBox}>
-      <div style={secHead}>主盘 · 押第 {ballIdx + 1} 球</div>
+      {headRow(<span>主盘 · 押第 {ballIdx + 1} 球</span>, poolBadge)}
       <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
         {MAIN.map(m => rowCell(m.slot, m.name, m.range, m.bg))}
       </div>
@@ -857,17 +895,24 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       </div>
     </div>
   )
-  const comboRowBoard = (
+  // #47 刀1：原「组合 ｜ 行注三档」合卡（挤在主盘右侧半宽）拆成两张独立全宽卡。
+  //   ⚠ 仅 gameCard 引用；手机走独立的 comboBody（手风琴内），故拆分对手机零影响。
+  const comboBoard = (
     <div style={secBox}>
-      <div style={secHead}>组合 · 大小×单双 ｜ 行注三档</div>
+      {headRow('组合 · 大小×单双')}
       <div style={{
-        display: isMobile ? 'grid' : 'flex',
-        gridTemplateColumns: isMobile ? '1fr 1fr' : undefined,
-        gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4,
+        display: isMobile ? 'grid' : 'grid',
+        gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
+        gap: isMobile ? 5 : 8,
       }}>
         {/* 大小×单双四键：手机横排；桌面全档(≥1024, 单S9) → 竖排（名/赔率两行），赔率永不被裁。 */}
         {COMBO_META.map(m => stackCell(m.slot, m.name, '', DERBY.grey, isDesk))}
       </div>
+    </div>
+  )
+  const rowBetBoard = (
+    <div style={secBox}>
+      {headRow('行注三档')}
       {/* 行注三档：竖排堆叠（>N行 / 区间小字 / 赔率），满位赔率不挤。
           手机默认横排；桌面全档(≥1024, 单S9 扩档) 强制竖排，赔率独占一行永不被裁。 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: isMobile ? 5 : 8 }}>
@@ -884,6 +929,10 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       </div>
     </div>
   )
+  // #47 终批·刀1 裁定 (a) 收现状：顶区改纵排后，中栏定高滚动区把单号盘推出首屏，需下滚才见。
+  // ⚠ 禁为「让它进首屏」而重排本盘（如改 25×3）—— 单号盘 15×5 的【行】与列注区【列1-5】
+  //   是玩法语义映射（一行 = 一列的 15 个号），重排即切断语义，与骨牌 3×3 判例同理。
+  //   代价明确接受：下半盘靠滚。滚动层只有中栏一个（已探针核过，无滚中滚）。
   const numCols = isDesk ? 15 : 5
   const numBoard = (
     <div style={secBox}>
@@ -895,8 +944,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
           return (
             <button key={n} type="button" className="rbCell" data-key={key} disabled={!betting || oddsAt(key) == null}
               onClick={() => toggleSel(key)}
-              style={{ ...cellBase(key, isRed(n) ? DERBY.away : DERBY.home), padding: isMobile ? '3px 0' : '4px 0', minHeight: isMobile ? 30 : 26 }}>
-              <span style={{ ...cellName, fontSize: isMobile ? 12 : 12.5, fontFamily: "'Space Grotesk', sans-serif" }}>{String(n).padStart(2, '0')}</span>
+              style={{ ...cellBase(key, isRed(n) ? DERBY.away : DERBY.home), padding: isMobile ? '3px 0' : hasRail ? '6px 0' : '4px 0', minHeight: isMobile ? 30 : hasRail ? 32 : 26 }}>
+              <span style={{ ...cellName, fontSize: isMobile ? 12 : hasRail ? 15 : 12.5, fontFamily: "'Space Grotesk', sans-serif" }}>{String(n).padStart(2, '0')}</span>
               {stakeChip(key)}
             </button>
           )
@@ -907,8 +956,10 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
 
   // ---- ③ 珠盘路（第1球大小单轨，抄 Line Up）----
   const ROAD_COLS = 20
-  const roadBead = isMobile ? 18 : 14
-  const beads = road.slice(-ROAD_CAP)   // road 现存整局 3 球号码数组 [[b1,b2,b3],...]（旧衍生大小字已改）
+  // #47 刀2：原 roadBead(桌面 14) 已被 deskBead 取代；手机竖版珠格自带写死 14px，不引用本变量，故删。
+  const deskBead = 24                        // 桌面统一珠径：30×24 + 29×2 = 778 ≤ 786 可用宽
+  const beads = road.slice(-MOBILE_ROAD_CAP)   // 手机竖版珠格用；road 存整局 3 球号码数组 [[b1,b2,b3],...]
+  const deskBeads = road.slice(-(DESK_ROAD.cols * DESK_ROAD.rows))   // #47 桌面 30×6 窗口珠
   const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 当前珠盘视角（手机 pill 选）
   const beadRoad = (
     <div style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, margin: isMobile ? '0 12px 8px' : isDesk ? '0 0 8px' : '0 18px 8px', ...(isDesk ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
@@ -918,24 +969,27 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
           border: `1px solid ${DERBY.sel}`, fontSize: 10, fontWeight: 900, letterSpacing: 0.5,
         }}>第1球大小</span>
       </div>
+      <style>{ROAD_FX_CSS}</style>
       <div style={{ overflowX: 'auto', borderRadius: 10, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6 }}>
         <div style={{
           display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: `repeat(6, ${roadBead}px)`, gridTemplateColumns: `repeat(${ROAD_COLS}, ${roadBead}px)`,
+          gridTemplateRows: `repeat(${DESK_ROAD.rows}, ${deskBead}px)`, gridTemplateColumns: `repeat(${DESK_ROAD.cols}, ${deskBead}px)`,
           gap: 2, width: 'max-content',
         }}>
-          {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
+          {Array.from({ length: DESK_ROAD.cols * DESK_ROAD.rows }).map((_, i) => {
             // 桌面单视角：第1球大小（从整局 3 球取 balls[0]，走引擎 GROUPS.big.hit 派生，不手写表）
-            const balls = beads[i]
+            const balls = deskBeads[i]
             const b1 = balls != null ? balls[0] : undefined
             const big = b1 != null && GROUPS.big.hit(b1)
             const t = b1 != null ? (big ? '大' : '小') : ''
+            // #47 动效：新珠弹入 / 下一空格呼吸游标（只此一格）
+            const cls = i === freshIdx ? ROAD_FX_FRESH : (b1 == null && i === deskBeads.length ? ROAD_FX_NEXT : undefined)
             return (
-              <span key={i} style={{
-                width: roadBead, height: roadBead, borderRadius: '50%',
+              <span key={i} className={cls} style={{
+                width: deskBead, height: deskBead, borderRadius: '50%',
                 background: b1 != null ? (big ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.05)',
                 border: b1 != null ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                color: COLORS.white, fontSize: roadBead / 2, fontWeight: 900,
+                color: COLORS.white, fontSize: deskBead / 2, fontWeight: 900,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
               }}>{t}</span>
             )
@@ -984,9 +1038,11 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       }}>
         <WinToast toasts={toasts} />
         {ballSwitch}
-        <div style={{ display: 'flex', flexDirection: isDesk ? 'row' : 'column', gap: isDesk ? 8 : 4, alignItems: isDesk ? 'stretch' : undefined }}>
-          <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{mainBoard}</div>
-          <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{comboRowBoard}</div>
+        {/* #47 刀1：顶区改纵排 —— 主盘/组合/行注三档 各独占全宽一行，不再左右挤半宽 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: isDesk ? 8 : 4 }}>
+          {mainBoard}
+          {comboBoard}
+          {rowBetBoard}
         </div>
         {colBoard}
         {numBoard}
@@ -1000,8 +1056,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
         borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
       }}>
         <div style={{
-          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: isDesk ? RAIL_MAXW : 480, margin: '0 auto',
+          display: 'grid', gridTemplateColumns: `minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) ${hasRail ? 110 : 92}px`,
+          gridTemplateRows: `repeat(2, ${hasRail ? 34 : 28}px)`, gap: 6, maxWidth: isDesk ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },

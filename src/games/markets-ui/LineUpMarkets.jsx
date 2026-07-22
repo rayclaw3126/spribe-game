@@ -33,7 +33,8 @@ const MATRIX_COLS = [
   { slot: 'even', name: '双', bg: DERBY.grey },
 ]
 
-export default function LineUpMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, chipMode = false }) {
+export default function LineUpMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, chipMode = false, big = false }) {
+  // #47 三区放大：big 仅调【字号/内距】，A/B 双视图的结构与栅格一字不动（Ray 定版）
   const betting = !disabled
   const [view, setView] = useState('A')       // 投注盘视图：A 列表 / B 矩阵
   const [dim, setDim] = useState(0)           // A 视图维度：0 全局，1-5 行 L1-L5
@@ -50,7 +51,7 @@ export default function LineUpMarkets({ onPick, stakes, disabled = false, flying
     const isHit = hitSet.has(key)
     const staked = stakeOf(key) > 0
     return {
-      flex: 1, minWidth: 0, padding: isMobile ? '6px 2px' : '6px 4px',
+      flex: 1, minWidth: 0, padding: isMobile ? '6px 2px' : big ? '8px 4px' : '6px 4px',
       borderRadius: 10, cursor: betting ? 'pointer' : 'not-allowed',
       background: bg,
       border: `1.5px solid ${isHit ? DERBY.sel : sel || staked ? DERBY.gold : 'rgba(255,255,255,0.16)'}`,
@@ -65,10 +66,10 @@ export default function LineUpMarkets({ onPick, stakes, disabled = false, flying
       boxSizing: 'border-box', position: 'relative',
     }
   }
-  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
-  const secHead = { color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
+  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : big ? 15 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : big ? 11 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : big ? 14.5 : 12, fontWeight: 900 }
+  const secHead = { color: DERBY.gold, fontSize: big ? 12 : 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: 4,
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
@@ -168,7 +169,7 @@ export default function LineUpMarkets({ onPick, stakes, disabled = false, flying
         <span />
         {MATRIX_COLS.map(c => (
           <span key={c.slot} style={{
-            textAlign: 'center', fontSize: isMobile ? 10 : 11, fontWeight: 900,
+            textAlign: 'center', fontSize: isMobile ? 10 : big ? 13 : 11, fontWeight: 900,
             color: c.slot === 'home' ? DERBY.gold : c.slot === 'away' ? '#f0938a' : DERBY.dim,
           }}>{c.name}</span>
         ))}
@@ -176,14 +177,14 @@ export default function LineUpMarkets({ onPick, stakes, disabled = false, flying
           [
             <span key={`r${d}`} style={{
               display: 'inline-flex', alignItems: 'center',
-              color: DERBY.text, fontSize: isMobile ? 9.5 : 10.5, fontWeight: 900, whiteSpace: 'nowrap',
+              color: DERBY.text, fontSize: isMobile ? 9.5 : big ? 12.5 : 10.5, fontWeight: 900, whiteSpace: 'nowrap',
             }}>{d === 0 ? '全局' : `L${d} ${ROW_LABELS[d - 1]}`}</span>,
             ...MATRIX_COLS.map(c => {
               const key = keyOf(d, c.slot)
               return (
                 <button key={key} type="button" className={`luCell${wonCls(key)}`} data-key={key} disabled={!betting}
                   onClick={() => onPick(key)}
-                  style={{ ...cellBase(key, c.bg), padding: '2px 0' }}>
+                  style={{ ...cellBase(key, c.bg), padding: big ? '5px 0' : '2px 0' }}>
                   <span style={cellOdds}>{MARKETS[key].odds.toFixed(2)}</span>
                   {stakeChip(key)}{flyDot(key)}
                 </button>
