@@ -52,15 +52,21 @@ export const GAME_REGISTRY = [
   { id: 'StreakRoll',   backendId: 'streak',      name: '连胜转盘',    displayName: '连胜转盘',    venue: null,        desc: '转动号码带，停在倍数上！', color: '#16C784', bg: INSTANT_BG,                                 cover: coverStreakRoll,   cat: 'arcade', rooms: [] },
   { id: 'MiniRoulette', backendId: 'roulette',    name: '球队轮盘',    displayName: '球队轮盘',    venue: null,        desc: '选定球队，转动轮盘！',   color: '#16C784', bg: INSTANT_BG,                                 cover: coverTeamRoulette, cat: 'arcade', rooms: [] },
   { id: 'Momentum',     backendId: 'momentum',    name: '气势曲线',    displayName: '气势曲线',    venue: null,        desc: '乘势而上，巅峰兑现！',   color: '#16C784', bg: INSTANT_BG,                                 cover: coverMomentum,     cat: 'crash',  rooms: [] },
-  { id: 'HalfTime',     backendId: 'halftime',    name: '中场',        displayName: '中场',        venue: '翡翠球场',   desc: '押基诺总和——大/小/区间！', color: '#16C784', bg: INSTANT_BG,                              cover: coverHalfTime,     cat: 'lotto',  rooms: [] },
-  { id: 'GoldenBoot',   backendId: 'goldenboot',  name: 'PK10',       displayName: 'PK10',       venue: '红宝石赛道', desc: '十车一线，押名次！',     color: '#ffd54f', bg: INSTANT_BG,                                 cover: coverPk10,         cat: 'pk',     rooms: [] },
+  { id: 'HalfTime',     backendId: 'halftime',    name: '中场',        displayName: '中场',        venue: '翡翠球场',   desc: '押基诺总和——大/小/区间！', color: '#16C784', bg: INSTANT_BG,                              cover: coverHalfTime,     cat: 'lotto',
+    // #42：多房。key = 后端 ROOM_CONFIGS 的 room 段；只放 {key,label}，不放 bettingMs（节奏真源在服务端）。
+    rooms: [{ key: '30s', label: '标准 30秒' }, { key: '15s', label: '极速 15秒' }] },
+  { id: 'GoldenBoot',   backendId: 'goldenboot',  name: 'PK10',       displayName: 'PK10',       venue: '红宝石赛道', desc: '十车一线，押名次！',     color: '#ffd54f', bg: INSTANT_BG,                                 cover: coverPk10,         cat: 'pk',
+    // #42：多房。key = 后端 ROOM_CONFIGS 的 room 段；只放 {key,label}，不放 bettingMs（节奏真源在服务端）。
+    rooms: [{ key: '30s', label: '标准 30秒' }, { key: '15s', label: '极速 15秒' }] },
   { id: 'NumberUp',     backendId: 'numberup',    name: '号码王',      displayName: '号码王',      venue: '蛋白石球场', desc: '押球衣号码——00 到 49！', color: '#35d07f', bg: INSTANT_BG,                                cover: coverNumberUp,     cat: 'lotto',
     // #42：第二款多房。key = 后端 ROOM_CONFIGS 的 room 段（'30s' 标准房 / '15s' 快房）。
     // ⚠ 同 SpeedGrid：只放 {key,label}，【不放 bettingMs】——节奏真源在服务端 ROOM_CONFIGS，
     //   前端存副本即第二份手抄；倒计时永远只认 WS 的 endsAt（零本地时钟铁律）。
     rooms: [{ key: '30s', label: '标准 30秒' }, { key: '15s', label: '极速 15秒' }] },
   // TODO: 换 Codex 专属封面（暂借 Total Goals 封面占位）
-  { id: 'HatTrick',     backendId: 'hattrick',    name: '帽子戏法',    displayName: '帽子戏法',    venue: '琥珀穹顶',   desc: '三颗骰子，押总点数！',   color: '#35d07f', bg: INSTANT_BG,                                 cover: coverTotalGoals,   cat: 'lotto',  rooms: [] },
+  { id: 'HatTrick',     backendId: 'hattrick',    name: '帽子戏法',    displayName: '帽子戏法',    venue: '琥珀穹顶',   desc: '三颗骰子，押总点数！',   color: '#35d07f', bg: INSTANT_BG,                                 cover: coverTotalGoals,   cat: 'lotto',
+    // #42：多房。key = 后端 ROOM_CONFIGS 的 room 段；只放 {key,label}，不放 bettingMs（节奏真源在服务端）。
+    rooms: [{ key: '30s', label: '标准 30秒' }, { key: '15s', label: '极速 15秒' }] },
   { id: 'DerbyDay',     backendId: 'derbyday',    name: '德比大战',    displayName: '德比大战',    venue: '翡翠竞技场', desc: '主客对决，押你的一方！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverDerbyDay,     cat: 'lotto',  rooms: [] },
   { id: 'LineUp',       backendId: 'lineup',      name: '首发阵容',    displayName: '首发阵容',    venue: '蓝宝石球场', desc: '五行 25 号，押各行和！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverLineUp,       cat: 'lotto',  rooms: [] },
   { id: 'SpeedGrid',    backendId: 'speedgrid',   name: '极速方格',    displayName: '极速方格',    venue: '黄玉赛道',   desc: '24 车争先，一押到底！',  color: '#35d07f', bg: INSTANT_BG,                                 cover: coverSpeedGrid,    cat: 'pk',
