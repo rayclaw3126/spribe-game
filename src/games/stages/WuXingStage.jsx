@@ -121,7 +121,10 @@ function DrawStage({ round, sfx, onFinale, children }) {
 
 function StandbyBoard({ height = 128 }) { return <div style={{ width: '100%', height }} aria-hidden /> }
 
-export default function WuXingStage({ phase, roundNo, drawResult, width = '100%', height = 128, muted, onFinale, lastRound, style }) {
+// #46 单12 追加：可选 ball（球径 px）—— 带默认值、不传即原行为。仅五行原页桌面传 32（中度放大档）；
+// 多桌 stageRegistry→TableCard 与手机段均不传，走原 isMobile?26:isDesk?26:30，逐字节零感。
+// 球面字号是 ball*0.42 派生，故只调这一个数即等比例放大。引用方仅两处（WuXing.jsx / stageRegistry.js）。
+export default function WuXingStage({ phase, roundNo, drawResult, width = '100%', height = 128, muted, onFinale, lastRound, ball: ballProp, style }) {
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const audioRef = useRef({ ctx: null, muted: false })
@@ -183,7 +186,7 @@ export default function WuXingStage({ phase, roundNo, drawResult, width = '100%'
   }
   if (!round) return <div style={root}><StandbyBoard height={height} /></div>
   const cur = round, shown = round
-    const ball = isMobile ? 26 : isDesk ? 26 : 30
+    const ball = ballProp ?? (isMobile ? 26 : isDesk ? 26 : 30)
     const zBalls = drawing && cur ? cur.balls : shown.balls
     const staticView = { lit: null, flash: null, popAge: null, sum: shown.sum, up: shown.up, litN: 20, slamAge: null }
     const zoneBody = view => (

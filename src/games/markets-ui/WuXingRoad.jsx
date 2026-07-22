@@ -1,12 +1,15 @@
 // #41 单16：WuXing 珠盘路墙（大小 / 单双 / 五行段 页签 + 6×N 珠矩阵）——从 WuXing beadRoad 机械切片。
 // 判定走引擎口径（wuxingShared ROAD_VIEWS：大小 n≥811 / 单双 n%2 / 五行段 WX_BOUNDS，禁二份表）。
-// props {history,tab,onTab,isMobile,cols,rows,style}：history = 整局总和 sum 数组 [n,...]
+// props {history,tab,onTab,isMobile,cols,rows,bead,style}：history = 整局总和 sum 数组 [n,...]
+// #46 单12：新增可选 bead（珠径 px），照 HalfTimeRoad 的 compact 先例——【带默认值、不传即原行为】。
+//   仅五行原页桌面传 24（配合 cols 30 吃满 800 中栏）；多桌 TableCard 与手机段均不传，
+//   走默认 isMobile ? 18 : 14，逐字节零感。引用方仅两处（WuXing.jsx / marketsUiRegistry→TableCard）。
 // （原页 state road / 多桌 /round/history 派生）；判定一律从整值 sum 派生。style 覆外框边距（原页 18px / 多桌 0）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { ROAD_VIEWS } from './wuxingShared'
 
-export default function WuXingRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, style }) {
-  const roadBead = isMobile ? 18 : 14
+export default function WuXingRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, style }) {
+  const roadBead = bead ?? (isMobile ? 18 : 14)
   const curView = ROAD_VIEWS.find(v => v.key === tab) || ROAD_VIEWS[0]   // 路珠视角（手机/桌面共用 tab，切了两端一致）
   const cells = history.slice(-(cols * rows))
   return (

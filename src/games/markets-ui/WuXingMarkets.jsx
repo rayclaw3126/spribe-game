@@ -15,9 +15,17 @@ const EMPTY = new Set()
 // 四玩法组名（单16）：原页 secHead 四条真实中文标题，逐字节沿用（禁硬造英文）。
 const GROUP_TITLES = ['主盘 · 总和', '龙虎（和值十位/末位）｜ 上下（1-40/41-80 计数）', '过关四组合', '五行 · 总和五段']
 
-export default function WuXingMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, isDesk: isDeskProp, chipMode = false, openMode = 'all' }) {
+// #46 单12 追加：可选 big（桌面中度放大档 ×1.2）—— 默认 false 即原行为。仅五行原页桌面传 true；
+// 多桌 marketsUiRegistry→TableCard 与手机段均不传，逐字节零感。引用方仅两处（WuXing.jsx / marketsUiRegistry.js）。
+export default function WuXingMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, isDesk: isDeskProp, chipMode = false, openMode = 'all', big = false, stacked = false }) {
   const isDeskMedia = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const isDesk = isDeskProp == null ? isDeskMedia : isDeskProp
+  // #46 单12追2：stacked —— 桌面弃左右双栏、改「照 !isDesk 分支」的分区纵排（主盘/龙虎/过关各一张全宽卡）。
+  //   默认 false 即现状；仅五行原页桌面传 true。多桌 TableCard 不传（它本就走 isDesk={false} 那套），
+  //   引用方仅两处（WuXing.jsx / marketsUiRegistry→TableCard），逐字节零感。
+  // ⚠ 这两行必须在 isDesk 之后：isDesk 是 const，提前引用会 TDZ 崩组件（lint/build 都抓不到，只有浏览器能）。
+  const twoCol = isDesk && !stacked          // 主盘/龙虎左右并排（原桌面形态）
+  const parlayGrid = isMobile || stacked     // 过关 2×2（原仅手机；stacked 后桌面同款）
   const betting = !disabled
   // 四组折叠/展开（单16）：默认全开=原页习惯（secHead 常显）；openMode='first' 时仅开第一组（多桌手风琴记忆，每卡独立）
   const [open, setOpen] = useState(() => openMode === 'first' ? [true, false, false, false] : [true, true, true, true])
@@ -62,9 +70,10 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
   const flyDot = key => (flying?.[key] ? <span style={{ position: 'absolute', top: 2, left: 2, width: 5, height: 5, borderRadius: '50%', background: DERBY.gold, pointerEvents: 'none' }} /> : null)
   // 中奖高亮标准（hits 必接）：命中键走原版高亮(cellBase 内)；押中(有码)+命中 = 你中了 → 外加金边脉冲(WinFx 样式语言)。
   const wonCls = key => (hitSet.has(key) && stakeOf(key) > 0 ? ' wxWin' : '')
-  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
+  // big：桌面中度放大档（×1.2）。手机分支一律不受影响（big 只由五行原页桌面传入）。
+  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : big ? 15 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : big ? 14.5 : 12, fontWeight: 900 }
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
@@ -87,7 +96,7 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
       style={{
         ...cellBase(key, bg),
         flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-        padding: isMobile ? '6px 8px' : '5px 12px', gap: 6,
+        padding: isMobile ? '6px 8px' : big ? '7px 14px' : '5px 12px', gap: 6,
       }}>
       <span style={cellName}>{name}</span>
       {range ? <span style={{ ...cellRange, flex: 1, textAlign: 'center' }}>{range}</span> : <span style={{ flex: 1 }} />}
@@ -138,8 +147,8 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
       {groupHead(2)}
       {open[2] && (
       <div style={{
-        display: isMobile ? 'grid' : 'flex',
-        gridTemplateColumns: isMobile ? '1fr 1fr' : undefined,
+        display: parlayGrid ? 'grid' : 'flex',
+        gridTemplateColumns: parlayGrid ? '1fr 1fr' : undefined,
         gap: isMobile ? 5 : 8,
       }}>
         {rowCell('big-odd', '大单', '', '3.82')}
@@ -159,9 +168,9 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: isMobile ? 4 : 8 }}>
         {WUXING.map(w => (
           <button key={w.key} type="button" className={`wxCell${wonCls(w.key)}`} data-key={w.key} disabled={!betting} onClick={() => onPick(w.key)}
-            style={{ ...cellBase(w.key, DERBY.grey), padding: isMobile ? '5px 2px' : '6px 4px' }}>
-            <span style={{ ...cellName, fontSize: isMobile ? 14 : 16 }}>{w.name}</span>
-            <span style={{ ...cellRange, fontSize: isMobile ? 8 : 9.5 }}>{w.range}</span>
+            style={{ ...cellBase(w.key, DERBY.grey), padding: isMobile ? '5px 2px' : big ? '8px 6px' : '6px 4px' }}>
+            <span style={{ ...cellName, fontSize: isMobile ? 14 : big ? 19 : 16 }}>{w.name}</span>
+            <span style={{ ...cellRange, fontSize: isMobile ? 8 : big ? 11.5 : 9.5 }}>{w.range}</span>
             <span style={cellOdds}>{w.odds}</span>
             {stakeChip(w.key)}{flyDot(w.key)}
           </button>
@@ -176,10 +185,10 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
       <style>{`.wxCell:hover { filter: brightness(1.2); }
         @keyframes wxWinPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,213,79,0.0) } 45% { box-shadow: 0 0 0 3px rgba(255,213,79,0.95), 0 0 14px rgba(255,213,79,0.6) } }
         .wxWin { animation: wxWinPulse 1s ease-in-out infinite; z-index: 2; }`}</style>
-      {/* desk 主盘/龙虎上下并排（flex1 / flex1.4 压总高）；mobile 纵排 */}
-      <div style={{ display: 'flex', flexDirection: isDesk ? 'row' : 'column', gap: isDesk ? 8 : 4, alignItems: isDesk ? 'stretch' : undefined }}>
-        <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{mainBoard}</div>
-        <div style={isDesk ? { flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{dtudBoard}</div>
+      {/* twoCol：desk 主盘/龙虎左右并排（flex1 / flex1.4 压总高）；mobile 与 stacked 桌面一律纵排 */}
+      <div style={{ display: 'flex', flexDirection: twoCol ? 'row' : 'column', gap: isDesk ? 8 : 4, alignItems: twoCol ? 'stretch' : undefined }}>
+        <div style={twoCol ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{mainBoard}</div>
+        <div style={twoCol ? { flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{dtudBoard}</div>
       </div>
       {/* 过关一行；五行 desk 独占整行 */}
       {parlayBoard}

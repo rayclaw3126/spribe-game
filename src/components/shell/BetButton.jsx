@@ -32,7 +32,10 @@ const STATES = {
 
 // `sub` renders a second, larger line (Spribe's「下注 / $10.00」pattern);
 // `stretch` makes the button fill its flex parent's height.
-export default function BetButton({ state, label, sub, onClick, disabled, stretch }) {
+// #46 单12 追加：可选 size（字号倍率）—— 默认 1 即原行为。仅五行原页桌面传 1.2（中度放大档）；
+// 另 11 处引用方（LineUp/HalfTime/GoldenBoot/NumberUp/DerbyDay/RollingBall/SpeedGrid/HatTrick/
+// DominoDuel/Aviator/BetPanel）均不传，逐字节零感。
+export default function BetButton({ state, label, sub, onClick, disabled, stretch, size = 1 }) {
   const s = STATES[state] || STATES.bet
   return (
     <>
@@ -53,7 +56,7 @@ export default function BetButton({ state, label, sub, onClick, disabled, stretc
           borderRadius: RADIUS.btn,
           border: 'none',
           fontWeight: 800,
-          fontSize: 16,
+          fontSize: 16 * size,
           letterSpacing: '0.3px',
           color: COLORS.white,
           cursor: disabled ? 'not-allowed' : 'pointer',
@@ -63,7 +66,7 @@ export default function BetButton({ state, label, sub, onClick, disabled, stretc
         }}
       >
         {label}
-        {sub && <span style={{ fontSize: 21, fontWeight: 900, lineHeight: 1 }}>{sub}</span>}
+        {sub && <span style={{ fontSize: 21 * size, fontWeight: 900, lineHeight: 1 }}>{sub}</span>}
       </button>
     </>
   )

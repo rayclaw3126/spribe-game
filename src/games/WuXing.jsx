@@ -45,7 +45,9 @@ export { drawKeno, deriveRound, ODDS, MARKETS, hitsOf }
 // ---------- 轮次常量 ----------
 // 相位/期号/倒计时全走服务器排期器（useRoundRoom）；本地只保留开奖舞台动画时长。
 const DRAW_ANIM_MS = 4500   // 收到 drawn → 开奖舞台演完 → 结算回写；须 < 服务器 wuxing idle(5500ms)
-const ROAD_CAP = 120
+// #46 单12：120→180 —— 配合桌面路珠 30 列 × 6 行 = 180 格，恰好填满不造死格。
+// ⚠ 本常量是【五行私有】模块级常量：另 6 款各有自己的一份同名常量、互不引用，改这里只影响五行。
+const ROAD_CAP = 180
 
 // ---------- 静态种子数据（纯展示，零随机数）----------
 const G = GAME_BY_ID['WuXing']
@@ -235,6 +237,53 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
 
+  // F. #46 单12 路珠历史播种：进页 / 切房时按房拉 /round/history 灌满，替代只有 24 颗的假种子。
+  //   · 两房各拉各的：?room=15s 走单1 就有的现成分流参（不传 = 标准房），与右栏「近期开奖」同端点同 apiGet。
+  //   · 派生复用 deriveRound(balls).sum —— 与 finishRound / E 段 / 多桌 roadItem 同一函数，禁二份表。
+  //   · 方向：接口返回新→旧，road 存旧→新，故 reverse 后灌。
+  //   · 与 WS 增量珠去重：灌完把该房【最新期号】写进已有的两个去重 ref（选中房 roadRecordedRef、
+  //     未选中房 bgDrawRoundRef[key]），后续 WS 追同一期自然跳过 —— WS 那侧一行不改。
+  //     之所以走 ref 而非按期号比对：road 只存裸 sum、不带期号，按期号去重要改存储形状并在传参处 map。
+  //   · 失败静默保留 SEED_ROAD：路珠是装饰，拉不到不该打断游戏，也不弹错误条。
+  //   · 只读，钱层零碰（apiGet 不经手 setServerBalance）。
+  const apiRef = useRef(api)
+  useEffect(() => { apiRef.current = api })
+  useEffect(() => {
+    let cancelled = false
+    // ⚠ 后端把 limit 夹死在 50（round.js 的 Math.min(50, ...)），单请求拿不满 180 格，
+    //   故走该端点现成的 cursor 分页续拉，最多 PAGES 页（180/50 → 4 页封顶，防翻页失控）。
+    const PAGE = 50
+    const PAGES = Math.ceil(ROAD_CAP / PAGE)
+    const seedRoom = async (r) => {
+      const qs = r.key === '15s' ? '&room=15s' : ''
+      const acc = []                      // 新→旧累积
+      let cursor = null
+      for (let pg = 0; pg < PAGES && acc.length < ROAD_CAP; pg++) {
+        const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+        const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${qs}${cs}`)
+        const items = d?.items || []
+        if (!items.length) break
+        acc.push(...items)
+        cursor = d?.nextCursor
+        if (!cursor) break
+      }
+      if (cancelled || !acc.length) return
+      const sums = acc.slice(0, ROAD_CAP).reverse()   // 接口新→旧，road 存旧→新
+        .map((it) => (Array.isArray(it?.drawResult?.balls) ? deriveRound(it.drawResult.balls).sum : null))
+        .filter((n) => n != null)
+      if (!sums.length) return
+      setRoadByRoom((m) => ({ ...m, [r.key]: sums.slice(-ROAD_CAP) }))
+      const latest = acc[0]?.roundNo
+      if (latest) {
+        if (r.key === selectedRoomKey) roadRecordedRef.current = latest
+        else bgDrawRoundRef.current[r.key] = latest
+      }
+    }
+    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoomKey])
+
   const betting = room.phase === 'betting'
   const drawing = uiPhase === 'drawing'
   const settled = uiPhase === 'settled'
@@ -401,6 +450,13 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const drawZone = (
     <WuXingStage key={selectedRoomKey} phase={drawing ? 'drawn' : settled ? 'settled' : 'betting'} roundNo={room.roundNo}
       drawResult={cur ? { balls: cur.balls } : null} lastRound={shown} muted={muted}
+      ball={isDesk ? 32 : undefined} height={isDesk ? 140 : 128}
+      /* #46 单12 追加 中度放大档：球 26→32（球面字号 ball*0.42 自动跟随）。
+         ⚠ 必须按 isDesk 门控，不能写死：drawZone 这个变量【被手机分支 mobileCard 复用】
+         （gameCard:481 与 mobileCard:669 两处都渲染它），写死等于连手机一起改了。
+         ⚠ height 必须与 ball 一并抬（128→140）：舞台根是 fixed height + overflow:hidden，
+         两行球各 +6px 共 +12px，不抬就顶破被裁（实测裁 3px）。height 是组件现成 prop。
+         非桌面档传 undefined/128 → 走组件原默认，逐字节零感。 */
       onFinale={() => setPreHits(new Set([...hitsOf(pendingRef.current)].filter(k => k.startsWith('wx-'))))}
       style={{ flex: '0 0 auto', zIndex: 1, margin: isMobile ? '8px 12px 0' : hasRail ? '6px 0 0' : '6px 18px 0', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)',
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
@@ -437,15 +493,22 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
+        {/* #46 单12 追加 中度放大档：big 只在桌面 gameCard 传；手机段与多桌不传，逐字节零感 */}
         <WuXingMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
-          selected={picks} hits={result?.hits ?? preHits} isMobile={isMobile} isDesk={isDesk} />
+          selected={picks} hits={result?.hits ?? preHits} isMobile={isMobile} isDesk={isDesk} big stacked />
       </div>
 
-      {/* 弹性垫片：把珠盘路推向底部贴注栏 */}
+      {/* ③ 珠盘路（切件）：history=road 整值 → 组件内 roadView 派生 大小/单双/五行段（判定走引擎）
+          #46 单12 空腔治理：本件从「垫片之后」上提到「垫片之前」——目标序 开奖区→盘口→路珠→空白→注栏。
+          桌面传 cols 30 / bead 24（30×24+29×2=778 ≤ 内容可用宽 786，吃满 800 中栏）；
+          rows 保持 6 → 30×6=180 格恰好 = ROAD_CAP，零死格。多桌与手机不传这两个 prop，行为不变。 */}
+      {/* 弹性垫片：吸收剩余高度，把珠盘路推向底部贴注栏。
+          #46 单12追2 定案：路珠【回贴底】——垫片移回路珠之前（撤销单12 的上提调序），
+          顺序恢复 开奖→盘口→垫片→路珠→注栏；路珠保持 30×6 大珠满珠贴筹码条。 */}
       <div style={{ flex: '1 0 auto' }} />
 
-      {/* ③ 珠盘路（切件）：history=road 整值 → 组件内 roadView 派生 大小/单双/五行段（判定走引擎） */}
       <WuXingRoad history={road} tab={roadView} onTab={setRoadView} isMobile={isMobile}
+        cols={30} bead={24}
         style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
           ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
 
@@ -459,8 +522,9 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)',
+          /* #46 单12 追加 中度放大档：行高 28→34、下注钮列 92→110（本条是五行私有内联，直改） */
+          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',
+          gridTemplateRows: 'repeat(2, 34px)',
           gap: 6,
           maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
@@ -471,7 +535,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
             <button key={v} type="button" className="wxChip" disabled={!betting} onClick={() => setBet(v)} style={{
               gridColumn: col, gridRow: row,
               width: '100%', height: '100%', borderRadius: 8,
-              fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
+              fontSize: 13, fontWeight: 900, lineHeight: 1, color: COLORS.white,   /* #46 单12 追加：11→13 同比例 */
               background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
               border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
               cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
@@ -491,15 +555,15 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
               disabled={!betting}
               onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{
-                width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-                color: COLORS.white, fontSize: 14, fontWeight: 900,
+                width: 48, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
+                color: COLORS.white, fontSize: 17, fontWeight: 900,
               }}
             />
           </div>
           <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
             gridColumn: 3, gridRow: 2,
             width: '100%', height: '100%', borderRadius: 8,
-            fontSize: 11, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
+            fontSize: 13, fontWeight: 900, lineHeight: 1, whiteSpace: 'nowrap',
             color: repeatOk ? DERBY.text : DERBY.dim,
             background: 'rgba(0,0,0,0.35)',
             border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
@@ -514,6 +578,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
               onClick={confirmBets}
               disabled={!confirmOk}
               stretch
+              size={1.2}   /* #46 单12 追加：与筹码键同比例放大；另 11 处引用方不传，零感 */
             />
           </div>
         </div>
