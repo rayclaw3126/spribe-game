@@ -1,4 +1,5 @@
 // #42 单1 冒烟：speedgrid 两房（标准 30s / 快房 15s）后端多房验收。
+// 铺量后 g) 段追加 numberup / hattrick / goldenboot / halftime 四款 15s 快房（标准房走 room IS NULL）。
 //
 // 本单无 UI（前端零碰，单2 才见），验收 = 本脚本的证据链。
 // 跑法：cd server && ALICE_PW=<pw> node scripts/_speedroom_smoke.mjs
@@ -194,6 +195,92 @@ if (!WITH_KILL) {
   console.log('  ⏭  跳过（需 --with-kill；本段要 kill -9 后端进程，默认不跑以免误杀）');
 } else {
   console.log('  （本段由外部编排：下注→kill→重启→断言，见汇报回执）');
+}
+
+// ============ g) 铺量 4 款：numberup / hattrick / goldenboot / halftime 各一 15s 快房 ============
+// 与 speedgrid 的差异（务必别照抄 a) 段断言）：这 4 款标准房 room 落 NULL（不是显式 '30s'），
+// 所以「标准房在产」要走 `room IS NULL`，读侧靠 COALESCE 归一。
+console.log('\n════ g) 铺量 4 款 15s 快房 ════');
+{
+  const GAMES = [
+    { game: 'numberup', prefix: 'NU' },
+    { game: 'hattrick', prefix: 'HT' },
+    { game: 'goldenboot', prefix: 'GB' },
+    { game: 'halftime', prefix: 'HF' },
+  ];
+  const fastPrefix = (g) => `${g.prefix}15-`;
+
+  // —— 等 4 房都出过至少 1 期（dev 刚起时快房还没跑满第一个周期，直接断言会假红）——
+  const allLive = async () => {
+    for (const g of GAMES) {
+      const n = (await query(
+        `SELECT count(*) n FROM rounds WHERE game=$1 AND room='15s'`, [g.game])).rows[0].n;
+      if (Number(n) === 0) return false;
+    }
+    return true;
+  };
+  let live = false;
+  for (let i = 0; i < 20 && !live; i++) { live = await allLive(); if (!live) await sleep(2000); }
+  ok(live, '4 款快房均已出期（等待 ≤40s）');
+
+  // —— 期号前缀在产 + 标准房仍走 NULL 房 ——
+  for (const g of GAMES) {
+    const fast = (await query(
+      `SELECT count(*) n, max(round_no) mx FROM rounds WHERE game=$1 AND room='15s'`, [g.game])).rows[0];
+    ok(Number(fast.n) > 0 && String(fast.mx).startsWith(fastPrefix(g)),
+      `${g.game} 快房期号前缀 ${fastPrefix(g)}`, `${fast.n} 局，最新 ${fast.mx}`);
+    const std = (await query(
+      `SELECT count(*) n, max(round_no) mx FROM rounds WHERE game=$1 AND room IS NULL`, [g.game])).rows[0];
+    ok(Number(std.n) > 0 && String(std.mx).startsWith(`${g.prefix}-`),
+      `  ↳ ${g.game} 标准房仍 room IS NULL 且前缀 ${g.prefix}-`, `${std.n} 局，最新 ${std.mx}`);
+    // 前缀零串号：标准房（NULL 房）里不能出现 15 前缀期号，反之亦然
+    const cross = (await query(
+      `SELECT count(*) n FROM rounds
+        WHERE game=$1 AND ((room IS NULL AND round_no LIKE $2) OR (room='15s' AND round_no NOT LIKE $2))`,
+      [g.game, `${fastPrefix(g)}%`])).rows[0].n;
+    ok(Number(cross) === 0, `  ↳ ${g.game} 前缀零串号（两房期号互不越界）`, `串号 ${cross} 条`);
+  }
+
+  // —— WS 房路由：?room=15s 命中快房 / 非法房 1008 拒 / 无参回标准房 ——
+  const probe = (qs) => new Promise((resolve) => {
+    const ws = new WebSocket(`ws://localhost:4000/ws/rounds?token=${encodeURIComponent(token)}${qs}`);
+    const t = setTimeout(() => { try { ws.close(); } catch { /* 已关 */ } resolve({ ok: false, why: '超时无快照' }); }, 12000);
+    ws.on('message', (raw) => {
+      let m; try { m = JSON.parse(raw.toString()); } catch { return; }
+      if (m.type === 'snapshot') { clearTimeout(t); try { ws.close(); } catch { /* 已关 */ } resolve({ ok: true, roundNo: m.roundNo }); }
+    });
+    ws.on('close', (code) => { clearTimeout(t); resolve({ ok: false, closed: code, why: `closed ${code}` }); });
+    ws.on('error', () => { /* 被拒时 close 会跟着来，交给 on('close') 处理 */ });
+  });
+  for (const g of GAMES) {
+    const fast = await probe(`&game=${g.game}&room=15s`);
+    ok(fast.ok && String(fast.roundNo).startsWith(fastPrefix(g)),
+      `${g.game} WS ?room=15s → 快房`, fast.roundNo ?? fast.why);
+    const std = await probe(`&game=${g.game}`);
+    ok(std.ok && String(std.roundNo).startsWith(`${g.prefix}-`),
+      `  ↳ ${g.game} WS 无 room 参 → 标准房（旧客户端零碰）`, std.roundNo ?? std.why);
+    const bad = await probe(`&game=${g.game}&room=bogus`);
+    ok(!bad.ok && bad.closed === 1008,
+      `  ↳ ${g.game} WS ?room=bogus → 1008 拒（不静默兜底）`, bad.why);
+  }
+
+  // —— history 分流：无参只出标准房、?room=15s 只出快房、两流零交集 ——
+  for (const g of GAMES) {
+    const hStd = await get(`/round/history/${g.game}?limit=50`);
+    const hFast = await get(`/round/history/${g.game}?room=15s&limit=50`);
+    ok(hStd.status === 200 && hFast.status === 200,
+      `${g.game} 两路 history 均 200`, `${hStd.status}/${hFast.status}`);
+    const itemsStd = hStd.json?.items ?? [];
+    const itemsFast = hFast.json?.items ?? [];
+    const idsStd = new Set(itemsStd.map((x) => x.id));
+    const inter = itemsFast.filter((x) => idsStd.has(x.id));
+    ok(inter.length === 0, `  ↳ ${g.game} 两流零交集`, `交集 ${inter.length} 条`);
+    const dirty = itemsStd.filter((x) => String(x.roundNo).startsWith(fastPrefix(g)));
+    ok(dirty.length === 0, `  ↳ ${g.game} 无参流无 ${fastPrefix(g)} 期号`, `混入 ${dirty.length} 条`);
+    const stray = itemsFast.filter((x) => !String(x.roundNo).startsWith(fastPrefix(g)));
+    ok(stray.length === 0 && itemsFast.length > 0,
+      `  ↳ ${g.game} ?room=15s 流全为快房期且非空`, `${itemsFast.length} 条，杂 ${stray.length} 条`);
+  }
 }
 
 console.log(`\n${fails === 0 ? '✅ _speedroom_smoke 全过' : `❌ ${fails} 条失败`}`);

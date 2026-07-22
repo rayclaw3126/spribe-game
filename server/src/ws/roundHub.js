@@ -134,23 +134,36 @@ const ROOM_ENGINES = {
 //     getRoomState('speedgrid') 等既有调用一律照旧命中，部署后玩家无感。
 //   · 附加房 roomKey = `${gameName}:${room}`（如 'speedgrid:15s'）。
 //
-// room 字段 = 落 rounds.room 的值。标准房也【显式】落值（'30s'）而非 NULL —— 让试点两房在库里
-//   都有明确房标识；其余 8 款 room:null → 落 NULL（= 该款标准房，读侧 COALESCE 归一）。
+// 当前房况：5 款各有 15s 快房（speedgrid / numberup / hattrick / goldenboot / halftime），
+//   其余 4 款（derbyday / dominoduel / wuxing / lineup）只有标准房。共 14 房。
+//
+// room 字段 = 落 rounds.room 的值。⚠ 标准房有两种落法，读侧靠 COALESCE 归一，别混：
+//   · speedgrid 标准房【显式】落 '30s'（试点时定的，让两房在库里都有明确房标识）；
+//   · 其余 8 款标准房 room:null → 落 NULL（= 该款标准房）。铺量的 4 款也走这条，不要改成 '30s'——
+//     改了会和房化前的老局（room IS NULL）分家，history 混流。
 //
 // prefix = 期号前缀，【每房独立】。recoverSeq 靠 `round_no LIKE '<prefix>-日期-%'` 发号，
 //   前缀不同即天然分房，不依赖 room 列（D 段实证）。⚠ 前缀不能有包含关系陷阱：
-//   'SG15-…' 不匹配 'SG-2026…'（第二段被日期占死），故 SG / SG15 安全共存。
+//   'SG15-…' 不匹配 'SG-2026…'（第二段被日期占死），故 SG / SG15 安全共存；
+//   NU/NU15、HT/HT15、GB/GB15、HF/HF15 同理，都靠这条日期段隔断而共存。
 //
-// timings = 覆盖 DEFAULT_TIMINGS 的字段。⚠ idleMs 两房都保 5000：它是【动画长度约束】
-//   （≥ 前端 DRAW_ANIM_MS，否则下一期 betting 会切断开奖动画），砍它会砍出画面 bug；
-//   15s 房只砍 betting 段。
+// timings = 覆盖 DEFAULT_TIMINGS 的字段。⚠ 所有快房都【只砍 bettingMs】，idleMs 一律不碰：
+//   它是【动画长度约束】（≥ 前端 DRAW_ANIM_MS，否则下一期 betting 会切断开奖动画），砍它会砍出
+//   画面 bug。故各快房 idle 继承本款 ROOM_TIMINGS，逐款不同（speedgrid 5000 / numberup 8000 /
+//   hattrick 8000 / goldenboot 9000 / halftime 11000），这是预期而非漏配。
 const ROOM_CONFIGS = [
   // —— speedgrid 试点：两房 ——
   { key: 'speedgrid', gameName: 'speedgrid', room: '30s', prefix: 'SG', timings: {} },                        // 标准房（key 裸 gameName，向后兼容）
   { key: 'speedgrid:15s', gameName: 'speedgrid', room: '15s', prefix: 'SG15', timings: { bettingMs: 15000 } }, // 快房：只砍 betting，idle 仍 5000
-  // —— 其余 8 款：各一标准房，room 落 NULL，prefix/timings 沿用 ROOM_ENGINES/ROOM_TIMINGS ——
+  // —— 其余 8 款的标准房：room 落 NULL，prefix/timings 沿用 ROOM_ENGINES/ROOM_TIMINGS ——
+  //    （其中 4 款在下面另有 15s 快房；这几行是它们的标准房，不要动）
   ...['numberup', 'derbyday', 'dominoduel', 'hattrick', 'goldenboot', 'halftime', 'wuxing', 'lineup']
     .map((g) => ({ key: g, gameName: g, room: null, prefix: null, timings: {} })),
+  // —— #42 单1 铺量：再开 4 个 15s 快房（idle 继承各款 ROOM_TIMINGS，见上方注释）——
+  { key: 'numberup:15s', gameName: 'numberup', room: '15s', prefix: 'NU15', timings: { bettingMs: 15000 } },
+  { key: 'hattrick:15s', gameName: 'hattrick', room: '15s', prefix: 'HT15', timings: { bettingMs: 15000 } },
+  { key: 'goldenboot:15s', gameName: 'goldenboot', room: '15s', prefix: 'GB15', timings: { bettingMs: 15000 } },
+  { key: 'halftime:15s', gameName: 'halftime', room: '15s', prefix: 'HF15', timings: { bettingMs: 15000 } },
 ];
 
 // 某款的所有房 key（下注相位闸按 roundId 在该款所有房里定位当期房用）
