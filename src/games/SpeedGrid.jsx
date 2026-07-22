@@ -34,6 +34,7 @@ import { TEAMS, teamOf } from './markets-ui/speedgridTeams'    // #41 单15：4 
 
 // —— 引擎常量块已剪切到 ./markets/speedgrid（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { RED, MARKETS, hitsOf, round2, drawCar, ODDS } from './markets/speedgrid'
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { RED, drawCar, ODDS, MARKETS, hitsOf }
 
 // 开奖动画总时长（收到 drawn → 冲线舞台演完 → 结算显示 + 回写余额）；须 < 服务器 idle(5s)
@@ -41,7 +42,12 @@ const DRAW_ANIM_MS = 4600
 const G = GAME_BY_ID['SpeedGrid']
 
 // 玩法说明文案已切至 ./markets-ui/speedgridRules（RULES import 回用，原页/多桌共享）。
-const ROAD_CAP = 120
+// #47 定案（全端规则）：路珠【列对齐滑动窗口】，右端恒留 2 空列。
+// 可用容量 = (30−2)×6 = 168；显示长度 L ≡ N (mod 6) 且 L ≤ 168，取最大 → 163–168 浮动。
+const ROAD_CAP = 168
+
+// #47 桌面路珠网格（模块级：进组件内会每渲染重建，带进 effect deps 会让首灌反复跑）
+const DESK_ROAD = { cols: 30, rows: 6 }
 const SEED_CHAMP = 17                   // 种子上局冠军（真开奖逐期顶掉）
 
 // 4 队涂装(TEAMS/teamOf) 已切至 ./markets-ui/speedgridTeams（开奖区/盘口区同源）。
@@ -63,7 +69,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   // 单S5：≥1280 有右栏、中栏变窄 → 开奖区/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐；
   // 车队四键竖排(forceStack)由 SpeedGridMarkets 内建（接 hasRail prop）。门控 ≥1280，<1280 逐位不变。
   const hasRail = useMediaQuery('(min-width: 1280px)')
-  const RAIL_MAXW = 670
+  // #47 三批·对表硬指标：670→800。四区 maxWidth 全在 hasRail 分支内，手机(390)永不进 → 天然零感。
+  const RAIL_MAXW = 800
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   // ---- #42 速度房骨架（单5 抽件）：双订阅 / 选中房 / per-room 注单 / A0 / D / tab 条 ----
@@ -95,12 +102,16 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   // 未选中房在 drawResult 一到就追加（没有动画可等）。
   const [roadByRoom, setRoadByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_ROAD])))
   const road = roadByRoom[selectedRoomKey] ?? SEED_ROAD
+  // #47 动效：仅 WS 真新珠时记新珠索引，【按房存】（单值会被后台快房覆盖）。
+  const [freshByRoom, setFreshByRoom] = useState({})
   const [roadTab, setRoadTab] = useState('BS')   // 珠盘路视角（手机/桌面共用一个 state）
   const [result, setResult] = useState(null)           // { champ, hits:Set, winTotal, perKeyOutcome }
   const [toasts, setToasts] = useState([])
 
   const picksRef = useRef(picks)
   const betRef = useRef(bet)
+  // #47 新增：珠盘路整局记账去重（按期号），防「正好在开奖动画中进页」与播种重复上珠。
+  const roadRecordedRef = useRef(null)
   const pendingRef = useRef(null)          // 只读表演：当前动画冠军车号（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -137,7 +148,15 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     }
     setLastChamp(champ)
     // #42：追进【选中房】自己的路（动画演完才追，保悬念）。存整值 champ → 多视角派生（判定走引擎）
-    setRoadByRoom(m => ({ ...m, [selectedRoomKey]: [...(m[selectedRoomKey] || SEED_ROAD), champ].slice(-ROAD_CAP) }))
+    // #47：按期号去重 + 列对齐窗口 + 新珠弹入
+    if (rnd != null && roadRecordedRef.current !== rnd) {
+      roadRecordedRef.current = rnd
+      setRoadByRoom(m => {
+        const next = roadWindow([...(m[selectedRoomKey] || SEED_ROAD), champ], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))
+        return { ...m, [selectedRoomKey]: next }
+      })
+    }
     setResult({ champ, hits, winTotal, perKeyOutcome })
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
@@ -202,10 +221,55 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       if (!rm.drawResult || !rm.roundNo || bgRoadRoundRef.current[r.key] === rm.roundNo) continue
       bgRoadRoundRef.current[r.key] = rm.roundNo
       const champ = rm.drawResult.n
-      setRoadByRoom(m => ({ ...m, [r.key]: [...(m[r.key] || SEED_ROAD), champ].slice(-ROAD_CAP) }))
+      setRoadByRoom(m => {
+        const next = roadWindow([...(m[r.key] || SEED_ROAD), champ], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [r.key]: next.length - 1 }))
+        return { ...m, [r.key]: next }
+      })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
+
+  // F. #47 三批 路珠真历史播种（双流版：本款 rooms 两枚，有 15s 快房）。
+  //   ⚠ 生死线：本款 gameCard 桌手共用、roadByRoom 也是共享 state —— 播种会把手机路珠从
+  //     「~40 颗种子珠」灌成满格真历史，珠数变了即违反「手机逐字节同基线」。故只在 hasRail 档播种。
+  //   · 珠子存整值 champ，派生直取 drawResult.n，与 finishRound / E 段同口径。
+  //   · 首灌按最新期号序号定相位；不是真新珠故不弹入。失败静默保留种子珠；只读，钱层零碰。
+  const apiRef = useRef(api)
+  useEffect(() => { apiRef.current = api })
+  useEffect(() => {
+    if (!hasRail) return undefined
+    let cancelled = false
+    const PAGE = 50
+    const SEED_TARGET = roadSeedTarget(DESK_ROAD)
+    const PAGES = Math.ceil(SEED_TARGET / PAGE)
+    const seedRoom = async (r) => {
+      const qs = r.key === '15s' ? '&room=15s' : ''
+      const acc = []
+      let cursor = null
+      for (let pg = 0; pg < PAGES && acc.length < SEED_TARGET; pg++) {
+        const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+        const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${qs}${cs}`)
+        const items = d?.items || []
+        if (!items.length) break
+        acc.push(...items)
+        cursor = d?.nextCursor
+        if (!cursor) break
+      }
+      if (cancelled || !acc.length) return
+      const champs = acc.slice(0, SEED_TARGET).reverse()
+        .map((it) => (it?.drawResult?.n != null ? it.drawResult.n : null))
+        .filter((n) => n != null)
+      if (!champs.length) return
+      setRoadByRoom((m) => ({ ...m, [r.key]: roadWindowAt(champs, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
+      if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
+      else bgRoadRoundRef.current[r.key] = acc[0]?.roundNo
+    }
+    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoomKey, hasRail])
 
   const betting = room.phase === 'betting'
   const drawing = uiPhase === 'drawing'
@@ -326,13 +390,16 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   // ---- ① 开奖区：冠军大牌 + 24 车号小网格（4 队涂装分组）----
   const champTeam = teamOf(shownChamp)
   const zoneTitle = drawing ? '冲线中…' : settled ? '本局冠军' : '上局冠军'
-  const mini = isMobile ? 22 : isDesk ? 24 : 28
+  // #47 放大 ×1.2：桌面车号 24→29。⚠ drawZone 在【桌手共用的 gameCard】里 → hasRail 门控。
+  const mini = isMobile ? 22 : hasRail ? 29 : isDesk ? 24 : 28
   // drawing+settled 挂冲线舞台（定格帧+彩带跨相位展示，照 Derby D4 先例；
   // 下一期 betting 换静态上局块时卸载归零）；betting 走静态块
   const drawZone = (drawing || settled) && cur ? (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '8px 12px 0' : '6px 18px 0',
+      // #47 三批：补 hasRail 档 —— 外层包裹层已 800 宽，本卡侧边距不归零就内缩 18px
+      //   （实测 L383/R1147/W764，比盘口窄 36px）。手机走 isMobile 分支，逐字节不变。
+      margin: isMobile ? '8px 12px 0' : hasRail ? '6px 0 0' : '6px 18px 0',
       borderRadius: 12, padding: isMobile ? '6px 8px' : '6px 12px',
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       boxSizing: 'border-box', overflow: 'hidden',
@@ -344,7 +411,9 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   ) : (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '8px 12px 0' : '6px 18px 0',
+      // #47 三批：补 hasRail 档 —— 外层包裹层已 800 宽，本卡侧边距不归零就内缩 18px
+      //   （实测 L383/R1147/W764，比盘口窄 36px）。手机走 isMobile 分支，逐字节不变。
+      margin: isMobile ? '8px 12px 0' : hasRail ? '6px 0 0' : '6px 18px 0',
       borderRadius: 12, padding: isMobile ? '8px 8px 6px' : isDesk ? '6px 12px 6px' : '8px 12px 8px',
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -423,7 +492,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处。hasRail 下发→车队四键竖排防裁 */}
-        <SpeedGridMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
+        {/* #47 ⚠ 桌手共用 → big/stacked 只在 hasRail 档给 */}
+        <SpeedGridMarkets big={hasRail} stacked={hasRail} onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
           selected={picks} hits={result?.hits} isMobile={isMobile} isDesk={isDesk} hasRail={hasRail} />
       </div>
 
@@ -431,7 +501,11 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       {isDesk && <div style={{ flex: '1 0 auto' }} />}
 
       {/* ③ 珠盘路（切件）：history=road 整值 → 组件内 roadTab 派生 大小/单双/红黑（判定走引擎） */}
+      {/* #47 ⚠ gameCard 桌手共用 → 路珠三参必须 hasRail 门控，手机不传走件内默认 20×6/珠18 */}
       <SpeedGridRoad history={road} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+        cols={hasRail ? DESK_ROAD.cols : undefined} rows={hasRail ? DESK_ROAD.rows : undefined}
+        bead={hasRail ? 24 : undefined}
+        freshIndex={hasRail ? (freshByRoom[selectedRoomKey] ?? -1) : -1}
         style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
           ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
 
@@ -445,8 +519,9 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)',
+          /* #47 ⚠ 桌手共用 → 行高与钮列宽必须 hasRail 门控，手机保持 28px/92px */
+          gridTemplateColumns: `minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) ${hasRail ? 110 : 92}px`,
+          gridTemplateRows: `repeat(2, ${hasRail ? 34 : 28}px)`,
           gap: 6,
           maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
@@ -500,6 +575,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
               onClick={confirmBets}
               disabled={!confirmOk}
               stretch
+              size={hasRail ? 1.2 : 1}   /* #47 ⚠ 桌手共用 → 只在 hasRail 档放大 */
             />
           </div>
         </div>

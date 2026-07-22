@@ -29,6 +29,7 @@ import trafficLightImg from '../assets/goldenboot/traffic_light.png'
 
 // —— 引擎常量块已剪切到 ./markets/goldenboot（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { drawRace, deriveRace, ODDS, hitsOf, round2, MARKETS, SUM_N } from './markets/goldenboot'
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { drawRace, deriveRace, ODDS, MARKETS, hitsOf }
 
 // ---------- 冲刺舞台时间轴（rAF 内使用，毫秒）：----------
@@ -37,7 +38,16 @@ export { drawRace, deriveRace, ODDS, MARKETS, hitsOf }
 const DRAW_ANIM_MS = 8000
 const G = GAME_BY_ID['GoldenBoot']
 
-const ROAD_CAP = 120
+// #47 定案（全端规则）：路珠【列对齐滑动窗口】，右端恒留 2 空列。
+// 可用容量 = (30−2)×6 = 168；显示长度 L ≡ N (mod 6) 且 L ≤ 168，取最大 → 163–168 浮动。
+const ROAD_CAP = 168
+
+// #47 桌面路珠网格（模块级：进组件内会每渲染重建，带进 effect deps 会让首灌反复跑）
+const DESK_ROAD = { cols: 30, rows: 6 }
+
+// ⚠ 本款【无 mobileCard，整张 gameCard 桌手共用】—— 桌面容量改动绝不能漏到手机。
+//   手机路珠走件内默认 20×6，容量由 cols×rows 决定，不吃本常量；此处仍留独立常量作显式边界。
+const MOBILE_ROAD_CAP = 120
 
 // 种子上期 + 种子历史（真开奖逐期顶掉）
 const SEED_LAST = deriveRace([3, 7, 1, 9, 2, 10, 5, 8, 4, 6])
@@ -58,7 +68,8 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // 单S5：≥1280 有右栏、中栏变窄 → 舞台/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
   const hasRail = useMediaQuery('(min-width: 1280px)')
-  const RAIL_MAXW = 660
+  // #47 三批·对表硬指标：660→800。四区的 maxWidth 全在 hasRail 分支内，手机(390)永不进 → 天然零感。
+  const RAIL_MAXW = 800
   // desk mode narrows the card by the 340px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
@@ -78,6 +89,8 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   const [historyOpen, setHistoryOpen] = useState(false)   // 开奖历史抽屉
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
+  // #47 动效：仅 WS 真新珠时记新珠索引，【按房存】（单值会被后台快房覆盖）。
+  const [freshByRoom, setFreshByRoom] = useState({})
   const [roadTab, setRoadTab] = useState('WINNER')
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
 
@@ -97,6 +110,9 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
 
   const picksRef = useRef(picks)
   const betRef = useRef(bet)
+  // #47 新增：珠盘路整局记账去重（按期号）。接了历史播种后必须显式去重
+  //   （玩家正好在开奖动画中进页时 history 已含该期，动画结束会再追一次 = 重复上珠）。
+  const roadRecordedRef = useRef(null)
   const pendingRef = useRef(null)          // 只读表演：当前动画名次（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -133,7 +149,15 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
     }
     // #42：两份累积写进【选中房】自己的槽（动画演完才写，保悬念）
     setLastRaceByRoom(m => ({ ...m, [selectedRoomKey]: r }))
-    setHistoryByRoom(m => ({ ...m, [selectedRoomKey]: [...(m[selectedRoomKey] || SEED_HISTORY), { winner: r.winner, sum: r.sprintSum }].slice(-ROAD_CAP) }))
+    // #47：按期号去重（防与历史播种重复上珠）+ 列对齐窗口 + 新珠弹入
+    if (rnd != null && roadRecordedRef.current !== rnd) {
+      roadRecordedRef.current = rnd
+      setHistoryByRoom(m => {
+        const next = roadWindow([...(m[selectedRoomKey] || SEED_HISTORY), { winner: r.winner, sum: r.sprintSum }], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))
+        return { ...m, [selectedRoomKey]: next }
+      })
+    }
     setResult({ hits, winTotal })
     // 假注单本期落账（展示用，结果已定后的装饰随机）
     setFeedBets(list => list.map(b => Math.random() < 0.45
@@ -200,10 +224,58 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       bgDrawRoundRef.current[r.key] = rm.roundNo
       const race = deriveRace(rm.drawResult.ranking)
       setLastRaceByRoom(m => ({ ...m, [r.key]: race }))
-      setHistoryByRoom(m => ({ ...m, [r.key]: [...(m[r.key] || SEED_HISTORY), { winner: race.winner, sum: race.sprintSum }].slice(-ROAD_CAP) }))
+      setHistoryByRoom(m => {
+        const next = roadWindow([...(m[r.key] || SEED_HISTORY), { winner: race.winner, sum: race.sprintSum }], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [r.key]: next.length - 1 }))
+        return { ...m, [r.key]: next }
+      })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
+
+  // F. #47 三批 路珠真历史播种（双流版：本款 registry rooms 两枚，有 15s 快房）。
+  //   · 两房各拉各的（?room=15s 现成分流参）；后端 limit 夹在 50 → 走现成 cursor 分页。
+  //   · 珠子存 {winner, sum}，派生走 deriveRace(ranking)，与 finishRound / E 段同口径。
+  //   · 首灌按最新期号序号定相位；不是真新珠故不弹入。失败静默保留种子珠；只读，钱层零碰。
+  const apiRef = useRef(api)
+  useEffect(() => { apiRef.current = api })
+  useEffect(() => {
+    // #47 ⚠ 生死线：本款 gameCard 桌手共用，historyByRoom 也是共享 state —— 播种会把手机路珠
+    //   从「~30 颗种子珠」灌成「120 颗真历史」（实测基线 有珠30 → 现版 有珠120）。几何量虽全同，
+    //   但珠数变了即违反「手机逐字节同基线」。故播种只在 hasRail（≥1280）档进行。
+    if (!hasRail) return undefined
+    let cancelled = false
+    const PAGE = 50
+    const SEED_TARGET = roadSeedTarget(DESK_ROAD)
+    const PAGES = Math.ceil(SEED_TARGET / PAGE)
+    const seedRoom = async (r) => {
+      const qs = r.key === '15s' ? '&room=15s' : ''
+      const acc = []
+      let cursor = null
+      for (let pg = 0; pg < PAGES && acc.length < SEED_TARGET; pg++) {
+        const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+        const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${qs}${cs}`)
+        const items = d?.items || []
+        if (!items.length) break
+        acc.push(...items)
+        cursor = d?.nextCursor
+        if (!cursor) break
+      }
+      if (cancelled || !acc.length) return
+      const rows = acc.slice(0, SEED_TARGET).reverse()
+        .map((it) => (Array.isArray(it?.drawResult?.ranking)
+          ? (() => { const d = deriveRace(it.drawResult.ranking); return { winner: d.winner, sum: d.sprintSum } })() : null))
+        .filter(Boolean)
+      if (!rows.length) return
+      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindowAt(rows, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
+      if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
+      else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
+    }
+    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoomKey, hasRail])
 
   const betting = room.phase === 'betting'
   const racing = uiPhase === 'racing'
@@ -320,12 +392,19 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   // ---- 珠盘路（切件；真历史滚动，容量 6×20）----
   const beadRoad = (
     <GoldenBootRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+      /* #47 ⚠ 本款 gameCard 桌手共用 → 路珠三个尺寸参数必须 hasRail 门控；
+         手机不传（undefined）走件内默认 20×6/珠18，与基线逐字节相同。 */
+      cols={hasRail ? DESK_ROAD.cols : undefined} rows={hasRail ? DESK_ROAD.rows : undefined}
+      bead={hasRail ? 24 : undefined}
+      freshIndex={hasRail ? (freshByRoom[selectedRoomKey] ?? -1) : -1}
       style={{ margin: isMobile ? '0 12px 10px' : hasRail ? '0 auto 12px' : '0 18px 12px',
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
   )
 
   // ---- 开奖区（常驻顶部）：RACING/SETTLED 冲刺舞台 / BETTING 上期名次静态待命 ----
-  const stageH = isMobile ? 150 : 178
+  // #47 放大 ×1.2：桌面开奖台 178→214。⚠ 本款 stageZone 在【桌手共用的 gameCard】里，
+  //   必须 hasRail 门控（不用 isDesk：1024–1280 无右栏档也不该跟着放）。
+  const stageH = isMobile ? 150 : hasRail ? 214 : 178
   const stageZone = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
@@ -398,7 +477,8 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
-        <GoldenBootMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
+        {/* #47 ⚠ 桌手共用 → big 只在 hasRail 档给，手机与窄桌面不传 */}
+        <GoldenBootMarkets big={hasRail} onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
           selected={picks} hits={result?.hits ?? preHits} isMobile={isMobile} />
 
       </div>
@@ -414,8 +494,9 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
         borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
       }}>
         <div style={{
-          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
+          /* #47 ⚠ 桌手共用 → 行高与钮列宽必须 hasRail 门控，手机保持 28px/92px 逐字节不变 */
+          display: 'grid', gridTemplateColumns: `minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) ${hasRail ? 110 : 92}px`,
+          gridTemplateRows: `repeat(2, ${hasRail ? 34 : 28}px)`, gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
@@ -454,6 +535,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
               onClick={confirmBets}
               disabled={!confirmOk}
               stretch
+              size={hasRail ? 1.2 : 1}   /* #47 ⚠ 桌手共用 → 只在 hasRail 档放大 */
             />
           </div>
         </div>

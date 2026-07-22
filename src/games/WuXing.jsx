@@ -274,6 +274,10 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   useEffect(() => { apiRef.current = api })
   useEffect(() => {
     let cancelled = false
+    // #47 三批回补 ⚠ 手机零碰：路珠 state 是【桌手共享】的，播种会把手机路珠从「种子珠」
+    //   灌成满格真历史 —— 几何量虽不变，但珠数变了即违反「手机逐字节同基线」（PK10 实测
+    //   有珠 30 → 120 才发现）。故播种只在 hasRail（≥1280）档进行。
+    if (!hasRail) return undefined
     // ⚠ 后端把 limit 夹死在 50（round.js 的 Math.min(50, ...)），单请求拿不满 180 格，
     //   故走该端点现成的 cursor 分页续拉，最多 PAGES 页（180/50 → 4 页封顶，防翻页失控）。
     const PAGE = 50
@@ -310,7 +314,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRoomKey])
+  }, [selectedRoomKey, hasRail])
 
   const betting = room.phase === 'betting'
   const drawing = uiPhase === 'drawing'

@@ -32,7 +32,7 @@ export function CarImgBead({ num, size = 30 }) {
   )
 }
 
-export default function GoldenBootMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, chipMode = false, openMode = 'all' }) {
+export default function GoldenBootMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, chipMode = false, openMode = 'all', big = false }) {
   const betting = !disabled
   // 三组折叠/展开（单14.6 item5）：默认全开=原页习惯；openMode='first' 时仅开第一组（多桌手风琴记忆，每卡独立）
   const [open, setOpen] = useState(() => openMode === 'first' ? [true, false, false] : [true, true, true])
@@ -59,9 +59,9 @@ export default function GoldenBootMarkets({ onPick, stakes, disabled = false, fl
       position: 'relative',
     }
   }
-  const cellName = { color: GOLDENBOOT.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: GOLDENBOOT.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: GOLDENBOOT.gold, fontSize: isMobile ? 10.5 : 12.5, fontWeight: 900 }
+  const cellName = { color: GOLDENBOOT.text, fontSize: isMobile ? 10 : big ? 15 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: GOLDENBOOT.dim, fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: GOLDENBOOT.gold, fontSize: isMobile ? 10.5 : big ? 14.5 : 12.5, fontWeight: 900 }
   // 角标：原页 = 文字 $X 绿标（分毫不变）；多桌 chipMode = 筹码码叠角（不改键内布局）。
   const stakeChip = (key) => {
     const amt = stakeOf(key)
@@ -111,16 +111,36 @@ export default function GoldenBootMarkets({ onPick, stakes, disabled = false, fl
       <div style={groupBox}>
         {groupHead(1)}
         {open[1] && (
+        /* #47 三批补：放大档下 17 键（3–19）拆【两行均衡】—— 原 flexWrap 在 800 宽下折成 16+1
+           的孤行。第 1 行 3–10（8 键）、第 2 行 11–19（9 键），各行 repeat(n,1fr) 均分吃满 800。
+           ⚠ 手机分支保持原 flexWrap + flexBasis:14%，逐字节不动（本款 gameCard 桌手共用）。 */
+        big ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {[Object.keys(SUM_N).slice(0, 8), Object.keys(SUM_N).slice(8)].map((row, ri) => (
+              <div key={ri} style={{ display: 'grid', gridTemplateColumns: `repeat(${row.length}, 1fr)`, gap: 5 }}>
+                {row.map(s => (
+                  <button key={s} type="button" className={`gbCell${wonCls(`sum-${s}`)}`} disabled={!betting} onClick={() => onPick(`sum-${s}`)}
+                    style={{ ...cellBtn(`sum-${s}`, { compact: true }), padding: '8px 4px', minWidth: 0 }}>
+                    <span style={{ ...cellName, fontSize: 15 }}>{s}</span>
+                    <span style={{ ...cellOdds, fontSize: 14.5 }}>{ODDS.sum[s].toFixed(2)}</span>
+                    {stakeChip(`sum-${s}`)}{flyDot(`sum-${s}`)}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : (
         <div style={{ display: 'flex', gap: isMobile ? 4 : 5, flexWrap: 'wrap' }}>
           {Object.keys(SUM_N).map(s => (
             <button key={s} type="button" className={`gbCell${wonCls(`sum-${s}`)}`} disabled={!betting} onClick={() => onPick(`sum-${s}`)}
               style={{ ...cellBtn(`sum-${s}`, { compact: true }), flexBasis: isMobile ? '14%' : 0, minWidth: isMobile ? 0 : 42 }}>
-              <span style={{ ...cellName, fontSize: isMobile ? 11 : 12.5 }}>{s}</span>
+              <span style={{ ...cellName, fontSize: isMobile ? 11 : big ? 15 : 12.5 }}>{s}</span>
               <span style={{ ...cellOdds, fontSize: isMobile ? 9 : 10.5 }}>{ODDS.sum[s].toFixed(2)}</span>
               {stakeChip(`sum-${s}`)}{flyDot(`sum-${s}`)}
             </button>
           ))}
         </div>
+        )
         )}
       </div>
 

@@ -302,6 +302,10 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   useEffect(() => { apiRef.current = api })
   useEffect(() => {
     let cancelled = false
+    // #47 三批回补 ⚠ 手机零碰：路珠 state 是【桌手共享】的，播种会把手机路珠从「种子珠」
+    //   灌成满格真历史 —— 几何量虽不变，但珠数变了即违反「手机逐字节同基线」（PK10 实测
+    //   有珠 30 → 120 才发现）。故播种只在 hasRail（≥1280）档进行。
+    if (!hasRail) return undefined
     const PAGE = 50
     const SEED_TARGET = roadSeedTarget(DESK_ROAD)
     const PAGES = Math.ceil(SEED_TARGET / PAGE)
@@ -328,7 +332,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       roadRecordedRef.current = acc[0]?.roundNo
     })().catch(() => { /* 静默：保留种子珠 */ })
     return () => { cancelled = true }
-  }, [])
+  }, [hasRail])
 
   const toggleSel = key => {
     if (room.phase !== 'betting') return   // 仅 betting 相位可选，之后全盘锁死

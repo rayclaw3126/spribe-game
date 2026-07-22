@@ -15,9 +15,13 @@ const EMPTY = new Set()
 // 三组组名（单15 item5）：原页 secHead 三条真实中文标题，逐字节沿用（禁硬造英文）。
 const GROUP_TITLES = ['主盘 · 冠军车号', '发车三段 · 第1/2/3个8 ｜ 车队涂装', '车号直选 · 4×6']
 
-export default function SpeedGridMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, isDesk: isDeskProp, chipMode = false, openMode = 'all', hasRail = false }) {
+export default function SpeedGridMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, isDesk: isDeskProp, chipMode = false, openMode = 'all', hasRail = false, big = false, stacked = false }) {
   const isDeskMedia = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const isDesk = isDeskProp == null ? isDeskMedia : isDeskProp
+  // #47 三批：stacked —— 桌面弃 mainBoard/rowBoard 左右并排、改纵排（照 !isDesk 分支的 column）。
+  //   默认 false 即现状；仅极速方格原页放大档传 true。多桌 TableCard 走 isDesk={false} 不受影响。
+  // ⚠ 必须在 isDesk 之后（isDesk 是 const，提前引用会 TDZ 崩组件——首批踩过）。
+  const twoCol = isDesk && !stacked
   const betting = !disabled
   // 三组折叠/展开（单15 item5）：默认全开=原页习惯；openMode='first' 时仅开第一组（多桌手风琴记忆，每卡独立）
   const [open, setOpen] = useState(() => openMode === 'first' ? [true, false, false] : [true, true, true])
@@ -45,9 +49,9 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
       boxSizing: 'border-box', position: 'relative',
     }
   }
-  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
+  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : big ? 15 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : big ? 14.5 : 12, fontWeight: 900 }
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
@@ -168,7 +172,7 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
             <button key={n} type="button" className={`sgCell${wonCls(`car-${n}`)}`} data-key={`car-${n}`} disabled={!betting} onClick={() => onPick(`car-${n}`)}
               style={{ ...cellBase(`car-${n}`, t.c), padding: isMobile ? '4px 0' : '5px 0' }}>
               <span style={{ ...cellName, fontSize: isMobile ? 12 : 14, fontFamily: "'Space Grotesk', sans-serif" }}>{n}</span>
-              <span style={{ ...cellOdds, fontSize: isMobile ? 8.5 : 9.5 }}>{MARKETS[`car-${n}`].odds.toFixed(2)}</span>
+              <span style={{ ...cellOdds, fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5 }}>{MARKETS[`car-${n}`].odds.toFixed(2)}</span>
               {stakeChip(`car-${n}`)}{flyDot(`car-${n}`)}
             </button>
           )
@@ -183,9 +187,9 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
       <style>{`.sgCell:hover:not(:disabled) { filter: brightness(1.2); }
         @keyframes sgWinPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,213,79,0.0) } 45% { box-shadow: 0 0 0 3px rgba(255,213,79,0.95), 0 0 14px rgba(255,213,79,0.6) } }
         .sgWin { animation: sgWinPulse 1s ease-in-out infinite; z-index: 2; }`}</style>
-      <div style={{ display: 'flex', flexDirection: isDesk ? 'row' : 'column', gap: isDesk ? 8 : 4, alignItems: isDesk ? 'stretch' : undefined }}>
-        <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{mainBoard}</div>
-        <div style={isDesk ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{rowBoard}</div>
+      <div style={{ display: 'flex', flexDirection: twoCol ? 'row' : 'column', gap: isDesk ? 8 : 4, alignItems: twoCol ? 'stretch' : undefined }}>
+        <div style={twoCol ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{mainBoard}</div>
+        <div style={twoCol ? { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' } : {}}>{rowBoard}</div>
       </div>
       {pickBoard}
     </>
