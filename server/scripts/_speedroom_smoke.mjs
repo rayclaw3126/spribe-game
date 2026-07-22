@@ -259,6 +259,14 @@ console.log('\n════ g) 铺量 4 款 15s 快房 ════');
     const std = await probe(`&game=${g.game}`);
     ok(std.ok && String(std.roundNo).startsWith(`${g.prefix}-`),
       `  ↳ ${g.game} WS 无 room 参 → 标准房（旧客户端零碰）`, std.roundNo ?? std.why);
+    // ⚠ 回归项（这条路当初没探，1008 事故就漏在这）：前端 registry 把标准房 tab 的 key 写成
+    //   '30s'，所以真实客户端发的是 ?room=30s 而【不是】无参。而这 4 款标准房 config 是
+    //   room:null，roomNameOf 若只做字面比对就会判非法 → close(1008)，整个标准房 tab 全死。
+    //   必须显式探这条，且断言收到的是标准房前缀（XX-）而非快房前缀。
+    const std30 = await probe(`&game=${g.game}&room=30s`);
+    ok(std30.ok && String(std30.roundNo).startsWith(`${g.prefix}-`)
+       && !String(std30.roundNo).startsWith(fastPrefix(g)),
+      `  ↳ ${g.game} WS ?room=30s → 标准房（${g.prefix}- 期号，非快房）`, std30.roundNo ?? std30.why);
     const bad = await probe(`&game=${g.game}&room=bogus`);
     ok(!bad.ok && bad.closed === 1008,
       `  ↳ ${g.game} WS ?room=bogus → 1008 拒（不静默兜底）`, bad.why);

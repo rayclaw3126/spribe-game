@@ -137,10 +137,14 @@ const ROOM_ENGINES = {
 // 当前房况：5 款各有 15s 快房（speedgrid / numberup / hattrick / goldenboot / halftime），
 //   其余 4 款（derbyday / dominoduel / wuxing / lineup）只有标准房。共 14 房。
 //
-// room 字段 = 落 rounds.room 的值。⚠ 标准房有两种落法，读侧靠 COALESCE 归一，别混：
+// room 字段 = 落 rounds.room 的值。⚠ 标准房有两种落法，读侧靠 COALESCE 归一：
 //   · speedgrid 标准房【显式】落 '30s'（试点时定的，让两房在库里都有明确房标识）；
-//   · 其余 8 款标准房 room:null → 落 NULL（= 该款标准房）。铺量的 4 款也走这条，不要改成 '30s'——
-//     改了会和房化前的老局（room IS NULL）分家，history 混流。
+//   · 其余 8 款标准房 room:null → 落 NULL（= 该款标准房）。
+//   两种写法在【读侧等价】：history 的过滤是 COALESCE(room, '30s') = $5，NULL 与 '30s' 归一到
+//   同一条流，不会分家。（此处原注释写着「改成 '30s' 会和老局分家致 history 混流」——那句说过头了，
+//   已订正。真正不改的理由只是「没必要动写入语义」，不是安全问题。）
+//   ⚠ 但读侧等价 ≠ 处处等价：WS 的 roomNameOf 是【字面比对】c.room === r，NULL 标准房曾因此
+//   把 ?room=30s 判成非法房而 1008（D 段实证）。故那里另有一条 null↔DEFAULT_ROOM 的兜底，见下。
 //
 // prefix = 期号前缀，【每房独立】。recoverSeq 靠 `round_no LIKE '<prefix>-日期-%'` 发号，
 //   前缀不同即天然分房，不依赖 room 列（D 段实证）。⚠ 前缀不能有包含关系陷阱：
@@ -579,6 +583,13 @@ export function findBettingRoomByRoundId(gameName, roundId) {
 //      speedgrid，房化后那意味着 15s 房的玩家被塞进 30s 房——他看着别人的局下注，
 //      比直接断连恶劣得多。宁可拒。
 //   3) game 本身缺省/非法 → 仍兜底 speedgrid（保持旧行为，向后兼容旧连接）。
+
+// 标准房的房段名。⚠ 这是 round.js 的 DEFAULT_ROOM（同名同值）的第二份手抄 —— 那边未 export，
+//   且 round.js 已 import 本模块（getRoomState/findBettingRoomByRoundId），反向 import 会成环，
+//   故不引。约定的单一出处见 server/src/routes/round.js 的 DEFAULT_ROOM 及其上方 history 房过滤
+//   注释；两处若要改，必须一起改。
+const DEFAULT_ROOM = '30s';
+
 function roomNameOf(req) {
   let g, r;
   try {
@@ -592,8 +603,12 @@ function roomNameOf(req) {
   if (r == null || r === '') return defaultRoomKeyOf(gameName);   // 缺 room → 标准房
   const key = `${gameName}:${r}`;
   if (rooms.has(key)) return key;
-  // 显式带了 room 却拼不出房：可能是 ?room=30s（标准房的房段名）——也放行，语义等价
-  const std = ROOM_CONFIGS.find((c) => c.gameName === gameName && c.room === r);
+  // 显式带了 room 却拼不出房：可能是 ?room=30s（标准房的房段名）——也放行，语义等价。
+  // ⚠ c.room == null 那一支不可省（D 段实证的 1008 事故根因）：只有 speedgrid 标准房显式落了
+  //   '30s'，其余 8 款标准房是 room:null。前端 registry 一律把标准房 tab 的 key 写成 '30s'，
+  //   若只做 c.room === r 的字面比对，这 8 款的 ?room=30s 全会被判成非法房而 close(1008)。
+  //   null 与 DEFAULT_ROOM 在读侧本就等价（history 走 COALESCE(room,'30s')），这里对齐同一约定。
+  const std = ROOM_CONFIGS.find((c) => c.gameName === gameName && (c.room === r || (c.room == null && r === DEFAULT_ROOM)));
   if (std) return std.key;
   return null;   // 显式非法 → 拒
 }
