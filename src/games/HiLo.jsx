@@ -414,7 +414,7 @@ export default function HiLo({ serverBalance, setServerBalance, caps, playerToke
     cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.55 : 1,
   })
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // desk mode narrows the card by the 340px feed — below 1200px viewport the
 
   // flip-history minis + count/multiplier badge — desktop renders it in the
   // 34px skeleton row, mobile keeps it inside the card (never both)

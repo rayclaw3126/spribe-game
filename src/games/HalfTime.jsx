@@ -61,7 +61,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   // 舞台/盘区/珠盘/下注条同 maxWidth 居中（压缩收留白），下注条与盘口板左右沿对齐。严格门控 ≥1280，<1280 逐位不变。
   const hasRail = useMediaQuery('(min-width: 1280px)')
   const RAIL_MAXW = 680
-  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // desk mode narrows the card by the 340px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   // ---- #42 速度房骨架（单5 抽件）：双订阅 / 选中房 / per-room 注单 / A0 / D / tab 条 ----

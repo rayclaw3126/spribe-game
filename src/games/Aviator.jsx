@@ -1007,7 +1007,7 @@ export default function Aviator({ serverBalance, setServerBalance, playerToken, 
         background: COLORS.bg,
       }}>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          {/* b. bet feed — 400px, full height, edge-flush, internal scroll */}
+          {/* b. bet feed — 340px, full height, edge-flush, internal scroll */}
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={displayPlayers} myBets={myBets} online={online} fill />
           </div>

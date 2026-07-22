@@ -162,8 +162,10 @@ export default function GameSideRail({ currentGameId, playerToken, onSelect, onL
 
   return (
     <aside style={{
-      // S4b：右栏改 position:fixed 贴视口右侧，脱离游戏布局流（游戏由 App 层 marginRight:200 让位）。
-      position: 'fixed', top: 0, right: 0, width: 200, height: '100vh', overflowY: 'auto',
+      // S4b：右栏改 position:fixed 贴视口右侧，脱离游戏布局流（游戏由 App 层 marginRight 让位）。
+      // #46 单11 三栏配平：200→250（右胖）。⚠ 必须与 App.jsx 的 marginRight 同值同改，
+      //   否则右栏压住游戏或留白（本件 fixed 脱流，靠那个 margin 让位）。
+      position: 'fixed', top: 0, right: 0, width: 250, height: '100vh', overflowY: 'auto',
       zIndex: 30, boxSizing: 'border-box', padding: 10, background: COLORS.bg,
     }}>
       {/* 单S4c：大奖跑马灯 = 右栏第一件（今日大奖上方 200px 内横滚细条），融入卡风格圆角边框；空则不占位。 */}

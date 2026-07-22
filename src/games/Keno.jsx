@@ -62,7 +62,7 @@ export default function Keno({ serverBalance, setServerBalance, playerToken, onL
   const isMobile = useIsMobile()
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })   // 统一后端封装
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // desk mode narrows the card by the 340px feed — below 1200px viewport the
   const [bet, setBet] = useState(10)
   const [selected, setSelected] = useState([])
   const [drawn, setDrawn] = useState([])

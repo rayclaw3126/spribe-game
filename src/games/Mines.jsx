@@ -339,7 +339,7 @@ export default function Mines({ serverBalance, setServerBalance, caps, playerTok
   })
 
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // desk mode narrows the card by the 340px feed — below 1200px viewport the
 
   // Turf-sheen backdrop (方案C): a skewed light band sweeps the card, the
   // football line-art watermarks slowly roll + drift (near big, far small),

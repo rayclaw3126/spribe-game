@@ -213,7 +213,8 @@ export default function App() {
       // 单S4c：跑马灯已移入 GameSideRail 顶部（顶横条方案废弃：其占位依赖游戏底部留白随窗口高度浮动、真机裁下注条）。
       // 游戏区回到 S4b 形态：普通块流 + marginRight 让出 200px 给右栏（fixed），零 paddingTop、零 overflow 改动。
       <div style={{ position: 'relative', minHeight: '100vh', background: '#0e1520' }}>
-        <div style={{ marginRight: 200 }}>{gameView}</div>
+        {/* #46 单11：让位宽度必须 === GameSideRail 的 width（250）。改一处不改另一处即错位。 */}
+        <div style={{ marginRight: 250 }}>{gameView}</div>
         <GameSideRail
           currentGameId={activeGame}
           playerToken={playerToken}

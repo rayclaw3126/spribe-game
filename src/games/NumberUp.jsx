@@ -69,7 +69,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // desk mode narrows the card by the 340px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   // ---- #42 速度房骨架（单5 抽件）：双订阅 / 选中房 / per-room 注单 / A0 / D / tab 条 ----
   // 逐款不同的部分仍在本文件：路珠/近5期/上局大卡 三份 xxxByRoom、E 段追三份、A 段换期清盘、切房演出态清理（见下方 handleRoomSwitch）、舞台 key 挂点。

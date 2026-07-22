@@ -78,7 +78,10 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // 单S5：≥1280 有右栏、中栏变窄 → 开奖区/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
   const hasRail = useMediaQuery('(min-width: 1280px)')
-  const RAIL_MAXW = 670
+  // #46 单11 三栏配平试点（中大）：670→800。仅五行试点，其余 20 款 RAIL_MAXW 本单不碰。
+  // ⚠ 封顶只在 ≥1415 视口才生效：中栏内容宽 = min(视口 − 250 − 341 − 24, RAIL_MAXW)，
+  //   1280 档实得 665px（未封顶），1440 及以上才吃满 800。
+  const RAIL_MAXW = 800
   // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
   // ---- #42 速度房骨架（单6 原生接入）：双订阅 / 选中房 / per-room 注单 / A0 / D / tab 条 ----
   // 逐款不同的部分仍在本文件：上局派生局 lastRound / 珠盘路 road（存 r.sum）两份 xxxByRoom、E 段追两份、A 段换期清盘、切房演出态清理（见 A1）、舞台 key。

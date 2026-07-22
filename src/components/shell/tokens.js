@@ -420,7 +420,9 @@ export const LAYOUT = {
   breakpoint: 1024,
   siteHeaderH: 0,    // 全屏游戏视图不挂站点顶栏，游戏区不再为它扣高度
   headerH: 40,       // in-game top bar (name left, balance right)
-  feedW: 400,        // bet feed sidebar, full height, edge-flush
+  feedW: 340,        // bet feed sidebar, full height, edge-flush
+                     // #46 单11 三栏配平：400→340（左瘦）。21 款全部走本常数，改此一处即全生效
+                     // （已 grep 确认无款自带硬编码宽度逃逸）。⚠ 与右栏 250 是一套配平，别单改。
   historyH: 34,      // round-history strip row
   canvasRadius: 16,  // arena card corner radius
   bottomH: 185,      // bottom bet-bay section (min height)

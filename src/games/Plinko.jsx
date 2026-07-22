@@ -363,7 +363,7 @@ export default function Plinko({ serverBalance, setServerBalance, playerToken, o
     return (start + (row.count === 1 ? 0 : (i / (row.count - 1)) * spread)) * 100
   }
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // desk mode narrows the card by the 340px feed — below 1200px viewport the
 
   // Fit-scale the fixed-coordinate board unit (board + multiplier table) to
   // the flexible middle zone. Board internals/physics stay untouched — only

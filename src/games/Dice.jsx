@@ -321,7 +321,7 @@ export default function Dice({ serverBalance, setServerBalance, playerToken, onL
   })
   const locked = rolling || bet < 1 || (serverBalance != null && bet > serverBalance)
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // desk mode narrows the card by the 340px feed — below 1200px viewport the
 
   // roll-value pill strip — desktop renders it in the 34px skeleton row,
   // mobile keeps it inside the card (never both)

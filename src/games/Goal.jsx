@@ -305,7 +305,7 @@ export default function Goal({ serverBalance, setServerBalance, playerToken, onL
   const nextMult = round2(cum * stepMult(tier))
   const cashable = round2(bet * cum)
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // desk mode narrows the card by the 340px feed — below 1200px viewport the
 
   // Darkened arena floor — derived in place from the GOAL felt greens
   // (bgCenter #4a7a1a / bgOuter #1c3a06) so the arenaFx star field reads.

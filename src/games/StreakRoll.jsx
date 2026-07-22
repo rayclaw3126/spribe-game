@@ -349,7 +349,7 @@ export default function StreakRoll({ serverBalance, setServerBalance, playerToke
   }
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
-  // desk mode narrows the card by the 400px feed — below 1200px viewport the
+  // desk mode narrows the card by the 340px feed — below 1200px viewport the
   // centered DEMO pill would collide with the How-to-Play pill, so hide it
   const deskWide = useMediaQuery('(min-width: 1200px)')
   const won = result && result.win
