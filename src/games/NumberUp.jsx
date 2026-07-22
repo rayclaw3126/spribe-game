@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { Panel } from '../components/GameLayout'
-import { COLORS, RADIUS, LAYOUT, NUMBERUP } from '../components/shell/tokens'
+import { COLORS, RADIUS, LAYOUT, NUMBERUP, MONO } from '../components/shell/tokens'
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery'
 import BetFeed from '../components/shell/BetFeed'
 import WinToast from '../components/shell/WinToast'
@@ -71,8 +71,17 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // desk mode narrows the card by the 400px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
-  // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
-  const room = useRoundRoom(playerToken, G.backendId)
+  // ---- #42 双订阅：两房各一条 WS（未选中的房也连——tab 上要显它的实时期号/倒计时）----
+  // ⚠ Rules of Hooks：这里【显式调两次】而不是 G.rooms.map(...)。房数在编译期由 registry 定死
+  //   （静态模块常量，运行时不可能变），map 出来的 hook 数量看着可变，既触 eslint 也会让后来者
+  //   误以为能动态增减房。照 SpeedGrid 试点同款写法。
+  const ROOMS = G.rooms                                    // [{key:'30s',label},{key:'15s',label}]
+  const [selectedRoomKey, setSelectedRoomKey] = useState(ROOMS[0].key)
+  const roomA = useRoundRoom(playerToken, G.backendId, ROOMS[0].key)
+  const roomB = useRoundRoom(playerToken, G.backendId, ROOMS[1].key)
+  const roomsByKey = useMemo(() => ({ [ROOMS[0].key]: roomA, [ROOMS[1].key]: roomB }), [ROOMS, roomA, roomB])
+  // 选中房 = 舞台/盘口/注栏/公平抽屉的唯一真相来源（下方所有 room.* 读的都是它）
+  const room = roomsByKey[selectedRoomKey]
 
   const [bet, setBet] = useState(10)
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
@@ -87,16 +96,29 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
 
   // ---- 本地「表演」状态机（仅动画层；相位真相在 room）：betting | drawing | settled ----
   const [uiPhase, setUiPhase] = useState('betting')
-  const [lastNum, setLastNum] = useState(SEED_LAST)
-  const [recent, setRecent] = useState(SEED_RECENT)       // 近 5 期（新→旧）
-  const [history, setHistory] = useState(SEED_HISTORY)
+  // #42 三份「按期累积」状态全部按房存 —— 号码王比 SpeedGrid 多两份，漏一份就串流：
+  //   · lastNum  上期开奖派生对象 → 喂 stageZone 待命大卡【和顶栏 subRow 的 NumberUpPodium】
+  //   · recent   近 5 期 → 同样喂 NumberUpPodium（顶栏一眼可见，串了最扎眼）
+  //   · history  路珠 120 期 → 喂 NumberUpRoad
+  // 两房开的是完全不同的局，共用任何一份都等于把另一房的号码显到这一房头上。
+  const [lastNumByRoom, setLastNumByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_LAST])))
+  const [recentByRoom, setRecentByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_RECENT])))
+  const [historyByRoom, setHistoryByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_HISTORY])))
+  const lastNum = lastNumByRoom[selectedRoomKey] ?? SEED_LAST
+  const recent = recentByRoom[selectedRoomKey] ?? SEED_RECENT
+  const history = historyByRoom[selectedRoomKey] ?? SEED_HISTORY
   const [result, setResult] = useState(null)              // { hits:Set, winTotal }
   const [preHits, setPreHits] = useState(null)            // 开牌动画收尾的命中预亮
   const [toasts, setToasts] = useState([])
   const [hasLast, setHasLast] = useState(false)   // 是否有上局注单快照（重复钮亮灭）
 
   const picksRef = useRef(picks)
-  const betsRef = useRef(new Map())        // 本期已下注并落库的 {key: 累计注额}
+  // #42 注单暂存按房：{roomKey: Map<key, 累计注额>}。切走再切回【同一期】，已下的注还在 ——
+  // 这是刻意的：注是真金白银下进那一房的，切个 tab 就把它从 UI 抹掉，玩家会以为注没了。
+  // 只在【该房自己换期】时清（见下方 A0 effect），禁按 tab 切换一刀 clear。
+  const betsByRoomRef = useRef(Object.fromEntries(ROOMS.map((r) => [r.key, new Map()])))
+  const betsOf = (k) => betsByRoomRef.current[k] || new Map()
+  const betsRef = { get current() { return betsOf(selectedRoomKey) }, set current(m) { betsByRoomRef.current[selectedRoomKey] = m } }
   const lastBetsRef = useRef(new Map())   // 上局注单快照（重复投注用）
   const betRef = useRef(bet)
   const pendingRef = useRef(null)          // 只读表演：当前动画开出号码的派生对象（.num 等）
@@ -105,8 +127,11 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   const cardShakeRef = useRef(null)
   const shownRoundRef = useRef(null)       // 已进入 betting 的当前期号（换期 reset 判定）
   const animatedRoundRef = useRef(null)    // 已启动开奖动画的期号（每期只演一次）
-  const settledRoundRef = useRef(null)     // 已回写余额的期号（每期只回写一次）
-  const settleInfoRef = useRef(null)       // 镜像 room.settleInfo，供动画结束时读取
+  // #42：余额/toast 的「本期已处理」判定改 Set —— 两房各自出期号（NU- / NU15-，天然不撞），
+  // 选中房走 finishRound、未选中房走后台结算 effect，两条路共用这一个 Set 防重（同期只回写一次）。
+  const settledRoundsRef = useRef(new Set())
+  const settleInfoRef = useRef(null)       // 镜像【选中房】settleInfo，供动画结束时读取
+  const betsResetRoundRef = useRef({})     // #42：{roomKey: 已清过注单的期号} —— 各房自己换期才清自己的注
 
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { settleInfoRef.current = room.settleInfo }, [room.settleInfo])
@@ -126,10 +151,15 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
     const si = settleInfoRef.current
     const hadBet = si && si.roundNo === rnd
     // 余额回写（每期一次）：有注用后端 settleInfo.balanceAfter；无注不动钱。
-    if (hadBet && si.balanceAfter != null && settledRoundRef.current !== rnd) {
-      setServerBalance(Number(si.balanceAfter))
+    // ⚠ add 必须收在 hadBet 内：切房时旧房的动画定时器仍会到点跑到这里，那时 settleInfoRef
+    //   已换成新房的 → hadBet=false → 本函数没消费这期；若仍 add，就把这期号钉成「已处理」，
+    //   D 段（未选中房后台结算）便会跳过它 → 该期余额回写与 toast 双双丢失。不 add 才能让 D 接住。
+    if (hadBet) {
+      if (si.balanceAfter != null && !settledRoundsRef.current.has(rnd)) {
+        setServerBalance(Number(si.balanceAfter))
+      }
+      settledRoundsRef.current.add(rnd)
     }
-    settledRoundRef.current = rnd
     // 视觉结算仅当本期仍是当前展示期（若下一期 betting 已抢先，跳过不覆盖新期 UI）
     if (shownRoundRef.current !== rnd) return
     let hits, winTotal
@@ -142,9 +172,10 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       // 无注：仅显示，不动钱
       hits = hitsOf(r); winTotal = 0
     }
-    setLastNum(r)
-    setRecent(list => [r.num, ...list].slice(0, 5))
-    setHistory(h => [...h, r.num].slice(-ROAD_CAP))
+    // #42：三份累积全写进【选中房】自己的槽（动画演完才写，保悬念）。
+    setLastNumByRoom(m => ({ ...m, [selectedRoomKey]: r }))
+    setRecentByRoom(m => ({ ...m, [selectedRoomKey]: [r.num, ...(m[selectedRoomKey] || SEED_RECENT)].slice(0, 5) }))
+    setHistoryByRoom(m => ({ ...m, [selectedRoomKey]: [...(m[selectedRoomKey] || SEED_HISTORY), r.num].slice(-ROAD_CAP) }))
     setResult({ hits, winTotal })
     // 假注单本期落账（展示用，结果已定后的装饰随机）
     setFeedBets(list => list.map(b => Math.random() < 0.45
@@ -154,20 +185,56 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   }
 
   // ---- 相位驱动 effects（全部只读 room，本地不产相位）----
-  // A. 新一期 betting：换期 reset（快照上期注单供「重复」→ 清盘 → 回 betting）
+
+  // A0. #42 各房换期清各房注单 —— 【两房都跑】，与当前选中哪个 tab 无关。
+  // 为什么必须按房独立：未选中的房也在自转，它换期时它的注单就作废了；若只在选中房跑，
+  // 切回去会看到上一期（甚至几期前）的注单挂在新期上——比不显示更糟（假注单）。
+  useEffect(() => {
+    for (const r of ROOMS) {
+      const rm = roomsByKey[r.key]
+      if (rm.phase !== 'betting' || !rm.roundNo) continue
+      if (betsResetRoundRef.current[r.key] === rm.roundNo) continue
+      betsResetRoundRef.current[r.key] = rm.roundNo
+      const m = betsOf(r.key)
+      if (m.size) {
+        // 「重复上期」只服务选中房（那是玩家眼前的盘）
+        if (r.key === selectedRoomKey) { lastBetsRef.current = new Map(m); setHasLast(true) }
+        betsByRoomRef.current[r.key] = new Map()
+        if (r.key === selectedRoomKey) setBetsPlaced(new Map())
+      }
+    }
+    // roomsByKey/betsOf 走 refs 与派生值，无需入依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomA.phase, roomA.roundNo, roomB.phase, roomB.roundNo, selectedRoomKey])
+
+  // A. 新一期 betting（【仅选中房】）：UI 清盘 → 回 betting。注单清理已由 A0 按房处理。
   useEffect(() => {
     if (room.phase === 'betting' && room.roundNo && room.roundNo !== shownRoundRef.current) {
       shownRoundRef.current = room.roundNo
-      if (betsRef.current.size) { lastBetsRef.current = new Map(betsRef.current); setHasLast(true) }
-      betsRef.current = new Map(); setBetsPlaced(new Map())
       picksRef.current = new Set(); setPicks(new Set())
+      setBetsPlaced(new Map(betsOf(selectedRoomKey)))   // 与该房的暂存对齐（切房回来时也走这条）
       setResult(null)
       setPreHits(null)
       setFeedBets(makeFeedBots())
       setNetErr(null)
       setUiPhase('betting')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.phase, room.roundNo])
+
+  // A1. #42 切房：把 UI 拉到新房的当前态（注单显该房暂存、清掉上一房的开奖结果与动画）。
+  // 舞台另有 key={selectedRoomKey} 强制重挂，这里只管数据面。
+  // ⚠ preHits 是号码王独有的「开牌收尾命中预亮」，SpeedGrid 没有——不清则上一房的预亮
+  //   会挂在新房盘口上（一片绿框，看着像中了奖），必须一起清。
+  useEffect(() => {
+    setBetsPlaced(new Map(betsOf(selectedRoomKey)))
+    picksRef.current = new Set(); setPicks(new Set())
+    setResult(null); setPreHits(null); setNetErr(null)
+    pendingRef.current = null          // 断开上一房的开奖派生对象（stageZone 三元据它判分支）
+    shownRoundRef.current = null       // 让 A 对新房的当期重新跑一遍（回 betting UI）
+    animatedRoundRef.current = null
+    setUiPhase('betting')
+  }, [selectedRoomKey])
 
   // B. locked：封盘（尚在 betting UI 时切 locked；已进入 drawing 的动画不打断）
   useEffect(() => {
@@ -187,6 +254,44 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
     // finishRound 走 refs，无需入依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.drawResult, room.roundNo])
+
+  // D. #42 未选中房的后台结算：余额 + WinToast，立即应用。
+  //   · 为什么不等动画：你没在看那一房，没有动画可等 —— settleInfo 一到就是终局。
+  //   · 为什么余额也要写：钱是真扣真派的，不能因为「玩家切走了 tab」就不回写（切回来才发现
+  //     余额对不上，会被当成吞钱）。服务端 balanceAfter 是权威快照；两房近同时结算时
+  //     last-write 可接受，下一次任一房结算/刷新即自纠。
+  //   · toast 与选中 tab 无关：钱动了就该响。文案带房名，否则玩家不知道是哪一房中的。
+  //   · settledRoundsRef 与 finishRound 共用：同一期号只回写一次（两房期号前缀不同，天然不撞）。
+  useEffect(() => {
+    for (const r of ROOMS) {
+      if (r.key === selectedRoomKey) continue          // 选中房走 finishRound（动画演完才回写）
+      const rm = roomsByKey[r.key]
+      const si = rm.settleInfo
+      if (!si || !si.roundNo || settledRoundsRef.current.has(si.roundNo)) continue
+      settledRoundsRef.current.add(si.roundNo)
+      if (si.balanceAfter != null) setServerBalance(Number(si.balanceAfter))
+      const win = Number(si.totalPayout || 0)
+      if (win > 0) pushToast(`${r.label} 命中`, win)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomA.settleInfo, roomB.settleInfo, selectedRoomKey])
+
+  // E. #42 未选中房的三份累积：drawResult 一到就追（无动画可等）。选中房在 finishRound 里追（保悬念）。
+  // ⚠ 后端号码王 drawResult 字段是 .num（SpeedGrid 是 .n），别照抄错。
+  const bgDrawRoundRef = useRef({})
+  useEffect(() => {
+    for (const r of ROOMS) {
+      if (r.key === selectedRoomKey) continue
+      const rm = roomsByKey[r.key]
+      if (!rm.drawResult || !rm.roundNo || bgDrawRoundRef.current[r.key] === rm.roundNo) continue
+      bgDrawRoundRef.current[r.key] = rm.roundNo
+      const d = deriveNum(rm.drawResult.num)
+      setLastNumByRoom(m => ({ ...m, [r.key]: d }))
+      setRecentByRoom(m => ({ ...m, [r.key]: [d.num, ...(m[r.key] || SEED_RECENT)].slice(0, 5) }))
+      setHistoryByRoom(m => ({ ...m, [r.key]: [...(m[r.key] || SEED_HISTORY), d.num].slice(-ROAD_CAP) }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
 
   const betting = room.phase === 'betting'
   const drawing = uiPhase === 'drawing'
@@ -212,7 +317,9 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
     if (serverBalance != null && total > serverBalance) { setNetErr('余额不足'); return false }
     setNetErr(null)
     try {
-      await api.apiPlay(G.backendId, { bets: Object.fromEntries(entries) })   // 返 balanceAfter → 自动回写扣款
+      // #42：带上当期 roundId 作【房凭证】—— 后端据它在该款所有房里定位当期 betting 房。
+      // 不传的话一律落标准房（房化前的行为），快房的注就跑到 30s 房去了。钱层逻辑本身零改动。
+      await api.apiPlay(G.backendId, { bets: Object.fromEntries(entries), roundId: room.roundId })   // 返 balanceAfter → 自动回写扣款
       entries.forEach((s, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + s)))
       setBetsPlaced(new Map(betsRef.current))
       return true
@@ -317,13 +424,62 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
     }}>{phaseChip.text}</span>
   )
   const subRowNode = <NumberUpPodium last={lastNum.num} recent={recent} isMobile={isMobile} />   // 上局信息条（切件）
+
+  // ---- #42 速度 tab 条（形态A）：顶栏下 44px 行，双端同构 ----
+  // 每房显 label + 期号短号 + 【该房自己 hook 的】实时倒计时 —— 未选中的房也在连，故它的秒数是真的。
+  // 高度账（手机 700 档）：本行落在【锁顶段】（与 topBar/stageZone 同一 flex:'0 0 auto' 容器），
+  //   44px 全从中滚区（flex:'1 1 0' 的三盘区手风琴）扣 → 舞台一像素不动，代价是手风琴少露约一行半。
+  // 色值全走 NUMBERUP tokens（sel/selTint/strip/dim），零新 hex。
+  const roomTabs = ROOMS.length > 1 && (
+    <div style={{
+      flex: '0 0 auto', display: 'flex', gap: 6, height: 44, alignItems: 'center',
+      padding: isMobile ? '0 12px' : '0 18px', boxSizing: 'border-box',
+    }}>
+      {ROOMS.map((r) => {
+        const rm = roomsByKey[r.key]
+        const on = r.key === selectedRoomKey
+        const sec = Math.max(0, Math.ceil((rm.countdownMs || 0) / 1000))
+        const timed = rm.phase === 'betting' || rm.phase === 'locked' || rm.phase === 'idle'
+        // 期号短号：NU-20260722-1604 → #1604（只取序号段，长串在 44px 里塞不下）
+        const shortNo = rm.roundNo ? `#${String(rm.roundNo).split('-').pop()}` : '…'
+        return (
+          <button key={r.key} type="button" onClick={() => setSelectedRoomKey(r.key)} style={{
+            flex: '1 1 0', minWidth: 0, height: 34, borderRadius: RADIUS.pill, cursor: 'pointer',
+            background: on ? NUMBERUP.sel : NUMBERUP.strip,
+            border: `1px solid ${on ? NUMBERUP.sel : 'rgba(255,255,255,0.16)'}`,
+            color: on ? '#083a1b' : NUMBERUP.dim,
+            fontSize: 12, fontWeight: 900, letterSpacing: 0.2,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden',
+          }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</span>
+            <span style={{ fontFamily: MONO, opacity: on ? 0.75 : 0.6, flex: '0 0 auto' }}>{shortNo}</span>
+            <span style={{
+              fontFamily: MONO, flex: '0 0 auto',
+              color: on ? '#083a1b' : (timed ? NUMBERUP.sel : NUMBERUP.dim),
+            }}>{timed ? `${sec}s` : '—'}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} band={NUMBERUP.band} venue={G.venue ?? G.displayName}
         roundId={room.roundNo || '连接中…'}
         phaseChip={phaseChipNode} subRow={subRowNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onHistory={() => setHistoryOpen(true)} onFairness={() => setFairOpen(true)} />
+      {roomTabs}
+      {/* #42：服务端 1008 拒房（?room= 认不出）——hook 已停重连，这里给出口，否则页面白等 */}
+      {room.roomError === 'invalid_room' && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
+          background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
+        }}>该房不存在，请切回其它房</div>
+      )}
       {/* 断线重连提示（hook 自动指数退避重连；恢复后 sync 补相位） */}
-      {!room.connected && room.roundNo && (
+      {!room.connected && room.roundNo && room.roomError !== 'invalid_room' && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${NUMBERUP.orange}`, borderRadius: 10,
@@ -360,7 +516,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box', minHeight: stageH,
     }}>
       {(drawing || settled) && pendingRef.current ? (
-        <NumberUpStage phase={settled ? 'settled' : 'drawn'} roundNo={room.roundNo} drawResult={{ num: pendingRef.current.num }}
+        <NumberUpStage key={selectedRoomKey} phase={settled ? 'settled' : 'drawn'} roundNo={room.roundNo} drawResult={{ num: pendingRef.current.num }}
           height={stageH} muted={muted}
           shakeRef={cardShakeRef} onFinale={() => setPreHits(hitsOf(pendingRef.current))} />
       ) : (
@@ -464,7 +620,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
         </div>
       </div>
       <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} game={G.backendId} drawResult={room.drawResult} onViewHistory={() => setHistoryOpen(true)} />
-      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} room={selectedRoomKey} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
@@ -649,7 +805,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       </div>
 
       <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} game={G.backendId} drawResult={room.drawResult} onViewHistory={() => setHistoryOpen(true)} />
-      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} room={selectedRoomKey} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>

@@ -139,10 +139,15 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     const si = settleInfoRef.current
     const hadBet = si && si.roundNo === rnd
     // 余额回写（每期一次）：有注用后端 settleInfo.balanceAfter；无注不动钱。
-    if (hadBet && si.balanceAfter != null && !settledRoundsRef.current.has(rnd)) {
-      setServerBalance(Number(si.balanceAfter))
+    // ⚠ add 必须收在 hadBet 内：切房时旧房的动画定时器仍会到点跑到这里，那时 settleInfoRef
+    //   已换成新房的 → hadBet=false → 本函数没消费这期；若仍 add，就把这期号钉成「已处理」，
+    //   D 段（未选中房后台结算）便会跳过它 → 该期余额回写与 toast 双双丢失。不 add 才能让 D 接住。
+    if (hadBet) {
+      if (si.balanceAfter != null && !settledRoundsRef.current.has(rnd)) {
+        setServerBalance(Number(si.balanceAfter))
+      }
+      settledRoundsRef.current.add(rnd)
     }
-    settledRoundsRef.current.add(rnd)
     // 视觉结算仅当本期仍是当前展示期（若下一期 betting 已抢先，跳过不覆盖新期 UI）
     if (shownRoundRef.current !== rnd) return
     let hits, winTotal, perKeyOutcome = null
