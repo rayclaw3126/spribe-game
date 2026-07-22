@@ -1,5 +1,5 @@
 import { MULTI_DARK as M, COLORS } from '../shell/tokens'
-import { RAIL_GROUPS, ALL_TABLE_IDS, nameOf, nameOfBackend } from './mockData'
+import { RAIL_GROUPS, SPEED_GROUP, ALL_TABLE_IDS, gameIdOf, nameOf, nameOfBackend } from './mockData'
 
 // 今日大奖榜块（只读 /player/bigwins.top）：Top5 行 名/游戏/金额；空态由父级 top.length 决定不挂载。
 // 自己上榜(mine)高亮金。挂在左栏「对决」组之下。
@@ -61,7 +61,7 @@ function RailRow({ id, room, active, star, onSelect }) {
       <span style={{
         flex: 1, minWidth: 0, color: active ? M.txt : M.txtDim, fontSize: 12, fontWeight: active ? 800 : 600,
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-      }}>{star && <span style={{ color: M.amount, marginRight: 3 }}>★</span>}{nameOf(id)}</span>
+      }}>{star && <span style={{ color: M.amount, marginRight: 3 }}>★</span>}{nameOf(gameIdOf(id))}</span>
       <span style={{
         flex: '0 0 auto', fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
         // 最后 5 秒（betting/idle 且 ≤5000ms）转红
@@ -102,6 +102,18 @@ export default function GameRail({ tables, onSelect, rooms, top, favIds }) {
           ))}
         </div>
       ))}
+
+      {/* #42 单9：「极速」组排在现有三组【之后】（拍板）——现有三组的款序与肌肉记忆一字不动。
+          组内条目是复合桌键（如 'PK10@15s'），行内名字经 gameIdOf 解码；组头绿字与桌卡速度签同色系，
+          让「这一组是另一种节奏」在扫栏时就成立，不必逐行加签。 */}
+      {SPEED_GROUP.ids.length > 0 && (
+        <div key={SPEED_GROUP.key} style={{ marginBottom: 8 }}>
+          <div style={{ color: M.accent, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, padding: '6px 8px 4px' }}>{SPEED_GROUP.label}</div>
+          {SPEED_GROUP.ids.map(k => (
+            <RailRow key={k} id={k} room={rooms?.[k]} active={onTable.has(k)} onSelect={onSelect} />
+          ))}
+        </div>
+      )}
 
       {top && top.length > 0 && <TopBoard top={top} />}
     </aside>

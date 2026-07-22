@@ -12,7 +12,7 @@ import { mapBetError } from './betErrors'
 import { useSfxMuted } from '../shell/bgmManager'
 import { SpeakerIcon } from '../shell/AudioIcons'
 import Chip from '../shell/Chip'
-import { DEFAULT_TABLES, CHIP_VALUES, ONLINE_COUNT, ALL_TABLE_IDS, nameOf, backendOf, venueOf, coverOf } from './mockData'
+import { DEFAULT_TABLES, CHIP_VALUES, ONLINE_COUNT, ALL_TABLE_IDS, TABLE_KEYS, gameIdOf, roomOf, nameOf, backendOf, venueOf, coverOf } from './mockData'
 
 // 用户名脱敏（与 BetFeed/后端同规则）：首 + *** + 末；≤2 字仅首 + ***
 const maskName = (s) => { const n = (s || '').trim(); return !n ? '玩家' : n.length <= 2 ? `${n[0]}***` : `${n[0]}***${n[n.length - 1]}` }
@@ -26,8 +26,10 @@ const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 // ⚠️ 快投模式故意不记忆——每次进页默认「注单」：快投点盘口即真钱秒扣，安全优先。
 const LS_TABLES = 'spribe_multi_tables'
 const LS_CHIP = 'spribe_multi_chip'
+// #42 单9：校验器从 ALL_TABLE_IDS 放宽到 TABLE_KEYS。老用户存的是裸 id 数组，
+// 而标准房桌键【就是】裸 id，故老值天然 ⊂ TABLE_KEYS —— 原样放行，零重置、零迁移代码。
 function loadTables() {
-  try { const s = JSON.parse(localStorage.getItem(LS_TABLES)); if (Array.isArray(s) && s.length && s.every(id => ALL_TABLE_IDS.includes(id))) return s } catch { /* ignore */ }
+  try { const s = JSON.parse(localStorage.getItem(LS_TABLES)); if (Array.isArray(s) && s.length && s.every(k => TABLE_KEYS.includes(k))) return s } catch { /* ignore */ }
   return DEFAULT_TABLES
 }
 // #44 收藏优先占前排（仅初始开桌用；会话中点☆不重排已开的桌 —— 靠 useState 初始器只跑一次保证）。
@@ -73,7 +75,10 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   const flashTimer = useRef(null)
   const seenSettleRef = useRef(new Set())
 
-  const capOf = (gameId) => caps?.[backendOf(gameId)] || {}
+  const capOf = (k) => caps?.[backendOf(gameIdOf(k))] || {}   // #42 单9：查表侧解码（风控是款级，两房共用）
+  // #42 单9：桌显示名 —— 同款两房并排时，注单行/toast/快投日志必须能区分，否则两行都叫「PK10」。
+  // 桌卡头另有定版A 的速度签，这里是文字场合的等价表达。
+  const tableLabel = (k) => (roomOf(k) === '15s' ? `${nameOf(gameIdOf(k))}·极速` : nameOf(gameIdOf(k)))
   function pushToast(text) {
     toastSeq.current += 1
     const tid = toastSeq.current
@@ -95,14 +100,14 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   const closeTable = (id) => setTables(prev => prev.filter(x => x !== id))
 
   // 挂注：该桌非 betting → 拒挂 toast；风控前置显示预估派彩超顶警示（不拦，后端结算钳制）
-  function addBet(gameId, key, label, odds) {
-    const room = rooms[gameId]
-    if (!room || room.phase !== 'betting') { pushToast(`${nameOf(gameId)}·已封盘`); return }
-    const cap = capOf(gameId)
+  function addBet(tk, key, label, odds) {
+    const room = rooms[tk]                                    // 身份侧：复合桌键
+    if (!room || room.phase !== 'betting') { pushToast(`${tableLabel(tk)}·已封盘`); return }
+    const cap = capOf(tk)
     const est = chip * Number(odds || 0)
     if (cap.maxPayout != null && est > Number(cap.maxPayout)) pushToast(`⚠ 触顶 上限 $${Number(cap.maxPayout).toFixed(0)}`)
     slipSeq.current += 1
-    setSlip(prev => [...prev, { id: slipSeq.current, gameId, gameName: nameOf(gameId), key, market: label, odds, amount: chip, error: null }])
+    setSlip(prev => [...prev, { id: slipSeq.current, gameId: tk, gameName: tableLabel(tk), key, market: label, odds, amount: chip, error: null }])
   }
   const removeBet = (rid) => setSlip(prev => prev.filter(it => it.id !== rid))
 
@@ -136,22 +141,24 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
 
   // 快投：点盘口即发单键 apiPlay，不进 slip。同键在飞禁重入（不同键可并发）；
   // 前置校验（点击前判，超 maxBet / 触顶 maxPayout / 已封盘 → toast + 闪红，不发）。
-  async function quickBet(gameId, key, label, odds) {
-    const ck = `${gameId}:${key}`
+  async function quickBet(tk, key, label, odds) {
+    const ck = `${tk}:${key}`
     if (quickState[ck] === 'flying') return
-    const room = rooms[gameId]
-    const cap = capOf(gameId)
-    if (!room || room.phase !== 'betting') { pushToast(`${nameOf(gameId)}·已封盘`); flashErr(ck); return }
+    const room = rooms[tk]
+    const cap = capOf(tk)
+    if (!room || room.phase !== 'betting') { pushToast(`${tableLabel(tk)}·已封盘`); flashErr(ck); return }
     if (cap.maxBet != null && chip > Number(cap.maxBet)) { pushToast(`超单注上限 $${Number(cap.maxBet).toFixed(0)}`); flashErr(ck); return }
     if (cap.maxPayout != null && chip * Number(odds || 0) > Number(cap.maxPayout)) { pushToast(`⚠ 触顶 上限 $${Number(cap.maxPayout).toFixed(0)}`); flashErr(ck); return }
     setQuickState(s => ({ ...s, [ck]: 'flying' }))
     try {
-      const res = await api.apiPlay(backendOf(gameId), { bets: { [key]: chip } })   // ★唯一钱路径·单键
+      // #42 单9：带该房 roundId 作房凭证 —— 后端据它在该款所有房里定位当期 betting 房。
+      // 不传一律落标准房，极速桌的注就会跑到 30s 房去。钱层逻辑本身零改动。
+      const res = await api.apiPlay(backendOf(gameIdOf(tk)), { bets: { [key]: chip }, roundId: room.roundId })   // ★唯一钱路径·单键
       setQuickState(s => ({ ...s, [ck]: 'ok' }))
       setTimeout(() => clearCell(ck), 700)
-      addStakes(gameId, res.roundNo, { [key]: chip })
+      addStakes(tk, res.roundNo, { [key]: chip })
       quickSeq.current += 1
-      setQuickLog(l => [{ id: quickSeq.current, gameName: nameOf(gameId), market: label, odds, amount: chip, roundNo: res.roundNo }, ...l])
+      setQuickLog(l => [{ id: quickSeq.current, gameName: tableLabel(tk), market: label, odds, amount: chip, roundNo: res.roundNo }, ...l])
     } catch (e) {
       setQuickState(s => ({ ...s, [ck]: 'err' }))   // 封盘竞态/后端 error → 闪红不重试
       setTimeout(() => clearCell(ck), 800)
@@ -189,7 +196,8 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
       const bets = {}   // 同 key 聚合注额
       rows.forEach(it => { bets[it.key] = Number((Number(bets[it.key] || 0) + Number(it.amount)).toFixed(2)) })
       try {
-        const res = await api.apiPlay(backendOf(gid), { bets })   // ★唯一钱路径：POST /round/<be>/play
+        // #42 单9：同上，带该桌所属房的 roundId（gid 此处是复合桌键）
+        const res = await api.apiPlay(backendOf(gameIdOf(gid)), { bets, roundId: rooms[gid]?.roundId })   // ★唯一钱路径：POST /round/<be>/play
         rows.forEach(it => succeededRowIds.add(it.id))
         addStakes(gid, res.roundNo, bets)   // 累计本期已投（total + byKey，与快投同一份账）
         okGids.push(gid)
@@ -215,9 +223,9 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
   // 结算：各房 settleInfo 到达（新 roundId）→ 余额认 balanceAfter + 单期派彩>0 触发中奖庆祝三档。
   // 档位 = totalPayout / 该款本期总注额（stake 只读本地已投 submittedRef，roundNo 匹配才计）。
   // 在屏与否 + 中奖盘口键交给 WinFxHost（离屏只走 toast）。异步 .then 里 setState（合规）。
-  const settleSig = ALL_TABLE_IDS.map(id => rooms[id]?.settleInfo?.roundId || '').join('|')
+  const settleSig = TABLE_KEYS.map(k => rooms[k]?.settleInfo?.roundId || '').join('|')
   useEffect(() => {
-    ALL_TABLE_IDS.forEach(id => {
+    TABLE_KEYS.forEach(id => {
       const si = rooms[id]?.settleInfo
       if (!si || si.roundId == null || seenSettleRef.current.has(si.roundId)) return
       seenSettleRef.current.add(si.roundId)
@@ -237,12 +245,12 @@ export default function MultiTablePage({ serverBalance, setServerBalance, caps, 
         let share = null
         try {
           if (tier === 'big' || tier === 'mega') share = {
-            cover: coverOf(id), gameName: nameOf(id), venue: venueOf(id), color: '#243447',
+            cover: coverOf(gameIdOf(id)), gameName: tableLabel(id), venue: venueOf(gameIdOf(id)), color: '#243447',
             payout: pay, mult: stake > 0 ? mult : null,
             name: maskName(playerName), roundNo: si.roundNo, date: todayStr(),
           }
         } catch { share = null }
-        winFxRef.current?.fire({ tier, payout: pay, name: nameOf(id), tableEl: el, inView, winKeys, share })
+        winFxRef.current?.fire({ tier, payout: pay, name: tableLabel(id), tableEl: el, inView, winKeys, share })
       })
     })
   }, [settleSig])   // eslint-disable-line react-hooks/exhaustive-deps

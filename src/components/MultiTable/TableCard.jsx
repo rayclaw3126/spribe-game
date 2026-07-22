@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { MULTI_DARK as M, KENO, COLORS } from '../shell/tokens'
 import { usePlayerApi } from '../../lib/playerApi'
 import { formatDraw, shortRoundNo } from '../drawFormatters'
-import { MARKET_GROUPS, nameOf, venueOf, backendOf } from './mockData'
+import { MARKET_GROUPS, nameOf, venueOf, backendOf, gameIdOf, roomOf } from './mockData'
 import { oddsStr, beadOf } from './marketsRegistry'
 import { useSfxMuted } from '../shell/bgmManager'
 import { STAGE_BY_ID } from './stageRegistry'
@@ -55,11 +55,17 @@ function useInViewport(ref) {
 // 单张桌卡（接活）：room 下发相位/期号/倒计时/开奖；上期+迷你路珠首帧 /round/history 播种、
 // 之后收 drawn 结果滚动追加；盘口赔率读 markets（oddsStr）；下注仍假（onAddBet → 右栏注单）。
 export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, stakes, mode, quickState, onAddBet, onQuickBet, onClose, onOpenGame, flash }) {
-  const be = backendOf(id)
-  const cfg = MARKETS_UI[id]   // #41 单15：本款「原版盘口件」配置（无 → 走通用手风琴+8珠回退）
+  // #42 单9：id 是【复合桌键】（'PK10' / 'PK10@15s'），承担身份职责（quickState / data-table-id /
+  //   onClose / onAddBet 一律原样传它）；gid 是解码后的 registry id，所有【查表】一律用它。
+  //   room15 = 该桌是否 15s 快房（决定速度签样式与 history 分流参数）。
+  const gid = gameIdOf(id)
+  const rm = roomOf(id)
+  const isFast = rm === '15s'
+  const be = backendOf(gid)
+  const cfg = MARKETS_UI[gid]   // #41 单15：本款「原版盘口件」配置（无 → 走通用手风琴+8珠回退）
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮同步；speedgrid 真舞台用）
   // 盘口点击：快投模式 → 立即发单键；注单模式 → 进 slip
-  const cellClick = (q) => (mode === 'quick' ? onQuickBet : onAddBet)(id, q.key, q.label, oddsStr(id, q.key))
+  const cellClick = (q) => (mode === 'quick' ? onQuickBet : onAddBet)(id, q.key, q.label, oddsStr(gid, q.key))
   // 快投按钮态 → 底/边/透明度 + 飞行 loading 点
   const quickFx = (q) => {
     const st = quickState?.[`${id}:${q.key}`]
@@ -79,7 +85,7 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
     : null)
   const groupStake = (grp) => (stakes ? grp.keys.reduce((s, q) => s + (stakes[q.key] || 0), 0) : 0)
   // goldenboot 真盘口件用：key→中文 label（读 MARKET_GROUPS）+ 快投 flying 键集（读 quickState）
-  const gbLabel = (key) => { for (const g of (MARKET_GROUPS[id] || [])) { const f = g.keys.find(k => k.key === key); if (f) return f.label } return key }
+  const gbLabel = (key) => { for (const g of (MARKET_GROUPS[gid] || [])) { const f = g.keys.find(k => k.key === key); if (f) return f.label } return key }
   const gbFlying = quickState
     ? Object.fromEntries(Object.entries(quickState).filter(([k, v]) => v === 'flying' && k.startsWith(`${id}:`)).map(([k]) => [k.slice(id.length + 1), true]))
     : undefined
@@ -172,7 +178,16 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
         flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8,
         padding: '8px 10px', background: KENO.band, borderBottom: `1px solid ${KENO.band}`,
       }}>
-        <span style={{ color: M.txt, fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap' }}>{nameOf(id)}</span>
+        <span style={{ color: M.txt, fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap' }}>{nameOf(gid)}</span>
+        {/* #42 单9 定版A 速度签（游戏名右侧）：标准房中性签 / 15s 房描边绿签。
+            同款两房并排时，这是区分两张桌的第一眼凭据。 */}
+        <span style={{
+          flex: '0 0 auto', borderRadius: 999, padding: '1px 6px', fontSize: 9, fontWeight: 900,
+          whiteSpace: 'nowrap', lineHeight: 1.5,
+          background: isFast ? 'rgba(74,222,128,0.14)' : M.cardHi,
+          border: `1px solid ${isFast ? M.accent : 'transparent'}`,
+          color: isFast ? M.accent : M.txtDim,
+        }}>{isFast ? '极速 15秒' : '标准 30秒'}</span>
         <span title={room.roundNo || ''} style={{ color: M.txtMute, fontSize: 11, fontWeight: 700 }}>{roundLabel}</span>
         {stakedAmt != null && (
           <span style={{ background: M.bettingTint, color: M.accent, borderRadius: 999, padding: '1px 7px', fontSize: 10, fontWeight: 900, whiteSpace: 'nowrap' }}>本期已投 ${stakedAmt}</span>
@@ -234,13 +249,13 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
       ) : (
         <>
           {/* 上局前三名信息条已移入卡头行内（item8），此处不再单独占条 */}
-          {STAGE_BY_ID[id] ? (
+          {STAGE_BY_ID[gid] ? (
             /* 真舞台上桌：抽件 Stage 铺满 150px（场馆皮自带）；倒计时/封盘/结算叠显上层，信息不丢 */
-            (() => { const StageComp = STAGE_BY_ID[id]; return (
+            (() => { const StageComp = STAGE_BY_ID[gid]; return (
             <div style={{ flex: '0 0 auto', height: 150, position: 'relative', overflow: 'hidden', background: KENO.band }}>
               <StageComp phase={room.phase} roundNo={room.roundNo} drawResult={room.drawResult} muted={muted} height={150}
                 onFinale={hasPodium ? onStageFinale : undefined} />
-              <span style={{ position: 'absolute', top: 4, left: 8, zIndex: 2, color: M.txtMute, fontSize: 9, fontWeight: 700, textShadow: '0 1px 3px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>{venueOf(id)}</span>
+              <span style={{ position: 'absolute', top: 4, left: 8, zIndex: 2, color: M.txtMute, fontSize: 9, fontWeight: 700, textShadow: '0 1px 3px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>{venueOf(gid)}</span>
               {(room.phase === 'betting' || room.phase === 'idle') && !room.drawResult && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, pointerEvents: 'none' }}>
                   <span style={{ color: room.countdownMs <= 5000 ? M.danger : M.betting, fontSize: 58, fontWeight: 900, lineHeight: 1, fontVariantNumeric: 'tabular-nums', textShadow: '0 2px 10px rgba(0,0,0,0.75)' }}>{cd}</span>
@@ -269,7 +284,7 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 4, padding: '0 10px', background: KENO.band,
           }}>
-            <span style={{ color: M.txtMute, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>{venueOf(id)}</span>
+            <span style={{ color: M.txtMute, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>{venueOf(gid)}</span>
             {room.phase === 'connecting' ? (
               <span style={{ color: M.txtMute, fontSize: 15, fontWeight: 800 }}>连接中…</span>
             ) : (room.phase === 'drawn' || room.phase === 'settled' || (room.phase === 'idle' && room.drawResult)) ? (
@@ -313,10 +328,10 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
             {cfg ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 10px' }}>
                 <cfg.Markets chipMode isMobile isDesk={false} openMode="first"
-                  onPick={(key) => (mode === 'quick' ? onQuickBet : onAddBet)(id, key, gbLabel(key), oddsStr(id, key))}
+                  onPick={(key) => (mode === 'quick' ? onQuickBet : onAddBet)(id, key, gbLabel(key), oddsStr(gid, key))}
                   stakes={stakes || {}} disabled={room.phase !== 'betting'} flying={gbFlying} hits={gbHits} />
               </div>
-            ) : (MARKET_GROUPS[id] || []).map((grp, gi) => {
+            ) : (MARKET_GROUPS[gid] || []).map((grp, gi) => {
               const isOpen = !!open[gi]
               const gStake = groupStake(grp)   // 组内本期已投合计
               return (
@@ -343,7 +358,7 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
                           {fx.flying && <span style={{ position: 'absolute', top: 2, left: 3, width: 5, height: 5, borderRadius: '50%', background: M.locked }} />}
                           {stakeChip(q.key)}
                           <span style={{ color: M.txt, fontSize: 11, fontWeight: 800, lineHeight: 1.1 }}>{q.label}</span>
-                          <span style={{ color: KENO.orange, fontSize: 8, fontWeight: 800 }}>{oddsStr(id, q.key)}</span>
+                          <span style={{ color: KENO.orange, fontSize: 8, fontWeight: 800 }}>{oddsStr(gid, q.key)}</span>
                         </button>
                       ) })}
                     </div>
@@ -358,7 +373,7 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
                           {fx.flying && <span style={{ position: 'absolute', top: 2, left: 3, width: 5, height: 5, borderRadius: '50%', background: M.locked }} />}
                           {stakeChip(q.key)}
                           <span style={{ color: M.txt, fontSize: 12, fontWeight: 800 }}>{q.label}</span>
-                          <span style={{ color: KENO.orange, fontSize: 10, fontWeight: 800 }}>{oddsStr(id, q.key)}</span>
+                          <span style={{ color: KENO.orange, fontSize: 10, fontWeight: 800 }}>{oddsStr(gid, q.key)}</span>
                         </button>
                       ) })}
                     </div>
@@ -379,7 +394,7 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
             {beads.length === 0 ? (
               <span style={{ color: M.txtMute, fontSize: 10 }}>暂无路珠</span>
             ) : beads.map((p, i) => {
-              const b = beadOf(id, p.drawResult)
+              const b = beadOf(gid, p.drawResult)
               return (
                 <span key={p.roundNo || i} title={formatDraw(be, p.drawResult) || ''} style={{
                   flex: '0 0 auto', width: 20, height: 20, borderRadius: '50%',
@@ -396,9 +411,11 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
       {/* #41 单14.5：⋯ 三弹层（现成组件零改，全传该桌 game/venue/commit/RULES；缺回调即隐藏） */}
       {cfg && (
         <>
-          <HistoryDrawer open={gbDrawer === 'hist'} onClose={() => setGbDrawer(null)} game={be} venue={venueOf(id)} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
-          <CommitRevealFairness open={gbDrawer === 'fair'} onClose={() => setGbDrawer(null)} venue={venueOf(id)} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setGbDrawer('hist')} />
-          <HowToPlay open={gbDrawer === 'rules'} onClose={() => setGbDrawer(null)} venue={venueOf(id)} title={`${nameOf(id)} 玩法说明`} sections={cfg.rules} />
+          {/* #42 单9：补传 room —— 不传则极速桌的开奖历史会显标准房那条流（两房混视）。
+              HistoryDrawer 自 71c404a 起已支持该 prop，此处只传参、不改件。 */}
+          <HistoryDrawer open={gbDrawer === 'hist'} onClose={() => setGbDrawer(null)} game={be} room={rm} venue={venueOf(gid)} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+          <CommitRevealFairness open={gbDrawer === 'fair'} onClose={() => setGbDrawer(null)} venue={venueOf(gid)} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} onViewHistory={() => setGbDrawer('hist')} />
+          <HowToPlay open={gbDrawer === 'rules'} onClose={() => setGbDrawer(null)} venue={venueOf(gid)} title={`${nameOf(gid)} 玩法说明`} sections={cfg.rules} />
         </>
       )}
     </div>

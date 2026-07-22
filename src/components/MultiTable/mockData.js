@@ -18,7 +18,38 @@ export const RAIL_GROUPS = [
 
 export const ALL_TABLE_IDS = RAIL_GROUPS.flatMap(g => g.ids)     // 9 款全集
 export const CATALOG = ALL_TABLE_IDS                             // 目录 = 9 款
-export const DEFAULT_TABLES = CATALOG.slice(0, 4)               // 默认前 4 款上桌
+export const DEFAULT_TABLES = CATALOG.slice(0, 4)               // 默认前 4 款上桌（#42 单9 未改：极速桌手动开）
+
+// ============================================================================
+// #42 单9：复合桌键 —— 让同一款的标准房与 15s 快房各成一张独立的桌，可并排开。
+//
+// 格式：标准房 = 【裸 registry id】（如 'SpeedGrid'）；快房 = `${id}@15s`（如 'SpeedGrid@15s'）。
+//
+// ⚠ 标准房必须保裸 id：老用户 localStorage 里存的是裸 id 数组，保裸即天然 ∈ TABLE_KEYS，
+//   校验器原样放行 —— 零重置、零迁移代码。改成 'X@30s' 就得写迁移，收益为零。
+//
+// ⚠ 分隔符用 @ 而非 :：quickState 的键已是 `${桌键}:${盘口键}`，且 TableCard 用
+//   startsWith(`${id}:`) 反查该桌的飞行态；桌键内再出现 : 会让该前缀匹配产生歧义。
+//   registry id 全是 PascalCase 字母数字，@ 绝不冲突。
+//
+// 用法铁律 —— 分清【身份侧】与【查表侧】，漏一处就是注落错桌：
+//   · 身份侧（tables / rooms 键 / slip.gameId / submitted / quickState / data-table-id /
+//     onClose / onAddBet）→ 一律用【复合键】原样传递；
+//   · 查表侧（nameOf / venueOf / backendOf / coverOf / capOf / MARKETS_UI / MARKET_GROUPS /
+//     STAGE_BY_ID / beadOf / oddsStr）→ 必须先 gameIdOf() 解码回 registry id。
+export const gameIdOf = (k) => String(k).split('@')[0]            // 复合键 → registry id（裸 id 原样返回）
+export const roomOf   = (k) => String(k).split('@')[1] || null    // → '15s' | null（null = 该款标准房）
+export const tableKey = (id, room) => (room ? `${id}@${room}` : id)
+
+// 有快房的款 = registry 里 rooms 两枚以上（与大厅极速角标同一判定，不手抄名单）。
+// > 1 而非 > 0：单房款写的是 rooms: []，多房款写两枚。
+export const SPEED_IDS  = ALL_TABLE_IDS.filter(id => (GAME_BY_ID[id]?.rooms?.length ?? 0) > 1)
+export const SPEED_KEYS = SPEED_IDS.map(id => tableKey(id, '15s'))
+export const TABLE_KEYS = [...ALL_TABLE_IDS, ...SPEED_KEYS]      // 16 = 9 标准 + 7 极速
+
+// 左栏「极速」组：排在现有三组之后（拍板），组内款序沿用 ALL_TABLE_IDS 序。
+export const SPEED_GROUP = { key: 'speed', label: '极速 15秒', ids: SPEED_KEYS }
+// ============================================================================
 export const CHIP_VALUES = [1, 5, 10, 50]                       // 纯假值：筹码档
 export const ONLINE_COUNT = 914                                // 纯假值：在线数
 
