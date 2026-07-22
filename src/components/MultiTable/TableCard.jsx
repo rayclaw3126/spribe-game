@@ -113,11 +113,14 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
   const settledRound = room.phase === 'settled' ? room.roundNo : null
   useEffect(() => {
     let cancelled = false
-    api.apiGet(`/round/history/${be}?limit=8`)
+    // #42 单13 快修：补 ?room= —— 单9 给 HistoryDrawer 补了 room 却漏了这处，
+    // 导致 XX@15s 桌卡的迷你路珠【首帧播的是标准房历史】（之后 WS 增量珠才是对的）。
+    // 语义与 HistoryDrawer 同款：rm==='15s' 才带，标准房不带（不传=标准房，读侧 COALESCE 归一）。
+    api.apiGet(`/round/history/${be}?limit=8${rm === '15s' ? '&room=15s' : ''}`)
       .then(d => { if (!cancelled) setPast((d.items || []).map(it => ({ roundNo: it.roundNo, drawResult: it.drawResult }))) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [be, settledRound])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [be, rm, settledRound])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // 渲染层并入「本期开奖」结果（drawn/settled 时即时上珠，早于 history 重拉），按 roundNo 去重
   const liveCur = (room.phase === 'drawn' || room.phase === 'settled') && room.drawResult && room.roundNo && past[0]?.roundNo !== room.roundNo
