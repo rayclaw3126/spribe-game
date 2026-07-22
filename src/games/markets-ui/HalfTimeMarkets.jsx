@@ -15,7 +15,7 @@ import { ROW1, PARLAY, ZONES, ROW3, GROUPS } from './halftimeMarketsData'   // �
 
 const EMPTY = new Set()
 
-export default function HalfTimeMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, chipMode = false, openMode = 'all', section }) {
+export default function HalfTimeMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, chipMode = false, openMode = 'all', section, big = false }) {
   const betting = !disabled
   // 三段折叠/展开（多桌手风琴，每卡独立）：openMode='first' 仅开第一段，'all' 全开
   const [open, setOpen] = useState(() => openMode === 'first' ? [true, false, false] : [true, true, true])
@@ -43,9 +43,10 @@ export default function HalfTimeMarkets({ onPick, stakes, disabled = false, flyi
       position: 'relative',
     }
   }
-  const cellName = { color: HALFTIME.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: HALFTIME.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: HALFTIME.odds, fontSize: isMobile ? 11 : 13, fontWeight: 900 }
+  // #47：big = 桌面放大档（键字 15 / 赔率 14.5），默认 false 即原行为；多桌与手机不传，零感。
+  const cellName = { color: HALFTIME.text, fontSize: isMobile ? 10 : big ? 15 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: HALFTIME.dim, fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: HALFTIME.odds, fontSize: isMobile ? 11 : big ? 14.5 : 13, fontWeight: 900 }
   // 角标：原页 = 文字 $X 绿标（分毫不变）；多桌 chipMode = 筹码码叠角（不改键内布局）。
   const stakeChip = (key) => {
     const amt = stakeOf(key)

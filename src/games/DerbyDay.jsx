@@ -31,6 +31,7 @@ import trophyImg from '../assets/shared/trophy.png'
 
 // —— 引擎常量块已剪切到 ./markets/derbyday（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { deriveMatch, ODDS, MARKETS, hitsOf, pushesOf, round2, drawMatch } from './markets/derbyday'
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { drawMatch, deriveMatch, ODDS, MARKETS, hitsOf, pushesOf }
 
 // ---------- 开奖动画分段时长（#43单3：服务器排期器驱动，本地不再有相位 setInterval）----------
@@ -42,7 +43,12 @@ const DRAW_ANIM_MS = HT_DRAW_MS + HT_SHOWN_MS + FT_DRAW_MS   // 22000
 const G = GAME_BY_ID['DerbyDay']
 
 // 玩法说明文案（RULES）已切至 ./markets-ui/derbydayRules（原名 import 回用，单一出处）。
-const ROAD_CAP = 120
+// #47 定案（全端规则）：路珠【列对齐滑动窗口】，右端恒留 2 空列。
+// 可用容量 = (30−2)×6 = 168；显示长度 L ≡ N (mod 6) 且 L ≤ 168，取最大 → 163–168 浮动。
+const ROAD_CAP = 168
+
+// #47 桌面路珠网格（模块级：进组件内会每渲染重建，带进 effect deps 会让首灌反复跑）
+const DESK_ROAD = { cols: 30, rows: 6 }
 
 // 种子上局（确定性脚本预生成后硬编码；真开奖逐期顶掉）
 const SEED_LAST = deriveMatch({
@@ -84,7 +90,8 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // 单S5：≥1280 有右栏、中栏变窄 → 开奖区/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
   const hasRail = useMediaQuery('(min-width: 1280px)')
-  const RAIL_MAXW = 670
+  // #47 二批·对表硬指标：670→800。开奖/盘口/路珠/筹码四区共用同一条宽度线。
+  const RAIL_MAXW = 800
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
@@ -97,6 +104,8 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
+  // #47 动效：仅 WS 真新珠时记新珠索引；首灌置 -1 不弹入。本款单房（rooms:[]），无需按房区分。
+  const [freshIdx, setFreshIdx] = useState(-1)
   const [roadTab, setRoadTab] = useState('FT-H/A')
   const [userAcc, setUserAcc] = useState({ ht: true, ft: true, htft: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开，玩家可自行收）；纯 UI，不动下注 state
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
@@ -116,6 +125,9 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const lastBetsRef = useRef(new Map())          // 上局注单快照（重复投注用，照 Line Up 接法）
   const [hasLast, setHasLast] = useState(false)
   const betRef = useRef(bet)
+  // #47 二批 新增：珠盘路整局记账去重（按期号）。本款原先无此 ref；接了历史播种后必须显式去重
+  //   （玩家正好在开奖动画中进页时，history 已含该期，动画结束会再追一次 = 重复上珠）。
+  const roadRecordedRef = useRef(null)
   const pendingRef = useRef(null)          // 只读表演：当前动画派生赛果
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -230,7 +242,15 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
     if (winTotal > 0) pushToast('本期命中', winTotal)
     if (refundTotal > 0) pushToast('平局退注', refundTotal)   // push 区分文案
     setLastMatch(r)
-    setHistory(h => [...h, [r.htHome, r.htAway, r.ftHome, r.ftAway]].slice(-ROAD_CAP))
+    // #47：按期号去重（防与历史播种重复上珠）+ 列对齐窗口 + 新珠弹入
+    if (rnd != null && roadRecordedRef.current !== rnd) {
+      roadRecordedRef.current = rnd
+      setHistory(h => {
+        const next = roadWindow([...h, [r.htHome, r.htAway, r.ftHome, r.ftAway]], DESK_ROAD)
+        setFreshIdx(next.length - 1)   // WS 真新珠 → 弹入
+        return next
+      })
+    }
     setResult({ hits, pushes, winTotal, refundTotal })
     // 假注单本期落账（展示用，结果已定后的装饰随机）
     setFeedBets(list => list.map(b => Math.random() < 0.45
@@ -271,6 +291,44 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
     // finishRound 走 refs，无需入依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.drawResult, room.roundNo])
+
+  // F. #47 二批 路珠真历史播种（【单流版】：本款 gameRegistry rooms:[] 无 15s 快房，
+  //   故不遍历 ROOMS、不带 ?room= 分流参、不需要 roadByRoom map —— 比双流版更简单）。
+  //   · 后端 limit 夹在 50 → 走现成 cursor 分页；⚠ 本款路珠存【四元组】[htHome,htAway,ftHome,ftAway]，
+  //     实测 drawResult 含 htHome/htAway/ftHome/ftAway 四键（+home20/away20/htTotal/ftTotal），可直取。
+  //   · 首灌按【最新期号序号】定相位（非拉取条数），与 WS 增量后 window(D+1) 天然连续；
+  //     首灌不是真新珠，freshIdx 置 -1 不弹入。失败静默保留种子珠；只读，钱层零碰。
+  const apiRef = useRef(api)
+  useEffect(() => { apiRef.current = api })
+  useEffect(() => {
+    let cancelled = false
+    const PAGE = 50
+    const SEED_TARGET = roadSeedTarget(DESK_ROAD)
+    const PAGES = Math.ceil(SEED_TARGET / PAGE)
+    ;(async () => {
+      const acc = []
+      let cursor = null
+      for (let pg = 0; pg < PAGES && acc.length < SEED_TARGET; pg++) {
+        const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+        const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${cs}`)
+        const items = d?.items || []
+        if (!items.length) break
+        acc.push(...items)
+        cursor = d?.nextCursor
+        if (!cursor) break
+      }
+      if (cancelled || !acc.length) return
+      const rows = acc.slice(0, SEED_TARGET).reverse()
+        .map((it) => { const dr = it?.drawResult
+          return dr && dr.htHome != null ? [dr.htHome, dr.htAway, dr.ftHome, dr.ftAway] : null })
+        .filter(Boolean)
+      if (!rows.length) return
+      setHistory(roadWindowAt(rows, roundSeq(acc[0]?.roundNo), DESK_ROAD))
+      setFreshIdx(-1)
+      roadRecordedRef.current = acc[0]?.roundNo
+    })().catch(() => { /* 静默：保留种子珠 */ })
+    return () => { cancelled = true }
+  }, [])
 
   const toggleSel = key => {
     if (room.phase !== 'betting') return   // 仅 betting 相位可选，之后全盘锁死
@@ -409,7 +467,9 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   )
 
   // ---- ① 开奖区：半场块（前 10 珠）+ 全场块（后 10 珠 + 累计和值） ----
-  const beadSize = isMobile ? 18 : 19
+  // #47 放大 ×1.2：桌面开奖球 19→23。⚠ 必须 isDesk 门控 —— beadSize 同时喂静态 ballGrid 与两个
+  //   DrawStage，而 drawZone 变量在 gameCard:536 与 mobileCard:686 【两处都渲染】，写死会连手机一起放大。
+  const beadSize = isMobile ? 18 : isDesk ? 23 : 19
   const ballGrid = (balls, color, lit) => (
     <div style={{
       display: 'grid', gridTemplateColumns: `repeat(5, ${beadSize}px)`,
@@ -501,7 +561,8 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const drawZone = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '8px 12px 0' : '6px 18px 0',
+      // #47 二批：补 hasRail 档 —— 外层包裹层已是 800 宽，本卡侧边距必须归零才共用同一条宽度线
+      margin: isMobile ? '8px 12px 0' : hasRail ? '6px 0 0' : '6px 18px 0',
       display: 'flex', flexDirection: 'column', gap: 6,
     }}>
       {fullBlock}
@@ -515,6 +576,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   // ---- ③ 珠盘路（切件；六页签 + 占比条 + 真历史滚动，容量 6×20）——判定/页签单一出处 ----
   const beadRoad = (
     <DerbyDayRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+      cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24} freshIndex={freshIdx}
       style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
   )
@@ -545,7 +607,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（两组并排 + 半全场组，视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
-        <DerbyDayMarkets {...marketsProps} isDesk={isDesk} />
+        <DerbyDayMarkets {...marketsProps} isDesk={isDesk} big />
       </div>
 
       {/* 弹性垫片：把珠盘路推向底部贴注栏 */}
@@ -565,8 +627,8 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)',
+          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47：92→110，钮字号 ×1.2 后 92px 折三行 */
+          gridTemplateRows: 'repeat(2, 34px)',
           gap: 6,
           maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>

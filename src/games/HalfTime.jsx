@@ -18,6 +18,7 @@ import HalfTimeStage from './stages/HalfTimeStage'
 import HalfTimeMarkets from './markets-ui/HalfTimeMarkets'                  // #41 单15：盘口区切件
 import { SEC_KEYS } from './markets-ui/halftimeMarketsData'                // #41 单15：段位 key 集（手机手风琴 selCount 用，单一出处）
 import HalfTimeRoad from './markets-ui/HalfTimeRoad'                        // #41 单15：珠盘路墙
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 import HalfTimePodium from './markets-ui/HalfTimePodium'                    // #41 单15：上局信息条（20 球+和值）
 import { RULES } from './markets-ui/halftimeRules'                          // #41 单15：玩法说明内容（共享）
 
@@ -38,7 +39,16 @@ const DRAW_ANIM_MS = 10000
 const G = GAME_BY_ID['HalfTime']
 
 // 玩法说明文案已切至 ./markets-ui/halftimeRules（RULES 单一出处，原名 import 回用）。
-const ROAD_CAP = 120   // 珠盘路 6×20 滚动容量
+// #47 定案（全端规则）：路珠【列对齐滑动窗口】，右端恒留 2 空列。
+// 可用容量 = (30−2)×6 = 168；显示长度 L ≡ N (mod 6) 且 L ≤ 168，取最大 → 163–168 浮动。
+const ROAD_CAP = 168
+
+// #47 桌面路珠网格（模块级：进组件内会每渲染重建，带进 effect deps 会让首灌反复跑）
+const DESK_ROAD = { cols: 30, rows: 6 }
+
+// ⚠ 手机段专用容量：桌面 ROAD_CAP 改动【不得】影响手机（首批学费）。本款手机路珠走
+//   history.slice(-MOBILE_ROAD_CAP)，CAP 一变手机显示的珠子会整体前移，故钉回原值。
+const MOBILE_ROAD_CAP = 120
 
 // 种子上期 + 种子历史（真开奖会逐期顶掉）
 const SEED_LAST = deriveRound([3, 7, 12, 18, 22, 25, 31, 36, 40, 44, 47, 52, 55, 59, 63, 66, 70, 74, 77, 80])
@@ -60,7 +70,8 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   // 单S5：≥1280 才有右栏（App 层 marginRight:200 让位），中栏变窄。此regime收一条统一宽度线：
   // 舞台/盘区/珠盘/下注条同 maxWidth 居中（压缩收留白），下注条与盘口板左右沿对齐。严格门控 ≥1280，<1280 逐位不变。
   const hasRail = useMediaQuery('(min-width: 1280px)')
-  const RAIL_MAXW = 680
+  // #47 二批·对表硬指标：680→800。开奖/盘口/路珠/筹码四区共用同一条宽度线。
+  const RAIL_MAXW = 800
   // desk mode narrows the card by the 340px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
@@ -80,6 +91,8 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   const [historyOpen, setHistoryOpen] = useState(false)   // 开奖历史抽屉
   const [rulesOpen, setRulesOpen] = useState(false)          // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())        // 待确认选格
+  // #47 动效：仅 WS 真新珠时记新珠索引，【按房存】（单值会被后台快房覆盖，首批实测踩过）。
+  const [freshByRoom, setFreshByRoom] = useState({})
   const [roadTab, setRoadTab] = useState('O/U')
   const [userAcc, setUserAcc] = useState({ m1: true, m2: true, m3: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开）；纯 UI，不动下注 state
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
@@ -100,6 +113,10 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   const [preHits, setPreHits] = useState(null)   // 开奖动画收尾的命中预亮（结算前）
   const picksRef = useRef(picks)
   const betRef = useRef(bet)
+  // #47 二批 新增：珠盘路整局记账去重（按期号）。本款原先无此 ref —— 追珠只靠 finishRound
+  //   每期跑一次隐式保证。接了历史播种后必须显式去重：若玩家【正好在开奖动画中进页】，
+  //   服务端已结算该期→history 已含它→播种灌入，随后动画结束 finishRound 会再追一次 = 重复上珠。
+  const roadRecordedRef = useRef(null)
   const pendingRef = useRef(null)          // 只读表演：当前动画派生结果（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -136,7 +153,15 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
     }
     // #42：两份累积写进【选中房】自己的槽（动画演完才写，保悬念）
     setLastDrawByRoom(m => ({ ...m, [selectedRoomKey]: r }))
-    setHistoryByRoom(m => ({ ...m, [selectedRoomKey]: [...(m[selectedRoomKey] || SEED_HISTORY), { sum: r.sum, half: halfOf(r) }].slice(-ROAD_CAP) }))
+    // #47：按期号去重（防与历史播种重复上珠，见 roadRecordedRef 注释）
+    if (rnd != null && roadRecordedRef.current !== rnd) {
+      roadRecordedRef.current = rnd
+      setHistoryByRoom(m => {
+        const next = roadWindow([...(m[selectedRoomKey] || SEED_HISTORY), { sum: r.sum, half: halfOf(r) }], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))   // WS 真新珠 → 弹入
+        return { ...m, [selectedRoomKey]: next }
+      })
+    }
     setResult({ hits, winTotal })
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
@@ -203,10 +228,57 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       bgDrawRoundRef.current[r.key] = rm.roundNo
       const d = deriveRound(rm.drawResult.balls)
       setLastDrawByRoom(m => ({ ...m, [r.key]: d }))
-      setHistoryByRoom(m => ({ ...m, [r.key]: [...(m[r.key] || SEED_HISTORY), { sum: d.sum, half: halfOf(d) }].slice(-ROAD_CAP) }))
+      setHistoryByRoom(m => {
+        const next = roadWindow([...(m[r.key] || SEED_HISTORY), { sum: d.sum, half: halfOf(d) }], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [r.key]: next.length - 1 }))   // WS 真新珠 → 弹入（切回该房可见）
+        return { ...m, [r.key]: next }
+      })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
+
+  // F. #47 二批 路珠真历史播种（双流版：本款 registry rooms 两枚，有 15s 快房）。
+  //   · 两房各拉各的（?room=15s 现成分流参），与右栏「近期开奖」同端点同 apiGet。
+  //   · 后端 limit 夹在 50 → 走现成 cursor 分页，PAGES 由 SEED_TARGET 定。
+  //   · ⚠ 本款路珠存的是【两字段对象】{sum, half}，不是裸数值 —— 派生须同时映两个字段，
+  //     与 finishRound / E 段同口径（halfOf 走引擎，禁二份表）。
+  //   · 首灌按【最新期号序号】定相位（非拉取条数，否则恒整除 6 会钉成满列），
+  //     与 WS 增量后 window(D+1) 天然连续；首灌不是真新珠，freshByRoom 置 -1 不弹入。
+  //   · 失败静默保留种子珠；只读，钱层零碰。
+  const apiRef = useRef(api)
+  useEffect(() => { apiRef.current = api })
+  useEffect(() => {
+    let cancelled = false
+    const PAGE = 50
+    const SEED_TARGET = roadSeedTarget(DESK_ROAD)
+    const PAGES = Math.ceil(SEED_TARGET / PAGE)
+    const seedRoom = async (r) => {
+      const qs = r.key === '15s' ? '&room=15s' : ''
+      const acc = []
+      let cursor = null
+      for (let pg = 0; pg < PAGES && acc.length < SEED_TARGET; pg++) {
+        const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+        const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${qs}${cs}`)
+        const items = d?.items || []
+        if (!items.length) break
+        acc.push(...items)
+        cursor = d?.nextCursor
+        if (!cursor) break
+      }
+      if (cancelled || !acc.length) return
+      const rows = acc.slice(0, SEED_TARGET).reverse()
+        .map((it) => (Array.isArray(it?.drawResult?.balls) ? (() => { const d = deriveRound(it.drawResult.balls); return { sum: d.sum, half: halfOf(d) } })() : null))
+        .filter(Boolean)
+      if (!rows.length) return
+      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindowAt(rows, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
+      if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
+      else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
+    }
+    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoomKey])
 
   const betting = room.phase === 'betting'
   const drawing = uiPhase === 'drawing'
@@ -325,7 +397,9 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
 
   // ---- 珠盘路（真历史滚动，容量 6×20）——切件（判定/页签单一出处）----
   const beadRoad = (
-    <HalfTimeRoad history={history.slice(-ROAD_CAP)} tab={roadTab} onTab={setRoadTab}
+    <HalfTimeRoad history={history} tab={roadTab} onTab={setRoadTab}
+      cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
+      freshIndex={freshByRoom[selectedRoomKey] ?? -1}
       style={{ margin: isMobile ? '0 12px 10px' : hasRail ? '0 auto 12px' : '0 18px 12px',
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
   )
@@ -364,8 +438,11 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（行①②③ 视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
-        <HalfTimeMarkets {...marketsProps} />
+        <HalfTimeMarkets {...marketsProps} big />
       </div>
+
+      {/* #47 二批 指标4：本款原本无垫片，补在盘口与路珠之间 → 空白沉中不沉底，路珠贴筹码条。 */}
+      <div style={{ flex: '1 0 auto' }} />
 
       {beadRoad}
 
@@ -375,8 +452,8 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
       }}>
         <div style={{
-          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
+          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47：92→110，钮字号 ×1.2 后 92px 折三行 */
+          gridTemplateRows: 'repeat(2, 34px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
@@ -495,7 +572,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       {/* ③ 锁底：路珠(5视角 pill 原样 + 珠压 2 行) + 注栏 */}
       <div style={{ flex: '0 0 auto' }}>
         {/* 珠盘路切件（紧凑变体：页签横滚 + 2 行 15px 珠矩阵，视觉原样） */}
-        <HalfTimeRoad history={history.slice(-ROAD_CAP)} tab={roadTab} onTab={setRoadTab} compact
+        <HalfTimeRoad history={history.slice(-MOBILE_ROAD_CAP)} tab={roadTab} onTab={setRoadTab} compact
           style={{ padding: '4px 12px 0' }} />
         <div style={{ padding: '6px 12px', background: HALFTIME.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{

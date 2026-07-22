@@ -19,7 +19,7 @@ const SIDES = [
 ]
 const pad2 = n => String(n).padStart(2, '0')
 
-export default function NumberUpMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, chipMode = false, openMode = 'all' }) {
+export default function NumberUpMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, chipMode = false, openMode = 'all', big = false }) {
   const betting = !disabled
   // 三组折叠/展开：默认全开=原页习惯；openMode='first' 时仅开第一组（多桌手风琴记忆，每卡独立）
   const [open, setOpen] = useState(() => openMode === 'first' ? [true, false, false] : [true, true, true])
@@ -50,9 +50,9 @@ export default function NumberUpMarkets({ onPick, stakes, disabled = false, flyi
       position: 'relative',
     }
   }
-  const cellName = { color: NUMBERUP.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: NUMBERUP.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: NUMBERUP.gold, fontSize: isMobile ? 10.5 : 12.5, fontWeight: 900 }
+  const cellName = { color: NUMBERUP.text, fontSize: isMobile ? 10 : big ? 15 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: NUMBERUP.dim, fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: NUMBERUP.gold, fontSize: isMobile ? 10.5 : big ? 14.5 : 12.5, fontWeight: 900 }
   const secHead = { color: NUMBERUP.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 6 }
   // 角标：原页 = 文字 $X 绿标（分毫不变）；多桌 chipMode = 筹码码叠角（不改键内布局）。
   const stakeChip = (key) => {
@@ -73,13 +73,15 @@ export default function NumberUpMarkets({ onPick, stakes, disabled = false, flyi
     const placed = stakeOf(key) > 0
     return (
       <button key={key} type="button" className={`nuCell${wonCls(key)}`} disabled={!betting} onClick={() => onPick(key)} style={{
-        height: isMobile ? 28 : 22, minWidth: 0, padding: 0,
+        // #47 补刀：直选键接放大档 —— 原先 height/fontSize 都没接 big，与下方大小·单双不成比例。
+        // 键宽由 repeat(10,1fr) 自动吃满 800 内宽（实测 76px/键），字号提到 15 档后正好填掉两侧空白。
+        height: isMobile ? 28 : big ? 30 : 22, minWidth: 0, padding: 0,
         borderRadius: 6, cursor: betting ? 'pointer' : 'not-allowed',
         background: hit ? NUMBERUP.sel : sel ? NUMBERUP.gold : NUMBERUP.grey,
         border: `1px solid ${hit ? NUMBERUP.sel : sel || placed ? NUMBERUP.gold : 'rgba(255,255,255,0.14)'}`,
         boxShadow: hit ? '0 0 10px rgba(53,208,127,0.7)' : sel ? '0 0 8px rgba(255,213,79,0.5)' : 'none',
         color: hit || sel ? '#083a1b' : NUMBERUP.text,
-        fontSize: isMobile ? 10.5 : 10, fontWeight: 800,
+        fontSize: isMobile ? 10.5 : big ? 15 : 10, fontWeight: 800,
         fontFamily: "'Space Grotesk', sans-serif",
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         boxSizing: 'border-box',
@@ -109,10 +111,16 @@ export default function NumberUpMarkets({ onPick, stakes, disabled = false, flyi
         .nuWin { animation: nuWinPulse 1s ease-in-out infinite; z-index: 2; }`}</style>
 
       {/* 组① 直选 00–49（桌面内滚：minHeight130 + overflowY；手机去内滚随中滚展开）*/}
-      <div style={{ ...groupBoxBase, boxSizing: 'border-box', ...(!isMobile ? { flex: '0 1 auto', minHeight: 130, overflowY: 'auto' } : {}) }}>
+      {/* #47 最后一刀：拆掉直选 groupBox 的【嵌套内滚】——原先 !isMobile 档带 minHeight:130 +
+          overflowY:auto，50 键 5 行只露 3 行、自己还能滚，形成「盘区滚 + 直选再滚」的滚中滚。
+          放大档下去掉后 5 行全展开进 DOM 流，滚动收敛为盘区单层，玩家一个滚动面到底。
+          ⚠ 只在 big（= 号码王原页桌面，本分支唯一实际消费者）下去掉；多桌走 isMobile=true 不进
+          本分支，其余非 big 桌面消费者（若将来有）保持原行为，逐字节不动。 */}
+      <div style={{ ...groupBoxBase, boxSizing: 'border-box', ...(!isMobile && !big ? { flex: '0 1 auto', minHeight: 130, overflowY: 'auto' } : {}) }}>
         {groupHead(0)}
         {open[0] && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 3 }}>
+        /* #47 补刀：行距随键高同步放 */
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: big ? 5 : 3 }}>
           {Array.from({ length: 50 }, (_, i) => gridCell(i))}
         </div>
         )}
@@ -122,18 +130,25 @@ export default function NumberUpMarkets({ onPick, stakes, disabled = false, flyi
       <div style={{ ...groupBoxBase, flex: '0 0 auto' }}>
         {groupHead(1)}
         {open[1] && (
-        <div style={{ display: 'flex', gap: isMobile ? 8 : 14, flexDirection: isMobile ? 'column' : 'row' }}>
+        /* #47 再补：放大档下【拆两行】—— 原桌面是左右并排各占一半，5 键的首位比 10 键的尾数
+            宽一倍，一行里出现两种键宽。改为纵排后每行各自吃满 800：首位 5 键均分（更宽）、
+            尾数 10 键均分（与直选同宽同 gap）。⚠ 手机分支原本就是 column，此处逐字节不动。 */
+        <div style={{ display: 'flex', gap: isMobile ? 8 : big ? 10 : 14, flexDirection: (isMobile || big) ? 'column' : 'row' }}>
           {[
             { pre: 'fd', label: `首位 · ${ODDS.firstDigit.toFixed(2)}`, count: 5 },
             { pre: 'ld', label: `尾数 · ${ODDS.lastDigit.toFixed(2)}`, count: 10 },
           ].map(g => (
-            <div key={g.pre} style={{ flex: 1, minWidth: 0 }}>
+            /* #47 再补：纵排下不吃 flex:1，避免瓜分纵向高度 */
+            <div key={g.pre} style={big ? { minWidth: 0 } : { flex: 1, minWidth: 0 }}>
               <div style={secHead}>{g.label}</div>
-              <div style={{ display: 'flex', gap: isMobile ? 3 : 4 }}>
+              {/* #47 补刀：键距随放大档；#47 再补：6→5 与直选 gap 一致 → 尾数键与直选同宽 */}
+              <div style={{ display: 'flex', gap: isMobile ? 3 : big ? 5 : 4 }}>
                 {Array.from({ length: g.count }, (_, d) => (
                   <button key={d} type="button" className={`nuCell${wonCls(`${g.pre}-${d}`)}`} disabled={!betting} onClick={() => onPick(`${g.pre}-${d}`)}
-                    style={{ ...cellBtn(`${g.pre}-${d}`, { compact: true }), padding: '4px 0' }}>
-                    <span style={{ ...cellName, fontSize: isMobile ? 11 : 12 }}>{d}</span>
+                    /* #47 补刀：内距随放大档 */
+                    style={{ ...cellBtn(`${g.pre}-${d}`, { compact: true }), padding: big ? '8px 0' : '4px 0' }}>
+                    {/* #47 补刀：原行内 fontSize 把 big 版 cellName 盖掉了，改为 big 感知 */}
+                    <span style={{ ...cellName, fontSize: isMobile ? 11 : big ? 15 : 12 }}>{d}</span>
                     {stakeChip(`${g.pre}-${d}`)}{flyDot(`${g.pre}-${d}`)}
                   </button>
                 ))}
@@ -153,7 +168,7 @@ export default function NumberUpMarkets({ onPick, stakes, disabled = false, flyi
             <button key={m.key} type="button" className={`nuCell${wonCls(m.key)}`} disabled={!betting} onClick={() => onPick(m.key)} style={cellBtn(m.key, { compact: true })}>
               <span style={cellName}>{m.name}</span>
               <span style={cellRange}>{m.range}</span>
-              <span style={{ ...cellOdds, fontSize: isMobile ? 10 : 11.5 }}>{ODDS.side.toFixed(2)}</span>
+              <span style={{ ...cellOdds, fontSize: isMobile ? 10 : big ? 15 : 11.5 }}>{ODDS.side.toFixed(2)}</span>
               {stakeChip(m.key)}{flyDot(m.key)}
             </button>
           ))}

@@ -27,6 +27,7 @@ import { RULES } from './markets-ui/numberupRules'               // #41 单15：
 
 // —— 引擎常量块已剪切到 ./markets/numberup（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { pad2, drawNumber, deriveNum, ODDS, hitsOf, round2, MARKETS } from './markets/numberup'
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { drawNumber, deriveNum, ODDS, MARKETS, hitsOf }
 
 // ---------- 换人牌舞台时间轴（rAF 内使用，毫秒）：十位先定、个位后定 ----------
@@ -35,7 +36,18 @@ const DRAW_ANIM_MS = 6500
 const G = GAME_BY_ID['NumberUp']
 
 // 玩法说明文案已切至 ./markets-ui/numberupRules（RULES，原页 + 多桌卡共享，单一出处）。
-const ROAD_CAP = 120
+// #47 定案（全端规则）：路珠【列对齐滑动窗口】，右端恒留 2 空列。
+// 可用容量 = (30−2)×6 = 168；显示长度 L ≡ N (mod 6) 且 L ≤ 168，取最大 → 163–168 浮动。
+const ROAD_CAP = 168
+
+// #47 桌面路珠网格（模块级：进组件内会每渲染重建，带进 effect deps 会让首灌反复跑）
+const DESK_ROAD = { cols: 30, rows: 6 }
+
+// ⚠ 手机段专用容量与列数：桌面改动【不得】影响手机（首批学费）。本款 ROAD_COLS 原先【双端共用】，
+//   同时喂桌面 beadRoad 与手机内联珠格；ROAD_CAP 同样双端共用且手机从切片头部取，
+//   故两者都必须解耦、钉回原值。
+const MOBILE_ROAD_CAP = 120
+const MOBILE_ROAD_COLS = 20
 
 // 种子上期 + 种子历史（值域 0–49，真开奖逐期顶掉）
 const SEED_LAST = deriveNum(38)
@@ -69,6 +81,10 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   const api = usePlayerApi({ playerToken, onLogout, setServerBalance })
   const isMobile = useIsMobile()
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
+  // #47 二批：本款原先【没有 hasRail 居中骨架】（四区无 maxWidth，与其余八款不同族）。
+  //   为对表「四区同一条 800 宽度线」，此处补上，用法与五行/中场/德比逐字一致。
+  const hasRail = useMediaQuery('(min-width: 1280px)')
+  const RAIL_MAXW = 800
   // desk mode narrows the card by the 340px feed — below 1200px viewport the
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   // ---- #42 速度房骨架（单5 抽件）：双订阅 / 选中房 / per-room 注单 / A0 / D / tab 条 ----
@@ -87,6 +103,8 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   const [historyOpen, setHistoryOpen] = useState(false)   // 开奖历史抽屉
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
+  // #47 动效：仅 WS 真新珠时记新珠索引，【按房存】（单值会被后台快房覆盖，首批实测踩过）。
+  const [freshByRoom, setFreshByRoom] = useState({})
   const [roadTab, setRoadTab] = useState('NUMBER')
   const [userAcc, setUserAcc] = useState({ pick: true, digit: true, side: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开）；纯 UI，不动下注 state
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
@@ -110,6 +128,9 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
 
   const picksRef = useRef(picks)
   const betRef = useRef(bet)
+  // #47 二批 新增：珠盘路整局记账去重（按期号）。接了历史播种后必须显式去重
+  //   （玩家正好在开奖动画中进页时 history 已含该期，动画结束会再追一次 = 重复上珠）。
+  const roadRecordedRef = useRef(null)
   const pendingRef = useRef(null)          // 只读表演：当前动画开出号码的派生对象（.num 等）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -149,7 +170,15 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
     // #42：三份累积全写进【选中房】自己的槽（动画演完才写，保悬念）。
     setLastNumByRoom(m => ({ ...m, [selectedRoomKey]: r }))
     setRecentByRoom(m => ({ ...m, [selectedRoomKey]: [r.num, ...(m[selectedRoomKey] || SEED_RECENT)].slice(0, 5) }))
-    setHistoryByRoom(m => ({ ...m, [selectedRoomKey]: [...(m[selectedRoomKey] || SEED_HISTORY), r.num].slice(-ROAD_CAP) }))
+    // #47：按期号去重（防与历史播种重复上珠）+ 列对齐窗口 + 新珠弹入
+    if (rnd != null && roadRecordedRef.current !== rnd) {
+      roadRecordedRef.current = rnd
+      setHistoryByRoom(m => {
+        const next = roadWindow([...(m[selectedRoomKey] || SEED_HISTORY), r.num], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))
+        return { ...m, [selectedRoomKey]: next }
+      })
+    }
     setResult({ hits, winTotal })
     // 假注单本期落账（展示用，结果已定后的装饰随机）
     setFeedBets(list => list.map(b => Math.random() < 0.45
@@ -218,10 +247,54 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       const d = deriveNum(rm.drawResult.num)
       setLastNumByRoom(m => ({ ...m, [r.key]: d }))
       setRecentByRoom(m => ({ ...m, [r.key]: [d.num, ...(m[r.key] || SEED_RECENT)].slice(0, 5) }))
-      setHistoryByRoom(m => ({ ...m, [r.key]: [...(m[r.key] || SEED_HISTORY), d.num].slice(-ROAD_CAP) }))
+      setHistoryByRoom(m => {
+        const next = roadWindow([...(m[r.key] || SEED_HISTORY), d.num], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [r.key]: next.length - 1 }))
+        return { ...m, [r.key]: next }
+      })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
+
+  // F. #47 二批 路珠真历史播种（双流版：本款 registry rooms 两枚，有 15s 快房）。
+  //   · 两房各拉各的（?room=15s 现成分流参）；limit 被后端夹在 50 → 走现成 cursor 分页。
+  //   · 派生 deriveNum(num).num，与 finishRound / E 段同口径；接口新→旧、路珠旧→新故 reverse。
+  //   · 首灌按【最新期号序号】定相位（非拉取条数，否则恒整除 6 会钉成满列）；不弹入。
+  //   · 失败静默保留种子珠；只读，钱层零碰。
+  const apiRef = useRef(api)
+  useEffect(() => { apiRef.current = api })
+  useEffect(() => {
+    let cancelled = false
+    const PAGE = 50
+    const SEED_TARGET = roadSeedTarget(DESK_ROAD)
+    const PAGES = Math.ceil(SEED_TARGET / PAGE)
+    const seedRoom = async (r) => {
+      const qs = r.key === '15s' ? '&room=15s' : ''
+      const acc = []
+      let cursor = null
+      for (let pg = 0; pg < PAGES && acc.length < SEED_TARGET; pg++) {
+        const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+        const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${qs}${cs}`)
+        const items = d?.items || []
+        if (!items.length) break
+        acc.push(...items)
+        cursor = d?.nextCursor
+        if (!cursor) break
+      }
+      if (cancelled || !acc.length) return
+      const nums = acc.slice(0, SEED_TARGET).reverse()
+        .map((it) => (it?.drawResult?.num != null ? deriveNum(it.drawResult.num).num : null))
+        .filter((n) => n != null)
+      if (!nums.length) return
+      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindowAt(nums, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
+      if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
+      else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
+    }
+    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoomKey])
 
   const betting = room.phase === 'betting'
   const drawing = uiPhase === 'drawing'
@@ -391,21 +464,27 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   )
 
   // ---- 珠盘路（真历史滚动，容量 6×20）----
-  const ROAD_COLS = 20
-  const roadItems = history.slice(-ROAD_CAP)
+  // #47：桌面走 DESK_ROAD；本常量降级为【手机专用】别名，解耦双端（见模块级注释）
+  const ROAD_COLS = MOBILE_ROAD_COLS
+  const roadItems = history.slice(-MOBILE_ROAD_CAP)   // #47：喂手机内联珠格，钉回手机专用容量
   const beads = roadItems.map(n => beadFor(roadTab, n))
   // ---- 珠盘路（切件；桌面 6×20；手机三段版另有 2 行内联）----
   const beadRoad = (
-    <NumberUpRoad history={history} tab={roadTab} onTab={setRoadTab} cols={ROAD_COLS} rows={6}
-      style={{ margin: isMobile ? '0 12px 10px' : '0 18px 10px' }} />
+    <NumberUpRoad history={history} tab={roadTab} onTab={setRoadTab}
+      cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
+      freshIndex={freshByRoom[selectedRoomKey] ?? -1}
+      style={{ margin: isMobile ? '0 12px 10px' : hasRail ? '0 auto 10px' : '0 18px 10px' }} />   /* #47：hasRail 档归零侧边距 */
   )
 
   // ---- 开奖区（常驻顶部）：REVEAL/SETTLED 换人牌舞台 / BETTING 上期开奖静态待命 ----
-  const stageH = isMobile ? 150 : 178
+  // #47 放大 ×1.2：桌面开奖台 178→214。⚠ stageZone 在 gameCard 与 mobileCard 【两处都渲染】，
+  //   写死会连手机一起放大，故必须 isDesk 门控（首批学费）。
+  const stageH = isMobile ? 150 : isDesk ? 214 : 178
   const stageZone = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '8px 12px 0' : '10px 18px 0',
+      // #47 二批：补 hasRail 档 —— 外层包裹层已是 800 宽，本卡侧边距必须归零才共用同一条宽度线
+      margin: isMobile ? '8px 12px 0' : hasRail ? '10px 0 0' : '10px 18px 0',
       background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)',
       borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box', minHeight: stageH,
     }}>
@@ -443,34 +522,36 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       {topBar}
 
       {/* ---- ① 开奖区（常驻顶部）---- */}
-      {stageZone}
+      {/* #47：仅在此处（gameCard）包 800 宽度线；stageZone 本体不动 → mobileCard 复用它时零感 */}
+      {hasRail ? <div style={{ alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW, boxSizing: 'border-box' }}>{stageZone}</div> : stageZone}
 
       {/* ---- ② 下注区: 盘区三行（可滚）；PICK 网格空间不足时独立纵滚 ---- */}
       <div style={{
         flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column',
-        padding: isMobile ? '8px 12px' : '8px 18px', boxSizing: 'border-box',
+        padding: isMobile ? '8px 12px' : hasRail ? '8px 0' : '8px 18px', boxSizing: 'border-box',
         gap: 8, overflowY: 'auto',
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),   /* #47：800 宽度线 */
       }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处（多桌卡同 import） */}
         <NumberUpMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
-          selected={picks} hits={result?.hits ?? preHits} isMobile={isMobile} />
+          selected={picks} hits={result?.hits ?? preHits} isMobile={isMobile} big />
       </div>
 
       <div style={{ flex: '1 0 auto' }} />
 
       {/* ---- ③ 珠盘路（常驻底部）---- */}
-      {beadRoad}
+      {hasRail ? <div style={{ alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW, boxSizing: 'border-box' }}>{beadRoad}</div> : beadRoad}
 
       {/* ---- ④ bottom bet band — pinned，grid 4列×2行（照 Line Up 定案）---- */}
       <div style={{
-        flex: '0 0 auto', padding: '6px 12px', background: NUMBERUP.band,
+        flex: '0 0 auto', padding: hasRail ? '6px 0' : '6px 12px', background: NUMBERUP.band,
         borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
       }}>
         <div style={{
-          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
+          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47：92→110 */
+          gridTemplateRows: 'repeat(2, 34px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },

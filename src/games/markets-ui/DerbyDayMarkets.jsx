@@ -27,8 +27,7 @@ const hexA = (hex, a) => {
 export default function DerbyDayMarkets({
   onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY,
   pushes = EMPTY, sideWins = null, isMobile = false, isDesk = false,
-  chipMode = false, openMode = 'all', section,
-}) {
+  chipMode = false, openMode = 'all', section, big = false }) {
   const betting = !disabled
   // 三段折叠/展开（多桌手风琴，每卡独立）：openMode='first' 仅开第一段，'all' 全开
   const [open, setOpen] = useState(() => openMode === 'first' ? [true, false, false] : [true, true, true])
@@ -63,9 +62,9 @@ export default function DerbyDayMarkets({
         : sideWin === false ? { opacity: 0.45 } : {}),
     }
   }
-  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
+  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : big ? 15 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : big ? 14.5 : 12, fontWeight: 900 }
   const secHead = { color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
