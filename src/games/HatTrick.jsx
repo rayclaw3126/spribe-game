@@ -16,7 +16,8 @@ import { usePlayerApi } from '../lib/playerApi'
 import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import HatTrickStage from './stages/HatTrickStage'
 import HatTrickMarkets, { DieFace } from './markets-ui/HatTrickMarkets'   // #41 单15：盘口区切件（DieFace 随件，舞台/mobile 回用）
-import HatTrickRoad from './markets-ui/HatTrickRoad'                       // #41 单15：珠盘路墙
+import HatTrickRoad from './markets-ui/HatTrickRoad'
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）                       // #41 单15：珠盘路墙
 import HatTrickPodium from './markets-ui/HatTrickPodium'                   // #41 单15：上局信息条（subRow 槽）
 import { RULES } from './markets-ui/hattrickRules'                         // #41 单15：玩法说明内容（共享）
 import { SIDES, ROAD_TABS, ROAD_TAB_LABELS, beadFor } from './markets-ui/hattrickShared'   // #41 单15：SIDES/珠盘页签/beadFor（mobile 段回用）
@@ -39,8 +40,20 @@ const DIE_LOCK = [2600, 3500, 4500]   // 各骰定格时刻（第1骰 2.6s / 第
 const DRAW_ANIM_MS = 7000
 const G = GAME_BY_ID['HatTrick']
 
-// 玩法说明文案已切至 ./markets-ui/hattrickRules（RULES 共享）。
-const ROAD_CAP = 120
+// #47 定案（全端规则）：【路珠不填满，右端恒留空最后两列】。
+// 数据上限 = (列数 − 2) × 行数 —— 桌面 30 列 × 6 行 → (30−2)×6 = 168 颗。
+// 网格仍渲染 30×6=180 格，只喂 168 颗；珠按列优先填充，故恒定占满第 1–28 列、
+// 第 29–30 列常空，新珠永远落在空区左缘。⚠ 改列数/行数时必须同步改本值。
+// 本常量各款私有（另 6 款各有自己的一份同名常量、互不引用），改这里只影响本款。
+const ROAD_CAP = 168
+
+// #47 桌面路珠网格（模块级常量：进组件内会每渲染重建，带进 effect deps 会让首灌反复跑）
+const DESK_ROAD = { cols: 30, rows: 6 }
+
+// ⚠ 手机段专用容量：桌面 ROAD_CAP 改动【不得】影响手机。手机内联珠格是从切片【头部】
+//   取 ROAD_COLS*2 颗（slice(-CAP)[i], i<40），故 CAP 一变手机显示的珠子整体前移。
+//   #46/#47 把桌面 CAP 从 120 抬到 168 时曾无意改动手机显示，此常量将手机钉回原值 120。
+const MOBILE_ROAD_CAP = 120
 
 // 种子历史（新→旧；真开奖逐期顶掉。含 2 期豹子：[2,2,2]、[6,6,6]）
 const SEED_ROUNDS = [
@@ -61,7 +74,9 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // 单S5：≥1280 有右栏、中栏变窄 → 舞台/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
   const hasRail = useMediaQuery('(min-width: 1280px)')
-  const RAIL_MAXW = 670
+  // #47 首批·对表五行定稿：670→800。舞台(599)/盘口(627)/路珠(640)/筹码条(655) 四区
+  // 全部 width:100% + maxWidth: RAIL_MAXW，共用同一条宽度线 → 左右边线垂直对齐。
+  const RAIL_MAXW = 800
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const [bet, setBet] = useState(10)
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
@@ -69,6 +84,9 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const [historyOpen, setHistoryOpen] = useState(false)   // 开奖历史抽屉
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
+  // #47 动效：仅 WS 真新珠时记新珠索引。⚠ 必须【按房存】—— 单值会被后台快房追珠覆盖，
+  //   导致选中房刚亮起的高亮被瞬间清掉（实测 2.2s 内即消失）。首灌/切房一律清该房 → 不弹入。
+  const [freshByRoom, setFreshByRoom] = useState({})
   const [roadTab, setRoadTab] = useState('TOTAL')
   const [userAcc, setUserAcc] = useState({ total: true, triple: true, double: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开）；纯 UI，不动下注 state
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
@@ -104,6 +122,11 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
 
   const picksRef = useRef(picks)
   const betRef = useRef(bet)
+  // #47 首批 新增：珠盘路整局记账去重（按期号）。本款原先无此 ref（settleInfoRef 等由
+  //   useSpeedRooms 解构而来，非本地）—— 追珠只靠 finishRound 每期跑一次隐式保证。
+  //   接了历史播种后必须显式去重：若玩家【正好在开奖动画中进页】，服务端已结算该期→
+  //   history 已含它→播种灌入，随后动画结束 finishRound 会再追一次 = 重复上珠。
+  const roadRecordedRef = useRef(null)
   const pendingRef = useRef(null)         // 只读表演：当前动画骰面派生（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -172,7 +195,15 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     // #42：三份累积写进【选中房】自己的槽（动画演完才写，保悬念）
     setLastRollByRoom(m => ({ ...m, [selectedRoomKey]: r }))
     setRecentByRoom(m => ({ ...m, [selectedRoomKey]: [r.total, ...(m[selectedRoomKey] || SEED_RECENT)].slice(0, 5) }))
-    setHistoryByRoom(m => ({ ...m, [selectedRoomKey]: [...(m[selectedRoomKey] || SEED_HISTORY), r.dice].slice(-ROAD_CAP) }))
+    // #47 首批：按期号去重（防与历史播种重复上珠，见 roadRecordedRef 注释）
+    if (rnd != null && roadRecordedRef.current !== rnd) {
+      roadRecordedRef.current = rnd
+      setHistoryByRoom(m => {
+        const next = roadWindow([...(m[selectedRoomKey] || SEED_HISTORY), r.dice], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))   // WS 真新珠 → 弹入
+        return { ...m, [selectedRoomKey]: next }
+      })
+    }
     setResult({ hits, winTotal })
     setSettleFx(true)   // 开结算演出：命中飞金 / 未中碎裂
     setSuspense(null)   // 悬念窗收束（保底：正常应已在第三颗定格时清）
@@ -218,6 +249,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     picksRef.current = new Set(); setPicks(new Set())
     setResult(null); setPreHits(null); setSettleFx(false); setSuspense(null); setNearMiss(new Set())
     setNetErr(null)
+    setFreshByRoom({})   // #47：切房不弹入
     pendingRef.current = null          // 断开上一房的三骰对象（舞台三元据它判分支）
     setUiPhase('betting')
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -256,10 +288,61 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       const roll = deriveRoll(rm.drawResult.dice)
       setLastRollByRoom(m => ({ ...m, [r.key]: roll }))
       setRecentByRoom(m => ({ ...m, [r.key]: [roll.total, ...(m[r.key] || SEED_RECENT)].slice(0, 5) }))
-      setHistoryByRoom(m => ({ ...m, [r.key]: [...(m[r.key] || SEED_HISTORY), roll.dice].slice(-ROAD_CAP) }))
+      setHistoryByRoom(m => {
+        const next = roadWindow([...(m[r.key] || SEED_HISTORY), roll.dice], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [r.key]: next.length - 1 }))   // WS 真新珠 → 弹入（切回该房时可见）
+        return { ...m, [r.key]: next }
+      })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
+
+  // F. #47 首批 路珠真历史播种（双流版：本款 registry rooms 两枚，有 15s 快房）。
+  //   · 两房各拉各的：?room=15s 是现成分流参（不传=标准房），与右栏「近期开奖」同端点同 apiGet。
+  //   · 后端 limit 夹在 50（round.js 的 Math.min(50,...)），单请求拿不满 180 → 走现成 cursor 分页，4 页封顶。
+  //   · 派生复用 deriveRoll(dice).dice，与 finishRound / E 段同一函数，禁二份表；接口新→旧、路珠旧→新故 reverse。
+  //   · 与 WS 增量珠去重：灌完把该房最新期号写进已有的两个去重 ref（选中房 roadRecordedRef、
+  //     未选中房 bgDrawRoundRef[key]），后续 WS 追同一期自然跳过，WS 那侧一行不改。
+  //   · 失败静默保留种子珠；只读，钱层零碰。
+  const apiRef = useRef(api)
+  useEffect(() => { apiRef.current = api })
+  useEffect(() => {
+    let cancelled = false
+    const PAGE = 50
+    const SEED_TARGET = roadSeedTarget(DESK_ROAD)   // #47：比 usable 多一整列，保证当前列半满
+    const PAGES = Math.ceil(SEED_TARGET / PAGE)
+    const seedRoom = async (r) => {
+      const qs = r.key === '15s' ? '&room=15s' : ''
+      const acc = []
+      let cursor = null
+      for (let pg = 0; pg < PAGES && acc.length < SEED_TARGET; pg++) {
+        const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+        const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${qs}${cs}`)
+        const items = d?.items || []
+        if (!items.length) break
+        acc.push(...items)
+        cursor = d?.nextCursor
+        if (!cursor) break
+      }
+      if (cancelled || !acc.length) return
+      const dice = acc.slice(0, SEED_TARGET).reverse()   // 素材（新→旧转旧→新）
+        .map((it) => (Array.isArray(it?.drawResult?.dice) ? deriveRoll(it.drawResult.dice).dice : null))
+        .filter(Boolean)
+      if (!dice.length) return
+      // #47：首灌【不预截】—— 直接把拉回的完整条数过窗口，当前列才天然半满；
+      //   且首灌不是「真新珠」，freshRoad 置空，避免一次灌 160+ 颗整屏爆闪。
+      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindowAt(dice, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setFreshByRoom(f => ({ ...f, [r.key]: -1 }))
+      const latest = acc[0]?.roundNo
+      if (latest) {
+        if (r.key === selectedRoomKey) roadRecordedRef.current = latest
+        else bgDrawRoundRef.current[r.key] = latest
+      }
+    }
+    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoomKey])
 
   // 注区中文名（悬念文案用）
   function keyLabel(key) {
@@ -506,9 +589,16 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
 
   // ---- 珠盘路（真历史滚动，容量 6×20）——桌面切件；mobile 段 2 行走自身内联（beads 复用）----
   const ROAD_COLS = 20
-  const beads = history.slice(-ROAD_CAP).map(d => beadFor(roadTab, d))
+  const beads = history.slice(-MOBILE_ROAD_CAP).map(d => beadFor(roadTab, d))
   const beadRoad = (
-    <HatTrickRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile} />
+    /* #47 首批：30 列 × 6 行 × 珠径 24 → 30×24+29×2=778 ≤ 内容可用宽 786，吃满 800 线。
+       本 beadRoad 变量【仅桌面 gameCard:640 使用】，手机在 889 行另有内联网格，故可直写不门控。 */
+    <HatTrickRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile} cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
+      freshIndex={freshByRoom[selectedRoomKey] ?? -1}
+      /* #47 首批 整改：件内默认 margin 是 '0 18px 8px'，有右栏时外层包裹层已是 800 宽，
+         不覆盖就会让路珠卡两侧各内缩 18px（实测 L383/R1147/W764，比开奖/盘口窄 36px）。
+         style 在件内是最后展开的，故此处覆盖生效。骨牌同位早已传 '0 auto 8px'，本款漏了。 */
+      style={hasRail ? { margin: '0 auto 8px' } : undefined} />
   )
 
   const gameCard = (
@@ -593,7 +683,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       {/* ① 开奖舞台槽（顶部，吃弹性空间 ≤260）：BETTING 静态回显上期三骰+TOTAL，
           ROLLING/SETTLED 换舞台动画（key=期号等高替换机制不变） */}
       <div style={{
-        flex: '1 1 auto', minHeight: isMobile ? 150 : 140, maxHeight: 260,
+        flex: '1 1 auto', minHeight: isMobile ? 150 : 168, maxHeight: 260,   /* #47 首批 放大：140→168（canvas 骰面随容器等比放大） */
         position: 'relative', zIndex: 1,
         margin: isMobile ? '8px 12px 0' : hasRail ? '8px 0 0' : '8px 18px 0',
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
@@ -608,7 +698,8 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
             <span style={{ color: HATTRICK.dim, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>上期</span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              {lastRoll.dice.map((v, i) => <DieFace key={i} v={v} size={isMobile ? 30 : 36} />)}
+              {/* #47 首批 放大：桌面待命骰面 36→43（×1.2） */}
+              {lastRoll.dice.map((v, i) => <DieFace key={i} v={v} size={isMobile ? 30 : 43} />)}
             </span>
             <span style={{
               color: HATTRICK.gold, fontSize: isMobile ? 16 : 20, fontWeight: 900,
@@ -630,13 +721,17 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处。
             富演出层(结算飞金/碎裂·就差1点·悬念脉冲)经 settleHits/settleFx/nearMiss/suspense 传入，原页分毫不变；
             richFx 抑制 GoldenBoot 口径的 .htWin 金脉冲（本页已有 htWinFly 接管，免重复）。 */}
-        <HatTrickMarkets onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
+        <HatTrickMarkets big onPick={toggleSel} stakes={betsPlaced} disabled={!betting}
           selected={picks} hits={result?.hits ?? preHits}
           settleHits={result?.hits} settleFx={settleFx} nearMiss={nearMiss} suspense={suspense}
           isMobile={isMobile} richFx />
       </div>
 
       {/* ③ 珠盘路（底部，三页签） */}
+      {/* #47 首批 指标4：本款原本【无垫片】，路珠紧跟盘口。补上后顺序为
+          开奖→盘口→垫片→路珠→注栏，空白沉中不沉底，路珠贴筹码条。 */}
+      <div style={{ flex: '1 0 auto' }} />
+
       {hasRail ? <div style={{ alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW, boxSizing: 'border-box' }}>{beadRoad}</div> : beadRoad}
 
       {/* ---- ④ bottom bet band — pinned（抄 Line Up：grid 4×2 筹码 + USD + 重复 + BetButton）---- */}
@@ -649,8 +744,8 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)',
+          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47 整改：92→110，下注钮字号 ×1.2 后在 92px 里折成三行 */
+          gridTemplateRows: 'repeat(2, 34px)',   /* #47 首批：行高 28→34 */
           gap: 6,
           maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
         }}>
@@ -704,6 +799,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
               onClick={confirmBets}
               disabled={!confirmOk}
               stretch
+              size={1.2}   /* #47 首批：与筹码键同比例放大；另 10 处引用方不传，零感 */
             />
           </div>
         </div>

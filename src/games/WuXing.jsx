@@ -16,7 +16,8 @@ import { usePlayerApi } from '../lib/playerApi'
 import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import WuXingStage from './stages/WuXingStage'
 import WuXingMarkets from './markets-ui/WuXingMarkets'   // #41 单16：盘口区切件（视觉原样）
-import WuXingRoad from './markets-ui/WuXingRoad'         // #41 单16：珠盘路墙（判定走引擎）
+import WuXingRoad from './markets-ui/WuXingRoad'
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）         // #41 单16：珠盘路墙（判定走引擎）
 import { RULES } from './markets-ui/wuxingRules'         // #41 单16：玩法说明内容（共享）
 import { WUXING, ROAD_VIEWS } from './markets-ui/wuxingShared'   // #41 单16：五行五段/珠盘视角（原页 mobile 段 + 切件同源）
 
@@ -45,9 +46,20 @@ export { drawKeno, deriveRound, ODDS, MARKETS, hitsOf }
 // ---------- 轮次常量 ----------
 // 相位/期号/倒计时全走服务器排期器（useRoundRoom）；本地只保留开奖舞台动画时长。
 const DRAW_ANIM_MS = 4500   // 收到 drawn → 开奖舞台演完 → 结算回写；须 < 服务器 wuxing idle(5500ms)
-// #46 单12：120→180 —— 配合桌面路珠 30 列 × 6 行 = 180 格，恰好填满不造死格。
-// ⚠ 本常量是【五行私有】模块级常量：另 6 款各有自己的一份同名常量、互不引用，改这里只影响五行。
-const ROAD_CAP = 180
+// #47 定案（全端规则）：【路珠不填满，右端恒留空最后两列】。
+// 数据上限 = (列数 − 2) × 行数 —— 桌面 30 列 × 6 行 → (30−2)×6 = 168 颗。
+// 网格仍渲染 30×6=180 格，只喂 168 颗；珠按列优先填充，故恒定占满第 1–28 列、
+// 第 29–30 列常空，新珠永远落在空区左缘。⚠ 改列数/行数时必须同步改本值。
+// 本常量各款私有（另 6 款各有自己的一份同名常量、互不引用），改这里只影响本款。
+const ROAD_CAP = 168
+
+// #47 桌面路珠网格（模块级常量：进组件内会每渲染重建，带进 effect deps 会让首灌反复跑）
+const DESK_ROAD = { cols: 30, rows: 6 }
+
+// ⚠ 手机段专用容量：桌面 ROAD_CAP 改动【不得】影响手机。手机内联珠格是从切片【头部】
+//   取 ROAD_COLS*2 颗（slice(-CAP)[i], i<40），故 CAP 一变手机显示的珠子整体前移。
+//   #46/#47 把桌面 CAP 从 120 抬到 168 时曾无意改动手机显示，此常量将手机钉回原值 120。
+const MOBILE_ROAD_CAP = 120
 
 // ---------- 静态种子数据（纯展示，零随机数）----------
 const G = GAME_BY_ID['WuXing']
@@ -113,6 +125,9 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const [roadByRoom, setRoadByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_ROAD])))
   const lastRound = lastRoundByRoom[selectedRoomKey] ?? SEED_LAST
   const road = roadByRoom[selectedRoomKey] ?? SEED_ROAD
+  // #47 动效：仅 WS 真新珠时记新珠索引。⚠ 必须【按房存】—— 单值会被后台快房追珠覆盖，
+  //   导致选中房刚亮起的高亮被瞬间清掉（实测 2.2s 内即消失）。首灌/切房一律清该房 → 不弹入。
+  const [freshByRoom, setFreshByRoom] = useState({})
   const [roadView, setRoadView] = useState('bs')   // 手机路珠视角（默认大小）；纯显示
   const [userAcc, setUserAcc] = useState({ main: true, dtud: true, parlay: true, wuxing: true })   // 4 盘区手风琴（默认全展开）；纯 UI
   const roadRecordedRef = useRef(null)   // 珠盘路整局记账去重（按 rnd，防 StrictMode 双调用重复入）
@@ -160,7 +175,11 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     // 珠盘路改存整局 sum（3 视角从 sum 派生）；按 rnd 去重，一局恰记一次（StrictMode 防重）
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
-      setRoadByRoom(m => ({ ...m, [selectedRoomKey]: [...(m[selectedRoomKey] || SEED_ROAD), r.sum].slice(-ROAD_CAP) }))
+      setRoadByRoom(m => {
+        const next = roadWindow([...(m[selectedRoomKey] || SEED_ROAD), r.sum], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))   // WS 真新珠 → 弹入
+        return { ...m, [selectedRoomKey]: next }
+      })
     }
     setResult({ hits, winTotal })
     setFeedBets(list => list.map(b => Math.random() < 0.45
@@ -194,6 +213,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     resetRoomView()   // 抽件：注单与该房暂存对齐 + shownRound/animatedRound 置空
     picksRef.current = new Set(); setPicks(new Set())
     setResult(null); setPreHits(null); setNetErr(null)
+    setFreshByRoom({})   // #47：切房不弹入
     setAnimRound(null)
     pendingRef.current = null
     setUiPhase('betting')
@@ -232,7 +252,11 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       bgDrawRoundRef.current[r.key] = rm.roundNo
       const d = deriveRound(rm.drawResult.balls)
       setLastRoundByRoom(m => ({ ...m, [r.key]: d }))
-      setRoadByRoom(m => ({ ...m, [r.key]: [...(m[r.key] || SEED_ROAD), d.sum].slice(-ROAD_CAP) }))
+      setRoadByRoom(m => {
+        const next = roadWindow([...(m[r.key] || SEED_ROAD), d.sum], DESK_ROAD)
+        setFreshByRoom(f => ({ ...f, [r.key]: next.length - 1 }))   // WS 真新珠 → 弹入（切回该房时可见）
+        return { ...m, [r.key]: next }
+      })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
@@ -253,12 +277,13 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     // ⚠ 后端把 limit 夹死在 50（round.js 的 Math.min(50, ...)），单请求拿不满 180 格，
     //   故走该端点现成的 cursor 分页续拉，最多 PAGES 页（180/50 → 4 页封顶，防翻页失控）。
     const PAGE = 50
-    const PAGES = Math.ceil(ROAD_CAP / PAGE)
+    const SEED_TARGET = roadSeedTarget(DESK_ROAD)   // #47：比 usable 多一整列，保证当前列半满
+    const PAGES = Math.ceil(SEED_TARGET / PAGE)
     const seedRoom = async (r) => {
       const qs = r.key === '15s' ? '&room=15s' : ''
       const acc = []                      // 新→旧累积
       let cursor = null
-      for (let pg = 0; pg < PAGES && acc.length < ROAD_CAP; pg++) {
+      for (let pg = 0; pg < PAGES && acc.length < SEED_TARGET; pg++) {
         const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
         const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${qs}${cs}`)
         const items = d?.items || []
@@ -268,11 +293,14 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         if (!cursor) break
       }
       if (cancelled || !acc.length) return
-      const sums = acc.slice(0, ROAD_CAP).reverse()   // 接口新→旧，road 存旧→新
+      const sums = acc.slice(0, SEED_TARGET).reverse()   // 素材（新→旧转旧→新）   // 接口新→旧，road 存旧→新
         .map((it) => (Array.isArray(it?.drawResult?.balls) ? deriveRound(it.drawResult.balls).sum : null))
         .filter((n) => n != null)
       if (!sums.length) return
-      setRoadByRoom((m) => ({ ...m, [r.key]: sums.slice(-ROAD_CAP) }))
+      // #47：首灌【不预截】到 usable —— 直接把拉回的完整条数过窗口，当前列才天然半满；
+      //   且首灌不是「真新珠」，freshRoad 置空，避免一次灌 160+ 颗整屏爆闪。
+      setRoadByRoom((m) => ({ ...m, [r.key]: roadWindowAt(sums, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setFreshByRoom(f => ({ ...f, [r.key]: -1 }))
       const latest = acc[0]?.roundNo
       if (latest) {
         if (r.key === selectedRoomKey) roadRecordedRef.current = latest
@@ -508,7 +536,8 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       <div style={{ flex: '1 0 auto' }} />
 
       <WuXingRoad history={road} tab={roadView} onTab={setRoadView} isMobile={isMobile}
-        cols={30} bead={24}
+        cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
+      freshIndex={freshByRoom[selectedRoomKey] ?? -1}
         style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
           ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
 
@@ -702,7 +731,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
           <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
             <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
               {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
-                const n = road.slice(-ROAD_CAP)[i]
+                const n = road.slice(-MOBILE_ROAD_CAP)[i]
                 const d = n != null ? curView.judge(n) : null
                 return (
                   <span key={i} style={{

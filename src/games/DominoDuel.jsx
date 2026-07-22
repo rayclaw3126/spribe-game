@@ -15,7 +15,8 @@ import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import DominoDuelMarkets from './markets-ui/DominoDuelMarkets'   // #41 单16：盘口区切件（section= 逐段接入手风琴，视觉原样）
-import DominoDuelRoad from './markets-ui/DominoDuelRoad'         // #41 单16：珠盘路墙（页签/判定单一出处，走引擎）
+import DominoDuelRoad from './markets-ui/DominoDuelRoad'   // #41 单16：珠盘路墙（页签/判定单一出处，走引擎）
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）
 import { RULES } from './markets-ui/dominoduelRules'            // #41 单16：玩法说明内容（共享）
 // #44 单S1：翻牌视觉原子（DominoTile/时间轴/keyframes）单一出处切至多桌舞台件，原页 import 回引（等价搬家）。
 import { DominoTile, FLIP_DELAY, FLIP_DUR, FLIP_END, DD_KEYFRAMES } from './stages/DominoDuelStage'
@@ -35,8 +36,15 @@ export { rollTiles, deriveRound, ODDS, MARKETS, hitsOf, pushesOf }
 // ---------- 开奖动画时长（#43 单3：收到 drawn → 翻牌演出 → 结算显示 + 回写余额）----------
 // 须 < 服务器 idle(13s)。翻牌 ~3.5s（FLIP_END+揭比分）+ 悬念保留 → 6s 后翻 settled（揭胜负+彩带+余额落定才跳）。
 const DRAW_ANIM_MS = 6000
-// 翻牌错峰时间轴 FLIP_DELAY/FLIP_DUR/FLIP_END 已切至 ./stages/DominoDuelStage（单一出处，import 回引）。
-const ROAD_CAP = 120
+// #47 定案（全端规则）：【路珠不填满，右端恒留空最后两列】。
+// 数据上限 = (列数 − 2) × 行数 —— 桌面 30 列 × 6 行 → (30−2)×6 = 168 颗。
+// 网格仍渲染 30×6=180 格，只喂 168 颗；珠按列优先填充，故恒定占满第 1–28 列、
+// 第 29–30 列常空，新珠永远落在空区左缘。⚠ 改列数/行数时必须同步改本值。
+// 本常量各款私有（另 6 款各有自己的一份同名常量、互不引用），改这里只影响本款。
+const ROAD_CAP = 168
+
+// #47 桌面路珠网格（模块级常量：进组件内会每渲染重建，带进 effect deps 会让首灌反复跑）
+const DESK_ROAD = { cols: 30, rows: 6 }
 
 const G = GAME_BY_ID['DominoDuel']
 
@@ -60,7 +68,9 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // 单S5：≥1280 有右栏、中栏变窄 → 对决区/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
   const hasRail = useMediaQuery('(min-width: 1280px)')
-  const RAIL_MAXW = 670
+  // #47 首批·对表五行定稿：670→800。开奖台(479)/盘口(484)/路珠(466)/筹码条(499) 四区
+  // 全部 width:100% + maxWidth: RAIL_MAXW，共用同一条宽度线 → 左右边线垂直对齐。
+  const RAIL_MAXW = 800
   // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
   const room = useRoundRoom(playerToken, G.backendId)
 
@@ -77,6 +87,8 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   const [animRound, setAnimRound] = useState(null)        // 当前开奖动画的派生局（deriveRound 形状）
   const [lastRound, setLastRound] = useState(SEED_LAST)
   const [road, setRoad] = useState(SEED_ROAD)
+  // #47 动效：仅 WS 真新珠时记新珠索引；首灌一律置 -1 → 不弹入。本款单房，无需按房区分。
+  const [freshIdx, setFreshIdx] = useState(-1)
   const [roadTab, setRoadTab] = useState('H/A')   // 珠盘路视角（手机/桌面共用一个 state）
   const [userAcc, setUserAcc] = useState({ main: true, totals: true, goals: true, correct: false })   // 手机手风琴（波胆高赔默认收，余默认全开）
   const [result, setResult] = useState(null)              // { hits:Set, pushes:Set, winTotal, refundTotal }
@@ -94,6 +106,10 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   const animatedRoundRef = useRef(null)    // 已启动开奖动画的期号（每期只演一次）
   const settledRoundRef = useRef(null)     // 已回写余额的期号（每期只回写一次）
   const settleInfoRef = useRef(null)       // 镜像 room.settleInfo，供动画结束时读取
+  // #47 首批 新增：珠盘路整局记账去重（按期号）。本款原先无此 ref —— 追珠只靠 finishRound
+  //   每期跑一次隐式保证。接了历史播种后必须显式去重：若玩家【正好在开奖动画中进页】，
+  //   服务端已结算该期→history 已含它→播种灌入，随后动画结束 finishRound 会再追一次 = 重复上珠。
+  const roadRecordedRef = useRef(null)
 
   const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
@@ -225,7 +241,15 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     if (winTotal > 0) pushToast('本期命中', winTotal)
     if (refundTotal > 0) pushToast('平局退注', refundTotal)   // push 区分文案
     setLastRound(r)
-    setRoad(rd => [...rd, [r.hs, r.as]].slice(-ROAD_CAP))   // 存整局 → 珠盘路多视角派生（判定走引擎）
+    // #47 首批：按期号去重（防与历史播种重复上珠，见 roadRecordedRef 注释）
+    if (rnd != null && roadRecordedRef.current !== rnd) {
+      roadRecordedRef.current = rnd
+      setRoad(rd => {
+        const next = roadWindow([...rd, [r.hs, r.as]], DESK_ROAD)   // 存整局 → 多视角派生（判定走引擎）
+        setFreshIdx(next.length - 1)   // WS 真新珠 → 弹入
+        return next
+      })
+    }
     setResult({ hits, pushes, winTotal, refundTotal })
     setFeedBets(list => list.map(b => Math.random() < 0.45
       ? { ...b, status: 'cashed', target: Number(b.target.toFixed(2)), payout: Number((b.bet * b.target).toFixed(2)) }
@@ -381,7 +405,9 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   )
 
   // ---- ① 对决区：主(蓝) VS 客(红)，各两张骨牌 + 比分（drawing 翻牌演出）----
-  const tileSz = isMobile ? 28 : 32
+  // #47 首批 放大 ×1.2：桌面骨牌面 32→38。⚠ duelZone 被 gameCard:479 与 mobileCard:609
+  // 【两处都渲染】，写死会连手机一起放大，故必须 isDesk 门控（五行踩过同款坑）。
+  const tileSz = isMobile ? 28 : isDesk ? 38 : 32
   const flipping = drawing && !reduced   // 翻牌相位（动画只读 pendingRef）
   const teamBlock = (name, tiles, score, color, side) => (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
@@ -397,7 +423,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         })}
       </div>
       <span style={{
-        color: COLORS.white, fontSize: isMobile ? 22 : 26, fontWeight: 900,
+        color: COLORS.white, fontSize: isMobile ? 22 : isDesk ? 31 : 26, fontWeight: 900,
         fontFamily: "'Space Grotesk', sans-serif", textShadow: `0 0 10px ${color}`,
         ...(flipping ? { animation: `ddScoreIn 0.4s ease ${FLIP_END}s both` } : {}),   // 翻完再揭比分（不剧透）
       }}>{score}</span>
@@ -416,10 +442,55 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     // room.roundNo 作重生成键：每局换一批彩带位置（body 不直接引用，禁 lint 误报）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   })), [room.roundNo])
+  // #47 首批 路珠真历史播种（单流版）：本款 gameRegistry rooms:[] 无 15s 快房，
+  //   故不遍历 ROOMS、不带 ?room= 分流参、不需要 roadByRoom map —— 比五行双流版更简单。
+  //   · 后端 /round/history 的 limit 被夹在 50（round.js 的 Math.min(50,...)），单请求拿不满 180，
+  //     故走该端点现成的 cursor 分页续拉，4 页封顶、拿满即停。
+  //   · 派生复用 deriveRound(tiles) → [hs,as]，与 C 段开奖追珠同一函数，禁二份表。
+  //   · 接口返回新→旧，road 存旧→新，故 reverse。
+  //   · 去重：灌完把最新期号写进 roadRecordedRef，后续 WS 追同一期自然跳过，WS 那侧一行不改。
+  //   · 失败静默保留种子珠；只读，钱层零碰。
+  const apiRef = useRef(api)
+  useEffect(() => { apiRef.current = api })
+  useEffect(() => {
+    let cancelled = false
+    const PAGE = 50
+    const SEED_TARGET = roadSeedTarget(DESK_ROAD)   // #47：比 usable 多一整列，保证当前列半满
+    const PAGES = Math.ceil(SEED_TARGET / PAGE)
+    ;(async () => {
+      const acc = []
+      let cursor = null
+      for (let pg = 0; pg < PAGES && acc.length < SEED_TARGET; pg++) {
+        const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+        const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${cs}`)
+        const items = d?.items || []
+        if (!items.length) break
+        acc.push(...items)
+        cursor = d?.nextCursor
+        if (!cursor) break
+      }
+      if (cancelled || !acc.length) return
+      const pairs = acc.slice(0, SEED_TARGET).reverse()
+        .map((it) => (Array.isArray(it?.drawResult?.tiles) ? (() => { const r = deriveRound(it.drawResult.tiles); return [r.hs, r.as] })() : null))
+        .filter(Boolean)
+      if (!pairs.length) return
+      // #47：首灌【不预截】—— 直接把拉回的完整条数过窗口，当前列才天然半满；
+      //   且首灌不是「真新珠」，freshIdx 置 -1，避免一次灌 160+ 颗整屏爆闪。
+      setRoad(roadWindowAt(pairs, roundSeq(acc[0]?.roundNo), DESK_ROAD))
+      setFreshIdx(-1)
+      const latest = acc[0]?.roundNo
+      if (latest) roadRecordedRef.current = latest
+    })().catch(() => { /* 静默：保留种子珠 */ })
+    return () => { cancelled = true }
+  }, [])
+
   const duelZone = (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
-      margin: isMobile ? '8px 12px 0' : '6px 18px 0',
+      // #47 首批 整改：补 hasRail 档 —— 原来无论有无右栏都留 18px 侧边距，导致开奖卡
+      //   实测 L383/R1147/W764，比盘口卡（L365/R1165/W800）两侧各内缩 18px、边线不齐。
+      //   有右栏时外层包裹层已是 800 宽，本卡侧边距必须归零才与盘口共用同一条宽度线。
+      margin: isMobile ? '8px 12px 0' : hasRail ? '6px 0 0' : '6px 18px 0',
       borderRadius: 12, padding: isMobile ? '10px 8px' : '10px 18px',
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -441,7 +512,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       )}
       {teamBlock('主队', shown.homeTiles, shown.hs, DERBY.home, 'h')}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flex: '0 0 auto', zIndex: 4 }}>
-        <span style={{ color: DERBY.gold, fontSize: isMobile ? 16 : 20, fontWeight: 900, fontFamily: "'Space Grotesk', sans-serif" }}>VS</span>
+        <span style={{ color: DERBY.gold, fontSize: isMobile ? 16 : isDesk ? 24 : 20, fontWeight: 900, fontFamily: "'Space Grotesk', sans-serif" }}>VS</span>
         {outcomeTag && (
           <span style={{
             padding: '1px 8px', borderRadius: RADIUS.pill, background: 'rgba(0,0,0,0.4)',
@@ -461,7 +532,10 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   // 桌面 rows=6/bead=(手机18/桌面14)；手机锁底 rows=2/bead=15（原页两处尺寸差，外部传参，视觉原样）。
   const beadRoad = (
     <DominoDuelRoad history={road} tab={roadTab} onTab={setRoadTab}
-      cols={20} rows={6} bead={isMobile ? 18 : 14} tabFs={10} ratioFs={9.5} pad={6} radius={10}
+      /* #47 首批：30 列 × 6 行 × 珠径 24 → 30×24+29×2=778 ≤ 内容可用宽 786，吃满 800 线。
+         本 beadRoad 变量【仅桌面 gameCard:490 使用】，手机在 623 行另有独立实例，故可直写不门控。 */
+      cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24} tabFs={10} ratioFs={9.5} pad={6} radius={10}
+      freshIndex={freshIdx}
       style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
   )
@@ -484,7 +558,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
       }}>
         <WinToast toasts={toasts} />
-        <DominoDuelMarkets {...marketsProps} isDesk={isDesk} />
+        <DominoDuelMarkets {...marketsProps} isDesk={isDesk} big />
       </div>
       <div style={{ flex: '1 0 auto' }} />
       {beadRoad}
@@ -495,8 +569,8 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
       }}>
         <div style={{
-          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-          gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
+          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47 整改：92→110，下注钮字号 ×1.2 后在 92px 里折成三行 */
+          gridTemplateRows: 'repeat(2, 34px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',   /* #47 首批：行高 28→34 */
         }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
@@ -535,6 +609,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
               onClick={confirmBets}
               disabled={!confirmOk}
               stretch
+              size={1.2}   /* #47 首批：与筹码键同比例放大；另 10 处引用方不传，零感 */
             />
           </div>
         </div>

@@ -50,7 +50,7 @@ const GROUPS = [
   { id: 'correct', title: '正确比分 · 波胆' },
 ]
 
-export default function DominoDuelMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, pushes = EMPTY, isMobile = false, isDesk: isDeskProp, chipMode = false, openMode = 'all', section }) {
+export default function DominoDuelMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, pushes = EMPTY, isMobile = false, isDesk: isDeskProp, chipMode = false, openMode = 'all', section , big = false }) {
   const isDeskMedia = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   const isDesk = isDeskProp == null ? isDeskMedia : isDeskProp
   const betting = !disabled
@@ -69,9 +69,11 @@ export default function DominoDuelMarkets({ onPick, stakes, disabled = false, fl
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', boxSizing: 'border-box',
   }
   const secHead = { color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 4 }
-  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : 12, fontWeight: 900 }
+  // #47 首批：可选 big（桌面放大档，对表五行定稿 键字15/赔率14.5）——默认 false 即原行为。
+  // 仅骨牌原页桌面传 true；多桌 marketsUiRegistry→TableCard 与手机段均不传，逐字节零感。
+  const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : big ? 15 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: DERBY.gold, fontSize: isMobile ? 10.5 : big ? 14.5 : 12, fontWeight: 900 }
   const cellBase = (key, bg) => {
     const sel = selSet.has(key)
     const hit = hitSet.has(key)

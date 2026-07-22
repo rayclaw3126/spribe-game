@@ -5,6 +5,7 @@
 //   桌面 rows=6/bead=14；手机锁底 rows=2/bead=15（原页两处尺寸差，外部传参，视觉原样）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { MARKETS } from '../markets/dominoduel'
+import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
 
 const ROAD_CAP = 120
 // 珠盘路多视角（B 型：存整局 [hs,as]，判定一律走引擎 MARKETS 现成 helper，禁手写第二份表）
@@ -19,15 +20,20 @@ function ddBeadFor(tab, pair) {
   return MARKETS['home-win'].hit(r) ? { t: '主', c: DERBY.home } : { t: '客', c: DERBY.away }
 }
 
-export default function DominoDuelRoad({ history = [], tab, onTab, cols = 20, rows = 6, bead = 14, tabFs = 10, ratioFs = 9.5, pad = 6, radius = 10, style }) {
-  const roadPairs = history.slice(-ROAD_CAP)
+export default function DominoDuelRoad({ history = [], tab, onTab, cols = 20, rows = 6, bead = 14, tabFs = 10, ratioFs = 9.5, pad = 6, radius = 10, freshIndex = -1, style }) {
+  // #47 首批：本件自带的 ROAD_CAP=120 会把 history 截到 120 再喂 cols×rows 格 —— 桌面扩到
+  //   30×6=180 格后尾部 60 格永远空（实测 120/180）。改取两者较大值：cols×rows > 120 时按格数取，
+  //   否则维持 120。⚠ 这样写而非直接 cols×rows，是为了让手机段（rows=2）与多桌（cols 小）
+  //   的取数范围逐字节不变 —— 它们 cols×rows < 120，仍走 120，行为零改。
+  const roadPairs = history.slice(-Math.max(cols * rows, ROAD_CAP))
   const beads = roadPairs.map(p => ddBeadFor(tab, p))
   const ratioSrc = history.slice(-30)
   let rHome = 0, rDraw = 0, rAway = 0
   ratioSrc.forEach(([hs, as]) => { if (hs > as) rHome++; else if (hs === as) rDraw++; else rAway++ })
   const pct = n => Math.round((n / Math.max(1, ratioSrc.length)) * 100)
+  // #47 动效：新珠弹入（仅 WS 真新珠，freshIndex 由调用方给）／下一空格呼吸游标（只此一格）
   const beadCell = (b, i, sz) => (
-    <span key={i} style={{
+    <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{
       width: sz, height: sz, borderRadius: '50%',
       background: b ? b.c : 'rgba(255,255,255,0.05)',
       border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
@@ -37,6 +43,7 @@ export default function DominoDuelRoad({ history = [], tab, onTab, cols = 20, ro
   )
   return (
     <div style={style}>
+      <style>{ROAD_FX_CSS}</style>
       <div style={{ display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none', marginBottom: 4 }}>
         {DD_ROAD_TABS.map(t => (
           <button key={t} type="button" onClick={() => onTab(t)} style={{

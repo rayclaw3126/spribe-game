@@ -47,6 +47,7 @@ export default function HatTrickMarkets({
   onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY,
   settleHits = EMPTY, settleFx = false, nearMiss = EMPTY, suspense = null,
   isMobile = false, chipMode = false, openMode = 'all', richFx = false,
+  big = false,   // #47 首批：桌面放大档（键字15/赔率14.5），默认 false 即原行为；多桌与手机不传，零感
 }) {
   const betting = !disabled
   // 三组折叠/展开：默认全开=原页习惯（secHead 常显）；openMode='first' 时仅开第一组（多桌手风琴记忆）
@@ -78,9 +79,9 @@ export default function HatTrickMarkets({
       boxSizing: 'border-box', position: 'relative',
     }
   }
-  const cellName = { color: HATTRICK.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-  const cellRange = { color: HATTRICK.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
-  const cellOdds = { color: HATTRICK.gold, fontSize: isMobile ? 10.5 : 12.5, fontWeight: 900 }
+  const cellName = { color: HATTRICK.text, fontSize: isMobile ? 10 : big ? 15 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
+  const cellRange = { color: HATTRICK.dim, fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
+  const cellOdds = { color: HATTRICK.gold, fontSize: isMobile ? 10.5 : big ? 14.5 : 12.5, fontWeight: 900 }
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: 5,
     background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
@@ -121,7 +122,7 @@ export default function HatTrickMarkets({
       position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
       zIndex: 4, padding: '2px 6px', borderRadius: RADIUS.pill,
       background: 'rgba(4,10,7,0.78)', color: '#ff6a3d', border: '1px solid #ff6a3d',
-      fontSize: isMobile ? 8.5 : 9.5, fontWeight: 900, whiteSpace: 'nowrap', pointerEvents: 'none',
+      fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 900, whiteSpace: 'nowrap', pointerEvents: 'none',
     }}>就差1点！</span>
   )
 
@@ -147,7 +148,7 @@ export default function HatTrickMarkets({
           color: hit ? '#083a1b' : HATTRICK.text, fontSize: isMobile ? 12 : 13, fontWeight: 900,
           fontFamily: "'Space Grotesk', sans-serif",
         }}>{s}</span>
-        <span className={fxCls(key)} style={{ color: hit ? '#083a1b' : HATTRICK.gold, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, whiteSpace: 'nowrap' }}>{placed ? winTxt(key, ODDS.total[s]) : ODDS.total[s]}</span>
+        <span className={fxCls(key)} style={{ color: hit ? '#083a1b' : HATTRICK.gold, fontSize: isMobile ? 8.5 : big ? 11.5 : 9.5, fontWeight: 800, whiteSpace: 'nowrap' }}>{placed ? winTxt(key, ODDS.total[s]) : ODDS.total[s]}</span>
         {stakeChip(key)}
         {flyDot(key)}
         {nearBadge(key)}

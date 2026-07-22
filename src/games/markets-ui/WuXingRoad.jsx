@@ -7,8 +7,9 @@
 // （原页 state road / 多桌 /round/history 派生）；判定一律从整值 sum 派生。style 覆外框边距（原页 18px / 多桌 0）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { ROAD_VIEWS } from './wuxingShared'
+import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
 
-export default function WuXingRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, style }) {
+export default function WuXingRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, style }) {
   const roadBead = bead ?? (isMobile ? 18 : 14)
   const curView = ROAD_VIEWS.find(v => v.key === tab) || ROAD_VIEWS[0]   // 路珠视角（手机/桌面共用 tab，切了两端一致）
   const cells = history.slice(-(cols * rows))
@@ -27,6 +28,7 @@ export default function WuXingRoad({ history = [], tab, onTab, isMobile = false,
           )
         })}
       </div>
+      <style>{ROAD_FX_CSS}</style>
       <div style={{
         overflowX: 'auto', borderRadius: 10,
         background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
@@ -40,8 +42,10 @@ export default function WuXingRoad({ history = [], tab, onTab, isMobile = false,
             // road 存整局 sum；按当前视角 curView.judge 派生（同一份函数，桌面/手机共用，禁复制第二份）
             const n = cells[i]
             const d = n != null ? curView.judge(n) : null
+            // #47 动效：新珠弹入（仅 WS 真新珠，freshIndex 由调用方给）／下一空格呼吸游标（只此一格）
+            const cls = i === freshIndex ? ROAD_FX_FRESH : (d == null && i === cells.length ? ROAD_FX_NEXT : undefined)
             return (
-              <span key={i} style={{
+              <span key={i} className={cls} style={{
                 width: roadBead, height: roadBead, borderRadius: '50%',
                 background: d ? d.c : 'rgba(255,255,255,0.05)',
                 border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
