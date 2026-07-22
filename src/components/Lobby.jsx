@@ -210,11 +210,15 @@ function MobilePill({ label, count, active, onClick }) {
 }
 
 function GameCard({ game, index, onSelect, isDesk, fav, onToggleFav }) {
-  // 角标：命中 HOT_IDS 显「热门」（绿底墨绿字），否则命中 NEW_IDS 显「新游」（#1f242b 底白字）；
-  // 双标（既热门又新游）只显热门（HOT 先判）。
-  const badge = HOT_IDS.includes(game.id) ? { label: '热门', bg: D.accent, ink: D.accentInk }
+  // 策展角标：命中 HOT_IDS 显「热门」（绿底墨绿字），否则命中 NEW_IDS 显「新游」（#1f242b 底白字）；
+  // 双标（既热门又新游）只显热门（HOT 先判）。—— 本判定与视觉是 #42 单8 前的原样，一字未改。
+  const curationBadge = HOT_IDS.includes(game.id) ? { label: '热门', bg: D.accent, ink: D.accentInk }
     : NEW_IDS.includes(game.id) ? { label: '新游', bg: D.cardHi, ink: '#fff' }
       : null
+  // #42 单8 极速角标：判定 = registry 该款有【多房】配置（rooms 两枚以上）。
+  // ⚠ 用 > 1 而非 > 0：单房 15 款写的是 rooms: []，多房 7 款写两枚；> 1 的语义才是「有多个房可选」，
+  //   且将来若有款只配一枚房也不会被误标成极速。
+  const isSpeed = (game.rooms?.length ?? 0) > 1
   return (
     <button
       onClick={() => onSelect(game.id)}
@@ -266,14 +270,32 @@ function GameCard({ game, index, onSelect, isDesk, fav, onToggleFav }) {
         >{fav ? '★' : '☆'}</span>
       )}
 
-      {/* 左上角 热门/新游 角标（浮图上；游戏名在左下，二者不重叠） */}
-      {badge && (
-        <span style={{
+      {/* 左上角角标行（浮图上；游戏名在左下，二者不重叠）——#42 单8 定版A：
+          策展枚（热门/新游）+ 极速枚【横排共存】，不再互斥。
+          容器负责定位，两枚只管自身样式；无策展枚时极速枚自然独占左上，无需额外分支。
+          ⚠ 纯显示：span 无 onClick、不 stopPropagation，整卡 onSelect 点击行为零改动。 */}
+      {(curationBadge || isSpeed) && (
+        <div style={{
           position: 'absolute', top: 8, left: 8, zIndex: 2,
-          background: badge.bg, color: badge.ink,
-          fontSize: isDesk ? 11 : 10, fontWeight: 800, letterSpacing: 0.3,
-          padding: '3px 8px', borderRadius: 999, lineHeight: 1.4,
-        }}>{badge.label}</span>
+          display: 'flex', alignItems: 'center', gap: 4,
+        }}>
+          {curationBadge && (
+            <span style={{
+              background: curationBadge.bg, color: curationBadge.ink,
+              fontSize: isDesk ? 11 : 10, fontWeight: 800, letterSpacing: 0.3,
+              padding: '3px 8px', borderRadius: 999, lineHeight: 1.4,
+            }}>{curationBadge.label}</span>
+          )}
+          {isSpeed && (
+            <span style={{
+              // 定版A：暗底 + accent 描边/字。accent 走 token（D.accent = #4ade80），零散 hex；
+              // 底色 rgba(10,12,16,0.65) 是定版给的字面量，tokens 里无对应项，故不新增 token（不动 tokens.js）。
+              background: 'rgba(10,12,16,0.65)', border: `1px solid ${D.accent}`, color: D.accent,
+              fontSize: isDesk ? 11 : 10, fontWeight: 800, letterSpacing: 0.3,
+              padding: '2px 8px', borderRadius: 999, lineHeight: 1.4,
+            }}>极速</span>
+          )}
+        </div>
       )}
 
       {/* 左下角：游戏名（白 500）+ desc 单行 ellipsis */}
