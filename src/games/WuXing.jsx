@@ -13,7 +13,7 @@ import HistoryDrawer from '../components/HistoryDrawer'
 import CommitRevealFairness from '../components/CommitRevealFairness'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
-import { useRoundRoom } from '../hooks/useRoundRoom'
+import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import WuXingStage from './stages/WuXingStage'
 import WuXingMarkets from './markets-ui/WuXingMarkets'   // #41 单16：盘口区切件（视觉原样）
 import WuXingRoad from './markets-ui/WuXingRoad'         // #41 单16：珠盘路墙（判定走引擎）
@@ -80,7 +80,14 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const hasRail = useMediaQuery('(min-width: 1280px)')
   const RAIL_MAXW = 670
   // ---- 服务器排期器房间：相位/期号/倒计时/开奖/结算唯一真相来源 ----
-  const room = useRoundRoom(playerToken, G.backendId)
+  // ---- #42 速度房骨架（单6 原生接入）：双订阅 / 选中房 / per-room 注单 / A0 / D / tab 条 ----
+  // 逐款不同的部分仍在本文件：上局派生局 lastRound / 珠盘路 road（存 r.sum）两份 xxxByRoom、E 段追两份、A 段换期清盘、切房演出态清理（见 A1）、舞台 key。
+  const {
+    ROOMS, selectedRoomKey, roomsByKey, room, roomA, roomB,
+    betsRef, betsOf, betsPlaced, setBetsPlaced, hasLast, lastBetsRef,
+    shownRoundRef, animatedRoundRef, settleInfoRef,
+    commitSettle, resetRoomView, renderRoomTabs,
+  } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
 
   const [bet, setBet] = useState(10)
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
@@ -88,16 +95,19 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const [historyOpen, setHistoryOpen] = useState(false)   // 开奖历史抽屉
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
-  const [betsPlaced, setBetsPlaced] = useState(() => new Map())
-  const [hasLast, setHasLast] = useState(false)
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
 
   // ---- 本地「表演」状态机（仅动画层；相位真相在 room）----
   // uiPhase: betting | locked | drawing | settled —— 由 room 相位 + 开奖动画时序派生
   const [uiPhase, setUiPhase] = useState('betting')
   const [animRound, setAnimRound] = useState(null)       // 当前开奖动画的派生局（deriveRound 结果）
-  const [lastRound, setLastRound] = useState(SEED_LAST)
-  const [road, setRoad] = useState(SEED_ROAD)
+  // #42 两份「按期累积」状态按房存：两房开的是完全不同的局，共用即串流。
+  //   · lastRound 上局派生局 → 喂舞台的 lastRound prop（betting 期待命展示）
+  //   · road      珠盘路 → 喂路珠墙
+  const [lastRoundByRoom, setLastRoundByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_LAST])))
+  const [roadByRoom, setRoadByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_ROAD])))
+  const lastRound = lastRoundByRoom[selectedRoomKey] ?? SEED_LAST
+  const road = roadByRoom[selectedRoomKey] ?? SEED_ROAD
   const [roadView, setRoadView] = useState('bs')   // 手机路珠视角（默认大小）；纯显示
   const [userAcc, setUserAcc] = useState({ main: true, dtud: true, parlay: true, wuxing: true })   // 4 盘区手风琴（默认全展开）；纯 UI
   const roadRecordedRef = useRef(null)   // 珠盘路整局记账去重（按 rnd，防 StrictMode 双调用重复入）
@@ -106,21 +116,14 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const [toasts, setToasts] = useState([])
 
   const picksRef = useRef(picks)
-  const betsRef = useRef(new Map())        // 本期已下注并落库的 {key: 累计注额}
-  const lastBetsRef = useRef(new Map())
   const betRef = useRef(bet)
   const pendingRef = useRef(null)          // 只读表演：当前动画派生局（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
-  const shownRoundRef = useRef(null)       // 已进入 betting 的当前期号（换期 reset 判定）
-  const animatedRoundRef = useRef(null)    // 已启动开奖动画的期号（每期只演一次）
-  const settledRoundRef = useRef(null)     // 已回写余额的期号（每期只回写一次）
-  const settleInfoRef = useRef(null)       // 镜像 room.settleInfo，供动画结束时读取
 
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
 
   useEffect(() => { betRef.current = bet }, [bet])
-  useEffect(() => { settleInfoRef.current = room.settleInfo }, [room.settleInfo])
   useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
 
 
@@ -136,10 +139,8 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   function finishRound(r, rnd) {
     const si = settleInfoRef.current
     const hadBet = si && si.roundNo === rnd
-    if (hadBet && si.balanceAfter != null && settledRoundRef.current !== rnd) {
-      setServerBalance(Number(si.balanceAfter))
-    }
-    settledRoundRef.current = rnd
+    // 坑1 修正语义（add 收在 hadBet 内）在抽件的 commitSettle 里，此处只调用，勿再自行 add。
+    commitSettle(rnd, si, hadBet)
     if (shownRoundRef.current !== rnd) return   // 下一期已抢先，跳过不覆盖新期 UI
     let hits, winTotal
     if (hadBet) {
@@ -149,11 +150,12 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     } else {
       hits = hitsOf(r); winTotal = 0
     }
-    setLastRound(r)
+    // #42：两份累积写进【选中房】自己的槽（动画演完才写，保悬念）
+    setLastRoundByRoom(m => ({ ...m, [selectedRoomKey]: r }))
     // 珠盘路改存整局 sum（3 视角从 sum 派生）；按 rnd 去重，一局恰记一次（StrictMode 防重）
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
-      setRoad(h => [...h, r.sum].slice(-ROAD_CAP))
+      setRoadByRoom(m => ({ ...m, [selectedRoomKey]: [...(m[selectedRoomKey] || SEED_ROAD), r.sum].slice(-ROAD_CAP) }))
     }
     setResult({ hits, winTotal })
     setFeedBets(list => list.map(b => Math.random() < 0.45
@@ -163,20 +165,35 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   }
 
   // ---- 相位驱动 effects（全部只读 room，本地不产相位）----
-  // A. 新一期 betting：换期 reset（快照上期注单供「重复」→ 清盘 → 回 betting）
+  // A. 新一期 betting（【仅选中房】）：UI 清盘 → 回 betting。注单清理由抽件的 A0 按房处理。
   useEffect(() => {
     if (room.phase === 'betting' && room.roundNo && room.roundNo !== shownRoundRef.current) {
       shownRoundRef.current = room.roundNo
-      if (betsRef.current.size) { lastBetsRef.current = new Map(betsRef.current); setHasLast(true) }
-      betsRef.current = new Map(); setBetsPlaced(new Map())
       picksRef.current = new Set(); setPicks(new Set())
+      setBetsPlaced(new Map(betsOf(selectedRoomKey)))   // 与该房的暂存对齐（切房回来时也走这条）
       setResult(null)
       setPreHits(null)
       setFeedBets(makeFeedBots())
       setNetErr(null)
       setUiPhase('betting')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.phase, room.roundNo])
+
+  // A1. #42 切房：把 UI 拉到新房的当前态。
+  // ⚠ 位置必须在 A 之后 —— 抽件不代管本 effect，正是为了保住这个顺序（见 useSpeedRooms 注释）。
+  // 舞台另有 key={selectedRoomKey} 强制重挂，这里只管数据面。
+  // 切房时本款要清的：picks / 结算结果 / 舞台尾五行段预亮 preHits / 当前动画派生局 animRound /
+  // 错误条 / 上一房的派生局对象（舞台常驻但读 pendingRef 取展示值）/ 回 betting UI。
+  useEffect(() => {
+    resetRoomView()   // 抽件：注单与该房暂存对齐 + shownRound/animatedRound 置空
+    picksRef.current = new Set(); setPicks(new Set())
+    setResult(null); setPreHits(null); setNetErr(null)
+    setAnimRound(null)
+    pendingRef.current = null
+    setUiPhase('betting')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoomKey])
 
   // B. locked：封盘（尚在 betting UI 时切 locked；已进入 drawing 的动画不打断）
   useEffect(() => {
@@ -198,6 +215,22 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     // finishRound 走 refs，无需入依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.drawResult, room.roundNo])
+
+  // E. #42 未选中房的两份累积：drawResult 一到就追（无动画可等）。选中房在 finishRound 里追。
+  // ⚠ 本款 drawResult 字段是 .balls，派生走 deriveRound；珠子取 r.sum。
+  const bgDrawRoundRef = useRef({})
+  useEffect(() => {
+    for (const r of ROOMS) {
+      if (r.key === selectedRoomKey) continue
+      const rm = roomsByKey[r.key]
+      if (!rm.drawResult || !rm.roundNo || bgDrawRoundRef.current[r.key] === rm.roundNo) continue
+      bgDrawRoundRef.current[r.key] = rm.roundNo
+      const d = deriveRound(rm.drawResult.balls)
+      setLastRoundByRoom(m => ({ ...m, [r.key]: d }))
+      setRoadByRoom(m => ({ ...m, [r.key]: [...(m[r.key] || SEED_ROAD), d.sum].slice(-ROAD_CAP) }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomA.drawResult, roomA.roundNo, roomB.drawResult, roomB.roundNo, selectedRoomKey])
 
   const betting = room.phase === 'betting'
   const drawing = uiPhase === 'drawing'
@@ -222,7 +255,9 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     if (serverBalance != null && total > serverBalance) { setNetErr('余额不足'); return false }
     setNetErr(null)
     try {
-      await api.apiPlay(G.backendId, { bets: Object.fromEntries(entries) })   // 返 balanceAfter → 自动回写扣款
+      // #42：带当期 roundId 作【房凭证】—— 后端据它在该款所有房里定位当期 betting 房。
+      // 不传一律落标准房（房化前行为），快房的注会跑到 30s 房去。钱层逻辑本身零改动。
+      await api.apiPlay(G.backendId, { bets: Object.fromEntries(entries), roundId: room.roundId })   // 返 balanceAfter → 自动回写扣款
       entries.forEach((x, k) => betsRef.current.set(k, round2((betsRef.current.get(k) || 0) + x)))
       setBetsPlaced(new Map(betsRef.current))
       return true
@@ -325,12 +360,24 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
     }}>{phaseChip.text}</span>
   )
+  // #42 速度 tab 条（形态A，抽件渲染）：色值传本款 tokens（两款共用 DERBY，同 SpeedGrid）。
+  const roomTabs = renderRoomTabs({ tokens: { sel: DERBY.sel, strip: DERBY.strip, dim: DERBY.dim, tabBorder: COLORS.borderLight, onSel: '#0d2016' }, isMobile })
+
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
         roundId={room.roundNo || '连接中…'}
         phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onHistory={() => setHistoryOpen(true)} onFairness={() => setFairOpen(true)} />
-      {!room.connected && room.roundNo && (
+      {roomTabs}
+      {/* #42：服务端 1008 拒房（?room= 认不出）——hook 已停重连，这里给出口，否则页面白等 */}
+      {room.roomError === 'invalid_room' && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
+          background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
+        }}>该房不存在，请切回其它房</div>
+      )}
+      {!room.connected && room.roundNo && room.roomError !== 'invalid_room' && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${DERBY.orange}`, borderRadius: 10,
@@ -349,7 +396,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
 
   // ---- ① 开奖区：20 球两行×10 + 龙虎/上下计数 + 总和大字 ----
   const drawZone = (
-    <WuXingStage phase={drawing ? 'drawn' : settled ? 'settled' : 'betting'} roundNo={room.roundNo}
+    <WuXingStage key={selectedRoomKey} phase={drawing ? 'drawn' : settled ? 'settled' : 'betting'} roundNo={room.roundNo}
       drawResult={cur ? { balls: cur.balls } : null} lastRound={shown} muted={muted}
       onFinale={() => setPreHits(new Set([...hitsOf(pendingRef.current)].filter(k => k.startsWith('wx-'))))}
       style={{ flex: '0 0 auto', zIndex: 1, margin: isMobile ? '8px 12px 0' : hasRail ? '6px 0 0' : '6px 18px 0', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)',
@@ -469,7 +516,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         </div>
       </div>
       <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} game={G.backendId} drawResult={room.drawResult} onViewHistory={() => setHistoryOpen(true)} />
-      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} room={selectedRoomKey} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>
@@ -651,7 +698,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       </div>
 
       <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null} game={G.backendId} drawResult={room.drawResult} onViewHistory={() => setHistoryOpen(true)} />
-      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
+      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} game={G.backendId} room={selectedRoomKey} venue={G.venue ?? G.displayName} playerToken={playerToken} onLogout={onLogout} pendingRound={room.commit} />
       <HowToPlay open={rulesOpen} onClose={() => setRulesOpen(false)}
         venue={G.venue ?? G.displayName} title={`${G.displayName} 玩法说明`} sections={RULES} />
     </Panel>

@@ -1,5 +1,6 @@
 // #42 单1 冒烟：speedgrid 两房（标准 30s / 快房 15s）后端多房验收。
-// 铺量后 g) 段追加 numberup / hattrick / goldenboot / halftime 四款 15s 快房（标准房走 room IS NULL）。
+// 铺量后 g) 段覆盖 numberup / hattrick / goldenboot / halftime / wuxing / lineup 六款 15s 快房
+// （标准房一律走 room IS NULL；speedgrid 是唯一显式落 '30s' 的，仍由 a)~e) 段单独验）。
 //
 // 本单无 UI（前端零碰，单2 才见），验收 = 本脚本的证据链。
 // 跑法：cd server && ALICE_PW=<pw> node scripts/_speedroom_smoke.mjs
@@ -200,13 +201,16 @@ if (!WITH_KILL) {
 // ============ g) 铺量 4 款：numberup / hattrick / goldenboot / halftime 各一 15s 快房 ============
 // 与 speedgrid 的差异（务必别照抄 a) 段断言）：这 4 款标准房 room 落 NULL（不是显式 '30s'），
 // 所以「标准房在产」要走 `room IS NULL`，读侧靠 COALESCE 归一。
-console.log('\n════ g) 铺量 4 款 15s 快房 ════');
+console.log('\n════ g) 铺量 6 款 15s 快房 ════');
 {
   const GAMES = [
     { game: 'numberup', prefix: 'NU' },
     { game: 'hattrick', prefix: 'HT' },
     { game: 'goldenboot', prefix: 'GB' },
     { game: 'halftime', prefix: 'HF' },
+    // #42 单6 追加：五行 / 首发阵容
+    { game: 'wuxing', prefix: 'WX' },
+    { game: 'lineup', prefix: 'LU' },
   ];
   const fastPrefix = (g) => `${g.prefix}15-`;
 
@@ -221,7 +225,7 @@ console.log('\n════ g) 铺量 4 款 15s 快房 ════');
   };
   let live = false;
   for (let i = 0; i < 20 && !live; i++) { live = await allLive(); if (!live) await sleep(2000); }
-  ok(live, '4 款快房均已出期（等待 ≤40s）');
+  ok(live, '6 款快房均已出期（等待 ≤40s）');
 
   // —— 期号前缀在产 + 标准房仍走 NULL 房 ——
   for (const g of GAMES) {

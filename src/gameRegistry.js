@@ -68,13 +68,17 @@ export const GAME_REGISTRY = [
     // #42：多房。key = 后端 ROOM_CONFIGS 的 room 段；只放 {key,label}，不放 bettingMs（节奏真源在服务端）。
     rooms: [{ key: '30s', label: '标准 30秒' }, { key: '15s', label: '极速 15秒' }] },
   { id: 'DerbyDay',     backendId: 'derbyday',    name: '德比大战',    displayName: '德比大战',    venue: '翡翠竞技场', desc: '主客对决，押你的一方！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverDerbyDay,     cat: 'lotto',  rooms: [] },
-  { id: 'LineUp',       backendId: 'lineup',      name: '首发阵容',    displayName: '首发阵容',    venue: '蓝宝石球场', desc: '五行 25 号，押各行和！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverLineUp,       cat: 'lotto',  rooms: [] },
+  { id: 'LineUp',       backendId: 'lineup',      name: '首发阵容',    displayName: '首发阵容',    venue: '蓝宝石球场', desc: '五行 25 号，押各行和！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverLineUp,       cat: 'lotto',
+    // #42 单6：多房。key = 后端 ROOM_CONFIGS 的 room 段；只放 {key,label}，不放 bettingMs（节奏真源在服务端）。
+    rooms: [{ key: '30s', label: '标准 30秒' }, { key: '15s', label: '极速 15秒' }] },
   { id: 'SpeedGrid',    backendId: 'speedgrid',   name: '极速方格',    displayName: '极速方格',    venue: '黄玉赛道',   desc: '24 车争先，一押到底！',  color: '#35d07f', bg: INSTANT_BG,                                 cover: coverSpeedGrid,    cat: 'pk',
     // #42：多房试点。key = 后端 ROOM_CONFIGS 的 room 段（'30s' 标准房 / '15s' 快房）。
     // ⚠ 只放 {key,label}，【不放 bettingMs】——节奏真源在服务端 ROOM_CONFIGS，
     //   前端一旦存副本就是第二份手抄，且倒计时永远只认 WS 的 endsAt（零本地时钟铁律）。
     rooms: [{ key: '30s', label: '标准 30秒' }, { key: '15s', label: '极速 15秒' }] },
-  { id: 'WuXing',       backendId: 'wuxing',      name: '五行',        displayName: '五行',        venue: '石榴石殿',   desc: '二十球，五行归类！',     color: '#35d07f', bg: INSTANT_BG,                                 cover: coverWuXing,       cat: 'lotto',  rooms: [] },
+  { id: 'WuXing',       backendId: 'wuxing',      name: '五行',        displayName: '五行',        venue: '石榴石殿',   desc: '二十球，五行归类！',     color: '#35d07f', bg: INSTANT_BG,                                 cover: coverWuXing,       cat: 'lotto',
+    // #42 单6：多房。key = 后端 ROOM_CONFIGS 的 room 段；只放 {key,label}，不放 bettingMs（节奏真源在服务端）。
+    rooms: [{ key: '30s', label: '标准 30秒' }, { key: '15s', label: '极速 15秒' }] },
   { id: 'RollingBall',  backendId: 'rollingball', name: '滚球',        displayName: '滚球',        venue: '尖晶石球场', desc: '三球滚动，逐球押注！',   color: '#35d07f', bg: INSTANT_BG,                                 cover: coverRollingBall,  cat: 'lotto',  rooms: [] },
   { id: 'DominoDuel',   backendId: 'dominoduel',  name: '骨牌对决',    displayName: '骨牌对决',    venue: '玛瑙竞技场', desc: '主客对决，骨牌定胜负！', color: '#35d07f', bg: INSTANT_BG,                                 cover: coverDominoDuel,   cat: 'lotto',  rooms: [] },
 ]
