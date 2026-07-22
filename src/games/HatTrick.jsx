@@ -17,7 +17,7 @@ import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import HatTrickStage from './stages/HatTrickStage'
 import HatTrickMarkets, { DieFace } from './markets-ui/HatTrickMarkets'   // #41 单15：盘口区切件（DieFace 随件，舞台/mobile 回用）
 import HatTrickRoad from './markets-ui/HatTrickRoad'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）                       // #41 单15：珠盘路墙
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）                       // #41 单15：珠盘路墙
 import HatTrickPodium from './markets-ui/HatTrickPodium'                   // #41 单15：上局信息条（subRow 槽）
 import { RULES } from './markets-ui/hattrickRules'                         // #41 单15：玩法说明内容（共享）
 import { SIDES, ROAD_TABS, ROAD_TAB_LABELS, beadFor } from './markets-ui/hattrickShared'   // #41 单15：SIDES/珠盘页签/beadFor（mobile 段回用）
@@ -308,10 +308,9 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   useEffect(() => { apiRef.current = api })
   useEffect(() => {
     let cancelled = false
-    // #47 三批回补 ⚠ 手机零碰：路珠 state 是【桌手共享】的，播种会把手机路珠从「种子珠」
-    //   灌成满格真历史 —— 几何量虽不变，但珠数变了即违反「手机逐字节同基线」（PK10 实测
-    //   有珠 30 → 120 才发现）。故播种只在 hasRail（≥1280）档进行。
-    if (!hasRail) return undefined
+    // #47 手机播种解禁：「手机无播种」是批铺时代的旧铁律，随本单废止 —— 手机升 20×6 高墙后
+    //   108 格靠本地攒太空，进页即拉真历史灌窗口（与桌面同一条 /round/history 链路、按当前房）。
+    //   ⚠ 桌面行为不变：原门控只是「非 hasRail 不跑」，去掉后桌面照跑，多出来的是手机/窄桌面也跑。
     const PAGE = 50
     const SEED_TARGET = roadSeedTarget(DESK_ROAD)   // #47：比 usable 多一整列，保证当前列半满
     const PAGES = Math.ceil(SEED_TARGET / PAGE)
@@ -484,7 +483,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         position: 'absolute', top: 2, right: 3, zIndex: 2,
         padding: '1px 5px', borderRadius: RADIUS.pill,
         background: HATTRICK.sel, color: '#083a1b',
-        fontSize: 8, fontWeight: 900, pointerEvents: 'none',
+        fontSize: 9, fontWeight: 900, pointerEvents: 'none',
       }}>${betsPlaced.get(key)}</span>
     )
   }
@@ -593,7 +592,11 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
 
   // ---- 珠盘路（真历史滚动，容量 6×20）——桌面切件；mobile 段 2 行走自身内联（beads 复用）----
   const ROAD_COLS = 20
-  const beads = history.slice(-MOBILE_ROAD_CAP).map(d => beadFor(roadTab, d))
+  // #47 专单：手机内联珠格改吃列滑窗口（20×2 → 可用 36 珠）。
+  const mobWin = roadWindow(history, { cols: ROAD_COLS, rows: 6 })
+  const beads = mobWin.map(d => beadFor(roadTab, d))
+  // #47 专单：动效手机也上（fresh 索引按各面窗口长度换算）
+  const mobFresh = freshFor(freshByRoom[selectedRoomKey] ?? -1, history.length, mobWin.length)
   const beadRoad = (
     /* #47 首批：30 列 × 6 行 × 珠径 24 → 30×24+29×2=778 ≤ 内容可用宽 786，吃满 800 线。
        本 beadRoad 变量【仅桌面 gameCard:640 使用】，手机在 889 行另有内联网格，故可直写不门控。 */
@@ -986,15 +989,18 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
             ))}
           </div>
           <div style={{ overflowX: 'auto', borderRadius: 8, background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
-            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
-              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
+            <style>{ROAD_FX_CSS}</style>{/* #47 专单：手机动效同一份 CSS */}
+            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`, gap: 2, width: 'max-content' }}>
+              {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
                 const b = beads[i]
+                // #47 专单：手机也上弹入/游标动效（同一份 CSS）
+                const cls = i === mobFresh ? ROAD_FX_FRESH : (b == null && i === beads.length ? ROAD_FX_NEXT : undefined)
                 return (
-                  <span key={i} style={{
-                    width: 15, height: 15, borderRadius: '50%',
+                  <span key={i} className={cls} style={{
+                    width: 18, height: 18, borderRadius: '50%',
                     background: b ? b.c : 'rgba(255,255,255,0.05)',
                     border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                    color: b?.dark ? '#3a2c00' : COLORS.white, fontSize: b && b.t.length > 1 ? 6 : 8, fontWeight: 900,
+                    color: b?.dark ? '#3a2c00' : COLORS.white, fontSize: b && b.t.length > 1 ? 7 : 9, fontWeight: 900,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
                   }}>{b ? b.t : ''}</span>
                 )

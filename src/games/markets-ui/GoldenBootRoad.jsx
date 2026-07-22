@@ -2,7 +2,7 @@
 // 判定 beadFor 走引擎口径（winner/sum，禁二份表）。props {history,tab,onTab,isMobile,cols,rows,style}：
 // history = [{winner,sum},...]（原页 state / 多桌 /round/history 派生）；style 覆外框边距（原页 18px / 多桌 0）。
 import { GOLDENBOOT, RADIUS, COLORS } from '../../components/shell/tokens'
-import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
 
 const ROAD_TABS = ['WINNER', 'SUM', 'SIZEPAR']
 // 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照先例分离）
@@ -16,8 +16,10 @@ function beadFor(tab, h) {
   return { t: (big ? '大' : '小') + (h.sum % 2 === 1 ? '单' : '双'), c: big ? GOLDENBOOT.dragon : GOLDENBOOT.tiger }
 }
 
-export default function GoldenBootRoad({ history = [], tab, onTab, cols = 20, rows = 6, bead = 18, freshIndex = -1, style }) {
-  const beads = history.slice(-(cols * rows)).map(h => beadFor(tab, h))
+export default function GoldenBootRoad({ history = [], tab, onTab, cols = 20, rows = 6, bead = 18, freshIndex = -1, slide = false, style }) {
+  // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
+  //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
+  const beads = (slide ? roadWindow(history, { cols, rows }) : history.slice(-(cols * rows))).map(h => beadFor(tab, h))
   return (
     <div style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, ...style }}>
       <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>

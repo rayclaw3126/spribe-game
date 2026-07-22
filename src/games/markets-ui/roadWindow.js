@@ -60,6 +60,15 @@ export function roundSeq(roundNo) {
 //
 // ⚠ 只有 WS 真新珠才弹：切房 / 首灌一律传 freshIndex = -1（调用方负责），
 //   否则一次灌 160+ 颗会整屏爆闪。
+// #47 专单：把某一面的 freshIndex 换算到【另一面】的窗口。
+// 起因：桌面与手机/多桌用同一个 fresh 信号，但各自窗口长度不同（桌 163–168、手机 35–36），
+//   直接复用索引会落到错误格子甚至越界。fresh 语义恒为「本面最后一颗」，故只需判断
+//   源索引是否仍指向源窗口末颗（= 动效仍在生效），是则返回目标窗口末颗，否则 -1。
+export function freshFor(srcIndex, srcLen, dstLen) {
+  if (!(srcIndex >= 0) || srcLen <= 0 || dstLen <= 0) return -1
+  return srcIndex === srcLen - 1 ? dstLen - 1 : -1
+}
+
 export const ROAD_FX_FRESH = 'rdFresh'   // 新珠入场类名
 export const ROAD_FX_NEXT = 'rdNext'     // 下一格呼吸游标类名
 

@@ -17,7 +17,7 @@ import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import WuXingStage from './stages/WuXingStage'
 import WuXingMarkets from './markets-ui/WuXingMarkets'   // #41 单16：盘口区切件（视觉原样）
 import WuXingRoad from './markets-ui/WuXingRoad'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）         // #41 单16：珠盘路墙（判定走引擎）
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）         // #41 单16：珠盘路墙（判定走引擎）
 import { RULES } from './markets-ui/wuxingRules'         // #41 单16：玩法说明内容（共享）
 import { WUXING, ROAD_VIEWS } from './markets-ui/wuxingShared'   // #41 单16：五行五段/珠盘视角（原页 mobile 段 + 切件同源）
 
@@ -274,10 +274,9 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   useEffect(() => { apiRef.current = api })
   useEffect(() => {
     let cancelled = false
-    // #47 三批回补 ⚠ 手机零碰：路珠 state 是【桌手共享】的，播种会把手机路珠从「种子珠」
-    //   灌成满格真历史 —— 几何量虽不变，但珠数变了即违反「手机逐字节同基线」（PK10 实测
-    //   有珠 30 → 120 才发现）。故播种只在 hasRail（≥1280）档进行。
-    if (!hasRail) return undefined
+    // #47 手机播种解禁：「手机无播种」是批铺时代的旧铁律，随本单废止 —— 手机升 20×6 高墙后
+    //   108 格靠本地攒太空，进页即拉真历史灌窗口（与桌面同一条 /round/history 链路、按当前房）。
+    //   ⚠ 桌面行为不变：原门控只是「非 hasRail 不跑」，去掉后桌面照跑，多出来的是手机/窄桌面也跑。
     // ⚠ 后端把 limit 夹死在 50（round.js 的 Math.min(50, ...)），单请求拿不满 180 格，
     //   故走该端点现成的 cursor 分页续拉，最多 PAGES 页（180/50 → 4 页封顶，防翻页失控）。
     const PAGE = 50
@@ -398,7 +397,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       position: 'absolute', top: 2, right: 3,
       padding: '1px 5px', borderRadius: RADIUS.pill,
       background: DERBY.sel, color: '#083a1b',
-      fontSize: 8, fontWeight: 900,
+      fontSize: 9, fontWeight: 900,
     }}>${betsPlaced.get(key)}</span>
   )
   const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
@@ -497,6 +496,11 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   // ---- ② 盘区（主盘/龙虎上下/过关/五行）：已切至 ./markets-ui/WuXingMarkets（键区单一出处），下方 JSX 直接组装。----
   // ---- ③ 珠盘路：桌面切件 ./markets-ui/WuXingRoad（页签/判定单一出处，history=road 整值派生）；mobile 段 2 行走自身内联（ROAD_VIEWS 复用）。----
   const ROAD_COLS = 20
+  // #47 专单：手机内联珠格改吃列滑窗口（按手机自己的 20×2 开窗 → 可用 (20−2)×2 = 36 珠）。
+  //   ⚠ 几何零碰：珠径 15 / 格数 40 / 盒尺寸一字未动，只改「填几颗」。
+  const mobileBeads = roadWindow(road, { cols: ROAD_COLS, rows: 6 })
+  // #47 专单：动效手机也上 —— 桌面 fresh 索引按各自窗口长度换算到手机面（禁直接复用，长度不同会落错格）
+  const mobFresh = freshFor(freshByRoom[selectedRoomKey] ?? -1, road.length, mobileBeads.length)
   const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 路珠视角（手机/桌面共用 roadView，切了两端一致）
 
   const gameCard = (
@@ -733,16 +737,19 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
             })}
           </div>
           <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
-            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 15px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 15px)`, gap: 2, width: 'max-content' }}>
-              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
-                const n = road.slice(-MOBILE_ROAD_CAP)[i]
+            <style>{ROAD_FX_CSS}</style>{/* #47 专单：手机动效同一份 CSS */}
+            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`, gap: 2, width: 'max-content' }}>
+              {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
+                const n = mobileBeads[i]
+                // #47 专单：手机也上弹入/游标动效（同一份 CSS）
+                const cls = i === mobFresh ? ROAD_FX_FRESH : (n == null && i === mobileBeads.length ? ROAD_FX_NEXT : undefined)
                 const d = n != null ? curView.judge(n) : null
                 return (
-                  <span key={i} style={{
-                    width: 15, height: 15, borderRadius: '50%',
+                  <span key={i} className={cls} style={{
+                    width: 18, height: 18, borderRadius: '50%',
                     background: d ? d.c : 'rgba(255,255,255,0.05)',
                     border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                    color: COLORS.white, fontSize: 8, fontWeight: 900,
+                    color: COLORS.white, fontSize: 9, fontWeight: 900,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
                   }}>{d ? d.t : ''}</span>
                 )

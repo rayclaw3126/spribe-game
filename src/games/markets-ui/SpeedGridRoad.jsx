@@ -4,7 +4,7 @@
 // style 覆外框边距（原页 isMobile ? '0 12px 8px' : '0 18px 8px'）。
 import { COLORS, RADIUS, DERBY, ROULETTE } from '../../components/shell/tokens'
 import { MARKETS } from '../markets/speedgrid'
-import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
 
 // 珠盘路多视角（B 型：存整值 champ，判定一律走引擎 MARKETS/RED 常量，禁手写第二份表）
 const SG_ROAD_TABS = ['BS', 'OE', 'RB']
@@ -15,9 +15,11 @@ function sgBeadFor(tab, n) {
   return MARKETS.big.hit(n) ? { t: '大', c: DERBY.away } : { t: '小', c: DERBY.home }   // BS 大小
 }
 
-export default function SpeedGridRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, style }) {
+export default function SpeedGridRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, slide = false, style }) {
+  // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
+  //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   const roadBead = bead ?? (isMobile ? 18 : 14)   // #47：可选 bead，默认原值
-  const beads = history.slice(-(cols * rows)).map(n => sgBeadFor(tab, n))
+  const beads = (slide ? roadWindow(history, { cols, rows }) : history.slice(-(cols * rows))).map(n => sgBeadFor(tab, n))
   return (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1, ...style,

@@ -18,7 +18,7 @@ import HalfTimeStage from './stages/HalfTimeStage'
 import HalfTimeMarkets from './markets-ui/HalfTimeMarkets'                  // #41 单15：盘口区切件
 import { SEC_KEYS } from './markets-ui/halftimeMarketsData'                // #41 单15：段位 key 集（手机手风琴 selCount 用，单一出处）
 import HalfTimeRoad from './markets-ui/HalfTimeRoad'                        // #41 单15：珠盘路墙
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 import HalfTimePodium from './markets-ui/HalfTimePodium'                    // #41 单15：上局信息条（20 球+和值）
 import { RULES } from './markets-ui/halftimeRules'                          // #41 单15：玩法说明内容（共享）
 
@@ -249,10 +249,9 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   useEffect(() => { apiRef.current = api })
   useEffect(() => {
     let cancelled = false
-    // #47 三批回补 ⚠ 手机零碰：路珠 state 是【桌手共享】的，播种会把手机路珠从「种子珠」
-    //   灌成满格真历史 —— 几何量虽不变，但珠数变了即违反「手机逐字节同基线」（PK10 实测
-    //   有珠 30 → 120 才发现）。故播种只在 hasRail（≥1280）档进行。
-    if (!hasRail) return undefined
+    // #47 手机播种解禁：「手机无播种」是批铺时代的旧铁律，随本单废止 —— 手机升 20×6 高墙后
+    //   108 格靠本地攒太空，进页即拉真历史灌窗口（与桌面同一条 /round/history 链路、按当前房）。
+    //   ⚠ 桌面行为不变：原门控只是「非 hasRail 不跑」，去掉后桌面照跑，多出来的是手机/窄桌面也跑。
     const PAGE = 50
     const SEED_TARGET = roadSeedTarget(DESK_ROAD)
     const PAGES = Math.ceil(SEED_TARGET / PAGE)
@@ -576,7 +575,11 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       {/* ③ 锁底：路珠(5视角 pill 原样 + 珠压 2 行) + 注栏 */}
       <div style={{ flex: '0 0 auto' }}>
         {/* 珠盘路切件（紧凑变体：页签横滚 + 2 行 15px 珠矩阵，视觉原样） */}
-        <HalfTimeRoad history={history.slice(-MOBILE_ROAD_CAP)} tab={roadTab} onTab={setRoadTab} compact
+        {/* #47 专单：不再预截固定 CAP —— 预截会让 N 恒定、mod rows 相位钉死成满列。传全量 + slide，由件内按 20×2 开窗 */}
+        {/* #47 专单：动效手机也上（fresh 索引按手机面 20×2 窗口长度换算） */}
+        {/* #47 手机高墙档：compact 默认 2 行 15px → 显式传 20×6 珠18，可用 108 */}
+        <HalfTimeRoad history={history} slide tab={roadTab} onTab={setRoadTab} compact rows={6} bead={18}
+          freshIndex={freshFor(freshByRoom[selectedRoomKey] ?? -1, history.length, roadWindow(history, { cols: 20, rows: 6 }).length)}
           style={{ padding: '4px 12px 0' }} />
         <div style={{ padding: '6px 12px', background: HALFTIME.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{

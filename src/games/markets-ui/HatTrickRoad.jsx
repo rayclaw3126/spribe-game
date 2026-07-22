@@ -3,12 +3,14 @@
 // history = 三骰数组序列 [[d,d,d],...]（原页 state / 多桌 /round/history 派生）；style 覆外框边距（原页 18px / 多桌 0）。
 import { HATTRICK, RADIUS, COLORS } from '../../components/shell/tokens'
 import { ROAD_TABS, ROAD_TAB_LABELS, beadFor } from './hattrickShared'
-import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
 
 // #47 首批：新增可选 bead（珠径 px），默认 15 = 原行为。仅帽子戏法原页桌面传 24；
 // 多桌 marketsUiRegistry→TableCard 与手机段均不传，逐字节零感。
-export default function HatTrickRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead = 15, freshIndex = -1, style }) {
-  const beads = history.slice(-(cols * rows)).map(d => beadFor(tab, d))
+export default function HatTrickRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead = 15, freshIndex = -1, slide = false, style }) {
+  // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
+  //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
+  const beads = (slide ? roadWindow(history, { cols, rows }) : history.slice(-(cols * rows))).map(d => beadFor(tab, d))
   return (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,

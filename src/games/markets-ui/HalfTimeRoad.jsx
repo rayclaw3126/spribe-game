@@ -5,7 +5,7 @@
 //   compact = 卡内紧凑变体（手机锁底 2 行 15px + 页签横滚），非 compact = 桌面 6 行 18px + 页签换行。
 //   style 覆外框（桌面 margin / 手机 padding）。
 import { COLORS, RADIUS, HALFTIME } from '../../components/shell/tokens'
-import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
 
 const ROAD_TABS = ['O/U', 'ODD/EVEN', 'PARLAY', 'ZONE', 'HALF']
 // 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照 Derby 先例分离）
@@ -22,14 +22,16 @@ function beadFor(tab, sum, half) {
   return { t: half, c: half === 'F' ? HALFTIME.over : half === 'S' ? HALFTIME.under : HALFTIME.draw }
 }
 
-export default function HalfTimeRoad({ history = [], tab, onTab, isMobile = false, compact = false, cols = 20, rows, bead, freshIndex = -1, style }) {
+export default function HalfTimeRoad({ history = [], tab, onTab, isMobile = false, compact = false, cols = 20, rows, bead, freshIndex = -1, slide = false, style }) {
+  // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
+  //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   // 紧凑变体 = 显式 compact 或手机（多桌/锁底），驱动页签横滚 + 2 行 15px 珠矩阵
   const cmp = compact || isMobile
   const cell = bead ?? (cmp ? 15 : 18)   // #47：可选 bead，默认原值
   const nRows = rows ?? (cmp ? 2 : 6)
   // 原页口径：history 已由调用方截到容量窗口(ROAD_CAP)，本件从窗口头部起填格(beads[i])——
   // 桌面渲首 6×cols、紧凑渲首 2×cols（与原 beadRoad / 锁底 road 逐格同源，分毫不变）。
-  const beads = history.map(h => beadFor(tab, h.sum, h.half))
+  const beads = (slide ? roadWindow(history, { cols, rows: nRows }) : history).map(h => beadFor(tab, h.sum, h.half))
   return (
     <div style={{ position: 'relative', zIndex: 1, ...(cmp ? {} : { flex: '0 0 auto' }), ...style }}>
       <div style={cmp

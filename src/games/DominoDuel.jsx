@@ -16,7 +16,7 @@ import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import DominoDuelMarkets from './markets-ui/DominoDuelMarkets'   // #41 单16：盘口区切件（section= 逐段接入手风琴，视觉原样）
 import DominoDuelRoad from './markets-ui/DominoDuelRoad'   // #41 单16：珠盘路墙（页签/判定单一出处，走引擎）
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）
 import { RULES } from './markets-ui/dominoduelRules'            // #41 单16：玩法说明内容（共享）
 // #44 单S1：翻牌视觉原子（DominoTile/时间轴/keyframes）单一出处切至多桌舞台件，原页 import 回引（等价搬家）。
 import { DominoTile, FLIP_DELAY, FLIP_DUR, FLIP_END, DD_KEYFRAMES } from './stages/DominoDuelStage'
@@ -454,10 +454,9 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   useEffect(() => { apiRef.current = api })
   useEffect(() => {
     let cancelled = false
-    // #47 三批回补 ⚠ 手机零碰：路珠 state 是【桌手共享】的，播种会把手机路珠从「种子珠」
-    //   灌成满格真历史 —— 几何量虽不变，但珠数变了即违反「手机逐字节同基线」（PK10 实测
-    //   有珠 30 → 120 才发现）。故播种只在 hasRail（≥1280）档进行。
-    if (!hasRail) return undefined
+    // #47 手机播种解禁：「手机无播种」是批铺时代的旧铁律，随本单废止 —— 手机升 20×6 高墙后
+    //   108 格靠本地攒太空，进页即拉真历史灌窗口（与桌面同一条 /round/history 链路、按当前房）。
+    //   ⚠ 桌面行为不变：原门控只是「非 hasRail 不跑」，去掉后桌面照跑，多出来的是手机/窄桌面也跑。
     const PAGE = 50
     const SEED_TARGET = roadSeedTarget(DESK_ROAD)   // #47：比 usable 多一整列，保证当前列半满
     const PAGES = Math.ceil(SEED_TARGET / PAGE)
@@ -699,8 +698,11 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
 
       {/* ③ 锁底：珠盘路多视角 pill + 注栏（原样搬） */}
       <div style={{ flex: '0 0 auto' }}>
-        <DominoDuelRoad history={road} tab={roadTab} onTab={setRoadTab}
-          cols={20} rows={2} bead={15} tabFs={9.5} ratioFs={8.5} pad={3} radius={8}
+        {/* #47 专单：动效手机也上 —— fresh 索引按手机面窗口长度换算（桌 30×6 与手机 20×2 长度不同） */}
+        <DominoDuelRoad history={road} slide tab={roadTab} onTab={setRoadTab}
+          freshIndex={freshFor(freshIdx, road.length, roadWindow(road, { cols: 20, rows: 6 }).length)}
+          /* #47 手机高墙档：2 行 15px 小条 → 20×6 珠18，可用 (20−2)×6 = 108 */
+          cols={20} rows={6} bead={18} tabFs={9.5} ratioFs={8.5} pad={3} radius={8}
           style={{ padding: '4px 12px 0', position: 'relative', zIndex: 1 }} />
         <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{

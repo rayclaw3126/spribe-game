@@ -74,13 +74,63 @@ const R_SINGLE = 0.9523
 
 // 珠盘路视角：从整局 3 球号码派生。判定全走引擎 helper（GROUPS.hit / isRed），禁手写第二份表。
 // 每视角 judge(号码) → { t: 单字, red: 是否红色珠 }（珠子红蓝双色 + 单字，沿用现有样式）。
+// #47 收官·路珠 8 路（桌手【单一出处】，桌面 pill 与手机 pill 同吃这一份）。
+// 判定一律走引擎现成口径：GROUPS / COMBO / isRed / col-N / row-t*，禁在此另写第二份表。
+//
+// ⚠ 一局落 3 颗（第1/2/3球顺序入列）：本款【不存在整局结算维度】—— 唯一判定入口
+//   hitOf(key, n) 只吃单个球号，组合/列注/行注同样是逐球（col-N 是 (n-1)%5、
+//   row-t* 是号段 1-5 / 6-20 / 21-45），故 8 条路语义统一，无特例分支。
+// ⚠ 行注天生有第 4 态：三档号段只覆盖 1-45，46-75 一档不沾 → 判「无」，
+//   按定案给中性灰珠显「无」，【不留空格】（空格会被读成「这局没开过」）。
+const ROAD_PAL = ['#e2564a', '#2563c9', '#35d07f', '#f28c17', '#7C3AED', '#0891B2', '#CA8A04', '#DB2777', '#16A34A', '#64748b']
+const ROAD_NONE = '#5b6472'   // 中性灰（比空格底色亮，与 DERBY.grey 深底可辨）
+
+// 双色路的公共构造：命中走 away 红、否则 home 蓝（与盘口键配色同源）
+const duo = (onKey, onText, offText) => (n) => (
+  GROUPS[onKey].hit(n) ? { t: onText, c: DERBY.away } : { t: offText, c: DERBY.home }
+)
 const ROAD_VIEWS = [
-  { key: '1big', label: '1球大小', ball: 0, judge: n => GROUPS.big.hit(n) ? { t: '大', red: true } : { t: '小', red: false } },
-  { key: '1oe', label: '1球单双', ball: 0, judge: n => GROUPS.odd.hit(n) ? { t: '单', red: true } : { t: '双', red: false } },
-  { key: '1rb', label: '1球红蓝', ball: 0, judge: n => isRed(n) ? { t: '红', red: true } : { t: '蓝', red: false } },
-  { key: '2big', label: '2球大小', ball: 1, judge: n => GROUPS.big.hit(n) ? { t: '大', red: true } : { t: '小', red: false } },
-  { key: '3big', label: '3球大小', ball: 2, judge: n => GROUPS.big.hit(n) ? { t: '大', red: true } : { t: '小', red: false } },
+  { key: 'bs', label: '大小', judge: duo('big', '大', '小') },
+  { key: 'oe', label: '单双', judge: duo('odd', '单', '双') },
+  { key: 'rb', label: '红蓝', judge: (n) => (isRed(n) ? { t: '红', c: DERBY.away } : { t: '蓝', c: DERBY.home }) },
+  {
+    key: 'combo', label: '组合',
+    judge: (n) => {
+      // 走 COMBO 表 + hitOf 同款 every 口径；四组互斥必中其一
+      const k = COMBO_META.find((m) => COMBO[m.slot].every((g) => GROUPS[g].hit(n)))
+      return { t: k ? RL[k.slot] : '—', c: k ? ROAD_PAL[COMBO_META.indexOf(k)] : ROAD_NONE }
+    },
+  },
+  {
+    key: 'col', label: '列注',
+    judge: (n) => {
+      const c = [1, 2, 3, 4, 5].find((i) => GROUPS[`col-${i}`].hit(n))
+      return { t: c ? String(c) : '—', c: c ? ROAD_PAL[c - 1] : ROAD_NONE }
+    },
+  },
+  {
+    key: 'row', label: '行注',
+    judge: (n) => {
+      // ⚠ 第 4 态「无」：row-t1/t3/t5 只覆盖 1-45，46-75 全部落此态（约四成球）
+      const t = ['row-t1', 'row-t3', 'row-t5'].find((k) => GROUPS[k].hit(n))
+      if (!t) return { t: '无', c: ROAD_NONE }
+      return { t: t.slice(-1), c: ROAD_PAL[['row-t1', 'row-t3', 'row-t5'].indexOf(t)] }
+    },
+  },
+  { key: 'nhi', label: '首位', judge: (n) => ({ t: String(Math.floor(n / 10)), c: ROAD_PAL[Math.floor(n / 10) % ROAD_PAL.length] }) },
+  { key: 'nlo', label: '尾数', judge: (n) => ({ t: String(n % 10), c: ROAD_PAL[(n % 10) % ROAD_PAL.length] }) },
 ]
+
+// 整局 [b1,b2,b3] 展开成 3 颗珠（顺序入列）；road 全量展开即该视角的珠序列。
+// ⚠ 展开必须在【过窗口之前】：roadWindow 是按「珠」算整列滑动的，喂局数会算错相位。
+function roadBeadsOf(view, rounds) {
+  const out = []
+  for (const balls of rounds) {
+    if (!Array.isArray(balls)) continue
+    for (const n of balls) if (n != null) out.push(view.judge(n))
+  }
+  return out
+}
 
 // 命中判定（单个球号 n）
 export function hitOf(key, n) {
@@ -123,6 +173,9 @@ const SETTLE_T = 6     // 3s 结算展示
 // ⚠ B 豁免只免「真历史灌满」，不免视觉规格：数据源仍是【本人实玩累积】，珠子随开局变多。
 const ROAD_CAP = 168
 const DESK_ROAD = { cols: 30, rows: 6 }   // 模块级：进组件内每渲染重建
+const BEADS_PER_ROUND = 3                 // #47 收官：一局落 3 颗（第1/2/3球顺序入列）
+// 存储只管「局」，窗口只管「珠」：桌面满窗 168 珠 = 56 局，手机 120 珠 = 40 局，存 120 局足够两端。
+const ROUND_CAP = 120
 
 // ⚠ 手机段专用容量，钉回原值 120：手机竖版珠格走 road.slice(-CAP)[i] 从【头部】取，
 //   CAP 一变手机珠子整体前移。桌面 CAP 改动不得穿到手机。
@@ -322,8 +375,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   //   中栏实宽仅 664，此档放大必挤爆赔率（S9 当年正是治这档的截断）。手机 <768 永为 false。
   const hasRail = useMediaQuery('(min-width: 1280px)')
   const [acc, setAcc] = useState({ comboRow: true, col: true, num: false })   // 手机手风琴折叠态（默认组合/列注展开、单号收起）；纯 UI，不动任何下注 state
-  const [freshIdx, setFreshIdx] = useState(-1)   // #47 动效：新珠索引（本款无速度房，单值即可）
-  const [roadView, setRoadView] = useState('1big')   // 珠盘路视角（手机 pill 选，默认 1球大小）；纯显示，零请求零 state 污染
+  const [freshCount, setFreshCount] = useState(0)   // #47 动效：本局新落珠数（本款无速度房，单值即可）
+  const [roadView, setRoadView] = useState('bs')   // 珠盘路视角（手机 pill 选，默认 1球大小）；纯显示，零请求零 state 污染
   const [bet, setBet] = useState(10)
   const [fairOpen, setFairOpen] = useState(false)   // 可验证公平抽屉
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
@@ -526,11 +579,10 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
           if (rid != null && roadRecordedRef.current !== rid) {
             roadRecordedRef.current = rid
             const balls = pendingRef.current.slice()
-            setRoad(r => {
-              const next = roadWindow([...r, balls], DESK_ROAD)   // #47：整列丢最旧，增量与全量同构
-              setFreshIdx(next.length - 1)                        // 真新珠 → 弹入（首挂无珠，天然不触发）
-              return next
-            })
+            // #47 收官：storage 只截局数；列滑窗口在渲染期按【珠】开（见 deskBeads），
+            //   否则窗口拿到的是局数、mod rows 相位全错，会钉成满 28 列。
+            setRoad(r => [...r, balls].slice(-ROUND_CAP))
+            setFreshCount(BEADS_PER_ROUND)   // 本局 3 颗一起弹入（首挂无珠，天然不触发）
           }
         }
         roundIdRef.current = null
@@ -958,16 +1010,32 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   const ROAD_COLS = 20
   // #47 刀2：原 roadBead(桌面 14) 已被 deskBead 取代；手机竖版珠格自带写死 14px，不引用本变量，故删。
   const deskBead = 24                        // 桌面统一珠径：30×24 + 29×2 = 778 ≤ 786 可用宽
-  const beads = road.slice(-MOBILE_ROAD_CAP)   // 手机竖版珠格用；road 存整局 3 球号码数组 [[b1,b2,b3],...]
-  const deskBeads = road.slice(-(DESK_ROAD.cols * DESK_ROAD.rows))   // #47 桌面 30×6 窗口珠
-  const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 当前珠盘视角（手机 pill 选）
+  const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 当前视角（桌手同一份 ROAD_VIEWS）
+  // #47 收官：road 存整局 [b1,b2,b3]；先按当前视角展开成【珠】，再各自取窗口。
+  //   ⚠ 展开在过窗口之前 —— 窗口按珠算整列滑动，喂局数会算错相位。
+  const viewBeads = roadBeadsOf(curView, road)
+  // #47 专单：手机竖版同吃列滑窗口（20×2 → 可用 36 珠）。本款 3 颗/局，N 每局 +3、mod 2 交替，
+  //   故 35/36 会逐局翻转 —— 全场最快的滑动节奏，相位错在此最先暴露（轨迹见交活）。
+  const beads = roadWindow(viewBeads, { cols: ROAD_COLS, rows: 6 })
+  const mobFreshFrom = freshCount > 0 ? beads.length - freshCount : -1   // #47 专单：手机面自己的新珠区间
+  const deskBeads = roadWindow(viewBeads, DESK_ROAD)   // 桌面：列对齐滑动窗口（163–168 浮动，右恒空 2 列）
+  const freshFrom = freshCount > 0 ? deskBeads.length - freshCount : -1   // 本局新珠区间起点
   const beadRoad = (
     <div style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, margin: isMobile ? '0 12px 8px' : isDesk ? '0 0 8px' : '0 18px 8px', ...(isDesk ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-        <span style={{
-          padding: '3px 12px', borderRadius: RADIUS.pill, background: DERBY.sel, color: '#083a1b',
-          border: `1px solid ${DERBY.sel}`, fontSize: 10, fontWeight: 900, letterSpacing: 0.5,
-        }}>第1球大小</span>
+      {/* #47 收官：桌面原为写死「第1球大小」的静态 span（零 tab）→ 换 8 路 pill，照五行同款 */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
+        {ROAD_VIEWS.map(v => {
+          const on = roadView === v.key
+          return (
+            <button key={v.key} type="button" onClick={() => setRoadView(v.key)} style={{
+              flex: '0 0 auto', whiteSpace: 'nowrap', cursor: 'pointer',
+              padding: '3px 12px', borderRadius: RADIUS.pill,
+              background: on ? DERBY.sel : 'rgba(0,0,0,0.35)', color: on ? '#083a1b' : DERBY.dim,
+              border: `1px solid ${on ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
+              fontSize: hasRail ? 12 : 10, fontWeight: 900, letterSpacing: 0.5,
+            }}>{v.label}</button>
+          )
+        })}
       </div>
       <style>{ROAD_FX_CSS}</style>
       <div style={{ overflowX: 'auto', borderRadius: 10, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6 }}>
@@ -977,21 +1045,19 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
           gap: 2, width: 'max-content',
         }}>
           {Array.from({ length: DESK_ROAD.cols * DESK_ROAD.rows }).map((_, i) => {
-            // 桌面单视角：第1球大小（从整局 3 球取 balls[0]，走引擎 GROUPS.big.hit 派生，不手写表）
-            const balls = deskBeads[i]
-            const b1 = balls != null ? balls[0] : undefined
-            const big = b1 != null && GROUPS.big.hit(b1)
-            const t = b1 != null ? (big ? '大' : '小') : ''
+            // #47 收官：珠面直接取 roadBeadsOf 派生好的 {t,c}（引擎口径，禁在此重算）
+            const d = deskBeads[i] || null
             // #47 动效：新珠弹入 / 下一空格呼吸游标（只此一格）
-            const cls = i === freshIdx ? ROAD_FX_FRESH : (b1 == null && i === deskBeads.length ? ROAD_FX_NEXT : undefined)
+            const cls = (freshFrom >= 0 && i >= freshFrom && i < deskBeads.length) ? ROAD_FX_FRESH
+              : (d == null && i === deskBeads.length ? ROAD_FX_NEXT : undefined)
             return (
               <span key={i} className={cls} style={{
                 width: deskBead, height: deskBead, borderRadius: '50%',
-                background: b1 != null ? (big ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.05)',
-                border: b1 != null ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                background: d ? d.c : 'rgba(255,255,255,0.05)',
+                border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
                 color: COLORS.white, fontSize: deskBead / 2, fontWeight: 900,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
-              }}>{t}</span>
+              }}>{d ? d.t : ''}</span>
             )
           })}
         </div>
@@ -1223,17 +1289,19 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
             })}
           </div>
           <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
-            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(2, 14px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 14px)`, gap: 2, width: 'max-content' }}>
-              {Array.from({ length: ROAD_COLS * 2 }).map((_, i) => {
-                const balls = beads[i]
-                const num = balls != null ? balls[curView.ball] : undefined
-                const d = num != null ? curView.judge(num) : null
+            <style>{ROAD_FX_CSS}</style>{/* #47 专单：手机动效同一份 CSS */}
+            <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`, gap: 2, width: 'max-content' }}>
+              {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
+                const d = beads[i] || null   // #47 收官：与桌面同一份 roadBeadsOf 派生（单一出处）
+                // #47 专单：手机也上弹入/游标动效；本款 3 颗/局，故整段新珠区间齐弹
+                const cls = (mobFreshFrom >= 0 && i >= mobFreshFrom && i < beads.length) ? ROAD_FX_FRESH
+                  : (d == null && i === beads.length ? ROAD_FX_NEXT : undefined)
                 return (
-                  <span key={i} style={{
-                    width: 14, height: 14, borderRadius: '50%',
-                    background: d ? (d.red ? DERBY.away : DERBY.home) : 'rgba(255,255,255,0.05)',
+                  <span key={i} className={cls} style={{
+                    width: 18, height: 18, borderRadius: '50%',
+                    background: d ? d.c : 'rgba(255,255,255,0.05)',
                     border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                    color: COLORS.white, fontSize: 7, fontWeight: 900,
+                    color: COLORS.white, fontSize: 9, fontWeight: 900,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
                   }}>{d ? d.t : ''}</span>
                 )

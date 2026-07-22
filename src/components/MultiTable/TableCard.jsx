@@ -390,9 +390,14 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
               多桌高度紧凑 → cols 收窄横向内滚。其余款仍 8 颗单字色珠。 */}
           {cfg ? (
             <div style={{ flex: '0 0 auto', padding: '8px 10px', borderTop: `1px solid ${KENO.band}` }}>
-              <cfg.Road history={gbRoadHistory} tab={gbRoadTab} onTab={setGbRoadTab} isMobile cols={cfg.roadCols || 12} style={{ margin: 0 }} />
+              {/* #47 专单：迷你路珠吃列对齐滑动窗口 —— slide 交给件内按【本面 cols × 紧凑 2 行】开窗
+                  （12 列 → 可用 (12−2)×2 = 20 珠），珠径/行列数/盒尺寸零碰。 */}
+              <cfg.Road history={gbRoadHistory} slide tab={gbRoadTab} onTab={setGbRoadTab} isMobile cols={cfg.roadCols || 12} style={{ margin: 0 }} />
             </div>
           ) : (
+          /* #47 专单·明确豁免：本分支是【单行 8 颗】小珠横排，不是 N×M 网格 ——
+             列滑窗口的语义是「整列丢最旧」，单行形态无列滑语义（退化成逐颗裁，接了等于没接），
+             故本分支不接 slide、不接弹入/游标动效。有 cfg 的款走上面的真珠盘路墙。 */
           <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 5, padding: '8px 10px', borderTop: `1px solid ${KENO.band}` }}>
             {beads.length === 0 ? (
               <span style={{ color: M.txtMute, fontSize: 10 }}>暂无路珠</span>

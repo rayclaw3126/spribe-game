@@ -6,7 +6,7 @@
 //   + 细占比条只显主/客），非 compact = 桌面 6 行 + 占比条含「和」+ 页签换行。style 覆外框（桌面 margin / 手机 padding）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { HT_BIG, FT_BIG } from '../markets/derbyday'
-import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
 
 // ---------- 珠盘路（六页签）——从原页机械切至此（页签/判定单一出处）----------
 const ROAD_TABS = ['HT-H/A', 'HT-O/U', 'HT-O/E', 'FT-H/A', 'FT-O/U', 'FT-O/E']
@@ -31,12 +31,14 @@ function beadFor(tab, r) {
   return total % 2 ? { t: 'O', c: DERBY.away } : { t: 'E', c: DERBY.home }   // O/E 单双
 }
 
-export default function DerbyDayRoad({ history = [], tab, onTab, cols = 20, rows, bead, freshIndex = -1, style, compact = false, isMobile = false }) {
+export default function DerbyDayRoad({ history = [], tab, onTab, cols = 20, rows, bead, freshIndex = -1, slide = false, style, compact = false, isMobile = false }) {
+  // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
+  //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   // 紧凑变体 = 显式 compact 或多桌 isMobile；驱动页签横滚 + 2 行 15px 珠矩阵 + 细占比条
   const cmp = compact || isMobile
   const roadBead = bead ?? (cmp ? 15 : (isMobile ? 16 : 14))   // #47：可选 bead，默认原值（桌面压一档保总高；紧凑固定 15）
   const nRows = rows ?? (cmp ? 2 : 6)
-  const beads = history.map(r => beadFor(tab, r))
+  const beads = (slide ? roadWindow(history, { cols, rows: nRows }) : history).map(r => beadFor(tab, r))
   // 占比条：近 30 期按当前页签所属盘（HT/FT）的 H/A 重算
   const ratioSrc = history.slice(-30)
   const ratioHalf = tab.startsWith('HT')

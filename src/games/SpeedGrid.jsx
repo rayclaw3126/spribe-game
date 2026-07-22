@@ -505,6 +505,9 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       <SpeedGridRoad history={road} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
         cols={hasRail ? DESK_ROAD.cols : undefined} rows={hasRail ? DESK_ROAD.rows : undefined}
         bead={hasRail ? 24 : undefined}
+        /* #47 专单：本款 gameCard 桌手共用 —— slide 只给非 hasRail 面（手机/窄桌面），
+           ≥1280 桌面面维持已收状态零碰（页面侧已窗口化，件内再开窗虽幂等，仍按铁律不传）。 */
+        slide={!hasRail}
         freshIndex={hasRail ? (freshByRoom[selectedRoomKey] ?? -1) : -1}
         style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
           ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />

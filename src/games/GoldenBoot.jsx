@@ -396,6 +396,9 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
          手机不传（undefined）走件内默认 20×6/珠18，与基线逐字节相同。 */
       cols={hasRail ? DESK_ROAD.cols : undefined} rows={hasRail ? DESK_ROAD.rows : undefined}
       bead={hasRail ? 24 : undefined}
+      /* #47 专单：本款 gameCard 桌手共用 —— slide 只给非 hasRail 面（手机/窄桌面），
+         ≥1280 桌面面维持已收状态零碰（页面侧已窗口化，件内再开窗虽幂等，仍按铁律不传）。 */
+      slide={!hasRail}
       freshIndex={hasRail ? (freshByRoom[selectedRoomKey] ?? -1) : -1}
       style={{ margin: isMobile ? '0 12px 10px' : hasRail ? '0 auto 12px' : '0 18px 12px',
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />

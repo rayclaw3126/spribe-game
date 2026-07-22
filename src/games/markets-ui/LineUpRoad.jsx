@@ -5,12 +5,14 @@
 // 手机三段锁死的内联 2 行路珠留在 LineUp.jsx（分毫不变），与本件同读 lineupRoadViews.ROAD_VIEWS（单一出处）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { ROAD_VIEWS } from './lineupRoadViews'
-import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
 
-export default function LineUpRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, style }) {
+export default function LineUpRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, slide = false, style }) {
+  // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
+  //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   const roadBead = bead ?? (isMobile ? 18 : 14)   // #47：可选 bead，默认原值（移动端大一档，桌面压一档保总高）
   const curView = ROAD_VIEWS.find(v => v.key === tab) || ROAD_VIEWS[0]   // 路珠视角（切了两端一致）
-  const beads = history.slice(-(cols * rows))
+  const beads = slide ? roadWindow(history, { cols, rows }) : history.slice(-(cols * rows))
   return (
     <div style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, ...style }}>
       <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>

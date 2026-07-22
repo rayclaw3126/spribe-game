@@ -7,12 +7,14 @@
 // （原页 state road / 多桌 /round/history 派生）；判定一律从整值 sum 派生。style 覆外框边距（原页 18px / 多桌 0）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { ROAD_VIEWS } from './wuxingShared'
-import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
 
-export default function WuXingRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, style }) {
+export default function WuXingRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, slide = false, style }) {
+  // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
+  //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   const roadBead = bead ?? (isMobile ? 18 : 14)
   const curView = ROAD_VIEWS.find(v => v.key === tab) || ROAD_VIEWS[0]   // 路珠视角（手机/桌面共用 tab，切了两端一致）
-  const cells = history.slice(-(cols * rows))
+  const cells = slide ? roadWindow(history, { cols, rows }) : history.slice(-(cols * rows))
   return (
     <div style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, ...style }}>
       <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>

@@ -5,7 +5,7 @@
 //   桌面 rows=6/bead=14；手机锁底 rows=2/bead=15（原页两处尺寸差，外部传参，视觉原样）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { MARKETS } from '../markets/dominoduel'
-import { ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
 
 const ROAD_CAP = 120
 // 珠盘路多视角（B 型：存整局 [hs,as]，判定一律走引擎 MARKETS 现成 helper，禁手写第二份表）
@@ -20,12 +20,14 @@ function ddBeadFor(tab, pair) {
   return MARKETS['home-win'].hit(r) ? { t: '主', c: DERBY.home } : { t: '客', c: DERBY.away }
 }
 
-export default function DominoDuelRoad({ history = [], tab, onTab, cols = 20, rows = 6, bead = 14, tabFs = 10, ratioFs = 9.5, pad = 6, radius = 10, freshIndex = -1, style }) {
+export default function DominoDuelRoad({ history = [], tab, onTab, cols = 20, rows = 6, bead = 14, tabFs = 10, ratioFs = 9.5, pad = 6, radius = 10, freshIndex = -1, slide = false, style }) {
+  // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
+  //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   // #47 首批：本件自带的 ROAD_CAP=120 会把 history 截到 120 再喂 cols×rows 格 —— 桌面扩到
   //   30×6=180 格后尾部 60 格永远空（实测 120/180）。改取两者较大值：cols×rows > 120 时按格数取，
   //   否则维持 120。⚠ 这样写而非直接 cols×rows，是为了让手机段（rows=2）与多桌（cols 小）
   //   的取数范围逐字节不变 —— 它们 cols×rows < 120，仍走 120，行为零改。
-  const roadPairs = history.slice(-Math.max(cols * rows, ROAD_CAP))
+  const roadPairs = slide ? roadWindow(history, { cols, rows }) : history.slice(-Math.max(cols * rows, ROAD_CAP))
   const beads = roadPairs.map(p => ddBeadFor(tab, p))
   const ratioSrc = history.slice(-30)
   let rHome = 0, rDraw = 0, rAway = 0
