@@ -36,6 +36,8 @@ export { drawMatch, deriveMatch, ODDS, MARKETS, hitsOf, pushesOf }
 
 // ---------- 开奖动画分段时长（#43单3：服务器排期器驱动，本地不再有相位 setInterval）----------
 // 收到 drawn 消息后本地按 HT出球 → 半场定格 → FT出球 依次演，总长 DRAW_ANIM_MS 必须 < 服务器 derbyday idle(24s)。
+// #47 首帧闪变：播种未到货时喂它 → 珠墙渲成骨架；模块级常量保稳定引用（新建数组会触发件内 effect）
+const EMPTY_ROAD = []
 const HT_DRAW_MS = 8000    // 半场 20 珠交替出珠 + 和值对比定格
 const HT_SHOWN_MS = 6000   // 半场定格展示（不动）
 const FT_DRAW_MS = 8000    // 全场 20 珠（同构）
@@ -105,6 +107,11 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const [picks, setPicks] = useState(() => new Set())
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   // #47 动效：仅 WS 真新珠时记新珠索引；首灌置 -1 不弹入。本款单房（rooms:[]），无需按房区分。
+  // #47 首帧闪变治理：播种未到货前不渲染珠墙（骨架占位，几何不变），到货后一次成型。
+  //   实测根因：先渲染 SEED_ROAD 假种子珠(24/30颗=4~5列)，~450ms 后播种到货跳到 70+颗(12~13列)，
+  //   视觉即「闪一下、几列变多列」。网格行列/珠径全程未变(6×30×18 恒定)，非重排、非锚定跳。
+  //   ⚠ 语义是「播种流程已结束（含被门控跳过）」——否则不播种的场景会永远卡骨架。
+  const [roadSeeded, setRoadSeeded] = useState(false)
   const [freshIdx, setFreshIdx] = useState(-1)
   const [roadTab, setRoadTab] = useState('FT-H/A')
   const [userAcc, setUserAcc] = useState({ ht: true, ft: true, htft: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开，玩家可自行收）；纯 UI，不动下注 state
@@ -329,7 +336,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       setHistory(roadWindowAt(rows, roundSeq(acc[0]?.roundNo), DESK_ROAD))
       setFreshIdx(-1)
       roadRecordedRef.current = acc[0]?.roundNo
-    })().catch(() => { /* 静默：保留种子珠 */ })
+    })().catch(() => { /* 静默：保留种子珠 */ }).then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
   }, [hasRail])
 
@@ -578,7 +585,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
 
   // ---- ③ 珠盘路（切件；六页签 + 占比条 + 真历史滚动，容量 6×20）——判定/页签单一出处 ----
   const beadRoad = (
-    <DerbyDayRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+    <DerbyDayRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
       cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24} freshIndex={freshIdx}
       style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
@@ -764,7 +771,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         {/* 珠盘路切件（紧凑变体：页签横滚 + 细占比条 + 2 行 15px 珠矩阵，视觉原样） */}
         {/* #47 专单：动效手机也上（fresh 索引按手机面 20×2 窗口长度换算） */}
         {/* #47 手机高墙档：compact 默认 2 行 15px → 显式传 20×6 珠18，可用 108 */}
-        <DerbyDayRoad history={history} slide tab={roadTab} onTab={setRoadTab} compact rows={6} bead={18}
+        <DerbyDayRoad history={roadSeeded ? history : EMPTY_ROAD} slide tab={roadTab} onTab={setRoadTab} compact cols={30} rows={6} bead={18}
           freshIndex={freshFor(freshIdx, history.length, roadWindow(history, { cols: 20, rows: 6 }).length)}
           style={{ padding: '4px 12px 0' }} />
         <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>

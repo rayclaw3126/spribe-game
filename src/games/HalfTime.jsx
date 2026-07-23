@@ -33,6 +33,8 @@ export { drawRound, deriveRound, halfOf, ODDS, MARKETS, hitsOf }
 
 // ---------- 开奖舞台时间轴（rAF 内使用，毫秒）----------
 // 单球飞行 530ms（较初版 +40% 可跟球），间隔压到 400ms 补偿总节奏
+// #47 首帧闪变：播种未到货时喂它 → 珠墙渲成骨架；模块级常量保稳定引用（新建数组会触发件内 effect）
+const EMPTY_ROAD = []
 const FINALE_HOLD = 1000
 // 开奖动画总时长（收 drawn → 20 球连发+SCORE 定格演完 → 结算+回写余额）；须 < 服务器 halftime idle(11s)
 const DRAW_ANIM_MS = 10000
@@ -92,6 +94,11 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   const [rulesOpen, setRulesOpen] = useState(false)          // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())        // 待确认选格
   // #47 动效：仅 WS 真新珠时记新珠索引，【按房存】（单值会被后台快房覆盖，首批实测踩过）。
+  // #47 首帧闪变治理：播种未到货前不渲染珠墙（骨架占位，几何不变），到货后一次成型。
+  //   实测根因：先渲染 SEED_ROAD 假种子珠(24/30颗=4~5列)，~450ms 后播种到货跳到 70+颗(12~13列)，
+  //   视觉即「闪一下、几列变多列」。网格行列/珠径全程未变(6×30×18 恒定)，非重排、非锚定跳。
+  //   ⚠ 语义是「播种流程已结束（含被门控跳过）」——否则不播种的场景会永远卡骨架。
+  const [roadSeeded, setRoadSeeded] = useState(false)
   const [freshByRoom, setFreshByRoom] = useState({})
   const [roadTab, setRoadTab] = useState('O/U')
   const [userAcc, setUserAcc] = useState({ m1: true, m2: true, m3: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开）；纯 UI，不动下注 state
@@ -278,7 +285,8 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
     }
-    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    Promise.all(ROOMS.map((r) => seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })))
+      .then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRoomKey, hasRail])
@@ -400,7 +408,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
 
   // ---- 珠盘路（真历史滚动，容量 6×20）——切件（判定/页签单一出处）----
   const beadRoad = (
-    <HalfTimeRoad history={history} tab={roadTab} onTab={setRoadTab}
+    <HalfTimeRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab}
       cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
       freshIndex={freshByRoom[selectedRoomKey] ?? -1}
       style={{ margin: isMobile ? '0 12px 10px' : hasRail ? '0 auto 12px' : '0 18px 12px',
@@ -578,7 +586,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         {/* #47 专单：不再预截固定 CAP —— 预截会让 N 恒定、mod rows 相位钉死成满列。传全量 + slide，由件内按 20×2 开窗 */}
         {/* #47 专单：动效手机也上（fresh 索引按手机面 20×2 窗口长度换算） */}
         {/* #47 手机高墙档：compact 默认 2 行 15px → 显式传 20×6 珠18，可用 108 */}
-        <HalfTimeRoad history={history} slide tab={roadTab} onTab={setRoadTab} compact rows={6} bead={18}
+        <HalfTimeRoad history={roadSeeded ? history : EMPTY_ROAD} slide tab={roadTab} onTab={setRoadTab} compact cols={30} rows={6} bead={18}
           freshIndex={freshFor(freshByRoom[selectedRoomKey] ?? -1, history.length, roadWindow(history, { cols: 20, rows: 6 }).length)}
           style={{ padding: '4px 12px 0' }} />
         <div style={{ padding: '6px 12px', background: HALFTIME.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>

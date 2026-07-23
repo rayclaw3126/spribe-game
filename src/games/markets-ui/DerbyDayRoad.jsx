@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'   // #47 A 案：右端锚定
 // #41 单16：DerbyDay 珠盘路墙（半场/全场 × 胜负/大小/单双 六页签 + 占比条 + 6×N 珠矩阵）——
 // 从 DerbyDay.jsx beadRoad(桌面 6×20 + 占比条含「和」) + 锁底 road(手机 2×20 15px 细占比条) 机械切片。
 // 判定 beadFor 走引擎口径（HT_BIG/FT_BIG 与 markets/derbyday 同源阈值，禁二份表）。
@@ -6,7 +7,7 @@
 //   + 细占比条只显主/客），非 compact = 桌面 6 行 + 占比条含「和」+ 页签换行。style 覆外框（桌面 margin / 手机 padding）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { HT_BIG, FT_BIG } from '../markets/derbyday'
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'   // #47：路珠动效（共用）
 
 // ---------- 珠盘路（六页签）——从原页机械切至此（页签/判定单一出处）----------
 const ROAD_TABS = ['HT-H/A', 'HT-O/U', 'HT-O/E', 'FT-H/A', 'FT-O/U', 'FT-O/E']
@@ -48,6 +49,10 @@ export default function DerbyDayRoad({ history = [], tab, onTab, cols = 20, rows
     if (home > away) hw++; else if (home === away) dw++; else aw++
   })
   const pct = n => Math.round((n / Math.max(1, ratioSrc.length)) * 100)
+  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, (bead ?? 18) + 2) }, [beads.length, bead])
+
   return (
     <div style={{ position: 'relative', zIndex: 1, ...(cmp ? {} : { flex: '0 0 auto' }), ...style }}>
       {/* 页签：桌面换行 / 紧凑横滚 */}
@@ -89,7 +94,7 @@ export default function DerbyDayRoad({ history = [], tab, onTab, cols = 20, rows
         </div>
       )}
       <style>{ROAD_FX_CSS}</style>
-      <div style={{
+      <div ref={roadScrollRef} style={{
         overflowX: 'auto', borderRadius: cmp ? 8 : 10,
         background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: cmp ? 3 : 5,
       }}>
@@ -101,7 +106,7 @@ export default function DerbyDayRoad({ history = [], tab, onTab, cols = 20, rows
           {Array.from({ length: cols * nRows }).map((_, i) => {
             const b = beads[i]
             return (
-              <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{
+              <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && beads.length > 0 && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{
                 width: roadBead, height: roadBead, borderRadius: '50%',
                 background: b ? b.c : 'rgba(255,255,255,0.05)',
                 border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',

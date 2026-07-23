@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'   // #47 A 案：右端锚定
 // #41 单16：DominoDuel 珠盘路墙（主客走势 / 总分大小 / 总分单双 页签 + 主客比例条 + rows×cols 珠矩阵）——
 // 从 DominoDuel.jsx 机械切片。判定 ddBeadFor 走引擎 MARKETS（禁二份表）。
 // props {history,tab,onTab,cols,rows,bead,tabFs,ratioFs,pad,radius,style}：
@@ -5,7 +6,7 @@
 //   桌面 rows=6/bead=14；手机锁底 rows=2/bead=15（原页两处尺寸差，外部传参，视觉原样）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { MARKETS } from '../markets/dominoduel'
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'
 
 const ROAD_CAP = 120
 // 珠盘路多视角（B 型：存整局 [hs,as]，判定一律走引擎 MARKETS 现成 helper，禁手写第二份表）
@@ -35,7 +36,7 @@ export default function DominoDuelRoad({ history = [], tab, onTab, cols = 20, ro
   const pct = n => Math.round((n / Math.max(1, ratioSrc.length)) * 100)
   // #47 动效：新珠弹入（仅 WS 真新珠，freshIndex 由调用方给）／下一空格呼吸游标（只此一格）
   const beadCell = (b, i, sz) => (
-    <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{
+    <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && beads.length > 0 && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{
       width: sz, height: sz, borderRadius: '50%',
       background: b ? b.c : 'rgba(255,255,255,0.05)',
       border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
@@ -43,6 +44,10 @@ export default function DominoDuelRoad({ history = [], tab, onTab, cols = 20, ro
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
     }}>{b ? b.t : ''}</span>
   )
+  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, roadPairs.length, (bead ?? 18) + 2) }, [roadPairs.length, bead])
+
   return (
     <div style={style}>
       <style>{ROAD_FX_CSS}</style>
@@ -65,7 +70,7 @@ export default function DominoDuelRoad({ history = [], tab, onTab, cols = 20, ro
         </div>
         <span style={{ color: DERBY.away, fontSize: ratioFs, fontWeight: 900, whiteSpace: 'nowrap' }}>客 {pct(rAway)}%</span>
       </div>
-      <div style={{ overflowX: 'auto', borderRadius: radius, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: pad }}>
+      <div ref={roadScrollRef} style={{ overflowX: 'auto', borderRadius: radius, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: pad }}>
         <div style={{
           display: 'grid', gridAutoFlow: 'column',
           gridTemplateRows: `repeat(${rows}, ${bead}px)`, gridTemplateColumns: `repeat(${cols}, ${bead}px)`,

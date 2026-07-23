@@ -1,9 +1,10 @@
+import { useRef, useEffect } from 'react'   // #47 A 案：右端锚定
 // #41 单15：HatTrick 珠盘路墙（和值/大小/豹子 页签 + 6×N 珠矩阵）——从 HatTrick beadRoad 机械切片。
 // 判定 beadFor 走引擎口径（hattrickShared，禁二份表）。props {history,tab,onTab,isMobile,cols,rows,style}：
 // history = 三骰数组序列 [[d,d,d],...]（原页 state / 多桌 /round/history 派生）；style 覆外框边距（原页 18px / 多桌 0）。
 import { HATTRICK, RADIUS, COLORS } from '../../components/shell/tokens'
 import { ROAD_TABS, ROAD_TAB_LABELS, beadFor } from './hattrickShared'
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'
 
 // #47 首批：新增可选 bead（珠径 px），默认 15 = 原行为。仅帽子戏法原页桌面传 24；
 // 多桌 marketsUiRegistry→TableCard 与手机段均不传，逐字节零感。
@@ -11,6 +12,10 @@ export default function HatTrickRoad({ history = [], tab, onTab, isMobile = fals
   // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
   //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   const beads = (slide ? roadWindow(history, { cols, rows }) : history.slice(-(cols * rows))).map(d => beadFor(tab, d))
+  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, (bead ?? 18) + 2) }, [beads.length, bead])
+
   return (
     <div style={{
       flex: '0 0 auto', position: 'relative', zIndex: 1,
@@ -29,7 +34,7 @@ export default function HatTrickRoad({ history = [], tab, onTab, isMobile = fals
         ))}
       </div>
       <style>{ROAD_FX_CSS}</style>
-      <div style={{
+      <div ref={roadScrollRef} style={{
         overflowX: 'auto', borderRadius: 10,
         background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 5,
       }}>
@@ -41,7 +46,7 @@ export default function HatTrickRoad({ history = [], tab, onTab, isMobile = fals
           {Array.from({ length: cols * rows }).map((_, i) => {
             const b = beads[i]
 
-            const cls = i === freshIndex ? ROAD_FX_FRESH : (!b && i === beads.length ? ROAD_FX_NEXT : undefined)   // #47 动效
+            const cls = i === freshIndex ? ROAD_FX_FRESH : (!b && beads.length > 0 && i === beads.length ? ROAD_FX_NEXT : undefined)   // #47 动效
             return (
               <span key={i} className={cls} style={{
                 width: bead, height: bead, borderRadius: '50%',

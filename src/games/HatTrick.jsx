@@ -17,7 +17,7 @@ import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import HatTrickStage from './stages/HatTrickStage'
 import HatTrickMarkets, { DieFace } from './markets-ui/HatTrickMarkets'   // #41 单15：盘口区切件（DieFace 随件，舞台/mobile 回用）
 import HatTrickRoad from './markets-ui/HatTrickRoad'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）                       // #41 单15：珠盘路墙
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）                       // #41 单15：珠盘路墙
 import HatTrickPodium from './markets-ui/HatTrickPodium'                   // #41 单15：上局信息条（subRow 槽）
 import { RULES } from './markets-ui/hattrickRules'                         // #41 单15：玩法说明内容（共享）
 import { SIDES, ROAD_TABS, ROAD_TAB_LABELS, beadFor } from './markets-ui/hattrickShared'   // #41 单15：SIDES/珠盘页签/beadFor（mobile 段回用）
@@ -35,6 +35,7 @@ import { rollDice, deriveRoll, ODDS, MARKETS, hitsOf, round2, sumOf } from './ma
 export { rollDice, deriveRoll, ODDS, MARKETS, hitsOf }
 
 // ---------- 三骰舞台时间轴（rAF 内使用，毫秒）：三骰错峰定格制造悬念 ----------
+const EMPTY_ROAD = []   // #47 桌面门闩：播种未到货时喂它 → 桌面珠墙也渲骨架（模块级稳定引用）
 const DIE_LOCK = [2600, 3500, 4500]   // 各骰定格时刻（第1骰 2.6s / 第2骰 3.5s / 第3骰 4.5s）
 // 开奖动画总时长（收到 drawn → 三骰舞台演完 → 结算显示 + 回写余额）；须 < 服务器 hattrick idle(8s)
 const DRAW_ANIM_MS = 7000
@@ -86,6 +87,11 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const [picks, setPicks] = useState(() => new Set())
   // #47 动效：仅 WS 真新珠时记新珠索引。⚠ 必须【按房存】—— 单值会被后台快房追珠覆盖，
   //   导致选中房刚亮起的高亮被瞬间清掉（实测 2.2s 内即消失）。首灌/切房一律清该房 → 不弹入。
+  // #47 首帧闪变治理：播种未到货前不渲染珠墙（骨架占位，几何不变），到货后一次成型。
+  //   实测根因：先渲染 SEED_ROAD 假种子珠(24/30颗=4~5列)，~450ms 后播种到货跳到 70+颗(12~13列)，
+  //   视觉即「闪一下、几列变多列」。网格行列/珠径全程未变(6×30×18 恒定)，非重排、非锚定跳。
+  //   ⚠ 语义是「播种流程已结束（含被门控跳过）」——否则不播种的场景会永远卡骨架。
+  const [roadSeeded, setRoadSeeded] = useState(false)
   const [freshByRoom, setFreshByRoom] = useState({})
   const [roadTab, setRoadTab] = useState('TOTAL')
   const [userAcc, setUserAcc] = useState({ total: true, triple: true, double: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开）；纯 UI，不动下注 state
@@ -342,7 +348,8 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         else bgDrawRoundRef.current[r.key] = latest
       }
     }
-    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    Promise.all(ROOMS.map((r) => seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })))
+      .then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRoomKey, hasRail])
@@ -591,16 +598,19 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   )
 
   // ---- 珠盘路（真历史滚动，容量 6×20）——桌面切件；mobile 段 2 行走自身内联（beads 复用）----
-  const ROAD_COLS = 20
+  // #47 双端一致·A 案：手机路珠列数升到与桌面同标 30（6 行已同）→ 与桌面吃同一段窗口，逐颗对得上
+  const ROAD_COLS = 30
   // #47 专单：手机内联珠格改吃列滑窗口（20×2 → 可用 36 珠）。
   const mobWin = roadWindow(history, { cols: ROAD_COLS, rows: 6 })
   const beads = mobWin.map(d => beadFor(roadTab, d))
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, 18 + 2) }, [beads.length])
   // #47 专单：动效手机也上（fresh 索引按各面窗口长度换算）
   const mobFresh = freshFor(freshByRoom[selectedRoomKey] ?? -1, history.length, mobWin.length)
   const beadRoad = (
     /* #47 首批：30 列 × 6 行 × 珠径 24 → 30×24+29×2=778 ≤ 内容可用宽 786，吃满 800 线。
        本 beadRoad 变量【仅桌面 gameCard:640 使用】，手机在 889 行另有内联网格，故可直写不门控。 */
-    <HatTrickRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile} cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
+    <HatTrickRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab} isMobile={isMobile} cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
       freshIndex={freshByRoom[selectedRoomKey] ?? -1}
       /* #47 首批 整改：件内默认 margin 是 '0 18px 8px'，有右栏时外层包裹层已是 800 宽，
          不覆盖就会让路珠卡两侧各内缩 18px（实测 L383/R1147/W764，比开奖/盘口窄 36px）。
@@ -988,13 +998,16 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
               }}>{ROAD_TAB_LABELS[t]}</button>
             ))}
           </div>
-          <div style={{ overflowX: 'auto', borderRadius: 8, background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+          {/* #47 A 案：30×6 珠18，598 > 390 → 横滑，右端锚定最新珠 */}
+          <div ref={roadScrollRef} style={{ overflowX: 'auto', borderRadius: 8, background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
             <style>{ROAD_FX_CSS}</style>{/* #47 专单：手机动效同一份 CSS */}
             <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`, gap: 2, width: 'max-content' }}>
               {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-                const b = beads[i]
+                // #47 首帧闪变：播种未到货 → 珠位留空（骨架），几何不变，到货后一次成型
+                const b = roadSeeded ? beads[i] : undefined
                 // #47 专单：手机也上弹入/游标动效（同一份 CSS）
-                const cls = i === mobFresh ? ROAD_FX_FRESH : (b == null && i === beads.length ? ROAD_FX_NEXT : undefined)
+                // #47 骨架期纯静态：播种未到货一律无游标/弹入（roadSeeded 前置）
+                const cls = !roadSeeded ? undefined : i === mobFresh ? ROAD_FX_FRESH : (b == null && i === beads.length ? ROAD_FX_NEXT : undefined)
                 return (
                   <span key={i} className={cls} style={{
                     width: 18, height: 18, borderRadius: '50%',

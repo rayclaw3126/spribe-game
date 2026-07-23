@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'   // #47 A 案：右端锚定
 // #41 单15：HalfTime 珠盘路墙（大小/单双/过关/段位/半场 5 页签 + N×cols 珠矩阵）——
 // 从 HalfTime.jsx beadRoad(桌面 6×18) + 锁底 road(手机 2×15) 机械切片。判定 beadFor 走引擎口径
 // （sum/lowCount→half，禁二份表：zoneOf/段位边界与 markets/halftime 同源语义）。
@@ -5,7 +6,7 @@
 //   compact = 卡内紧凑变体（手机锁底 2 行 15px + 页签横滚），非 compact = 桌面 6 行 18px + 页签换行。
 //   style 覆外框（桌面 margin / 手机 padding）。
 import { COLORS, RADIUS, HALFTIME } from '../../components/shell/tokens'
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'   // #47：路珠动效（共用）
 
 const ROAD_TABS = ['O/U', 'ODD/EVEN', 'PARLAY', 'ZONE', 'HALF']
 // 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照 Derby 先例分离）
@@ -32,6 +33,10 @@ export default function HalfTimeRoad({ history = [], tab, onTab, isMobile = fals
   // 原页口径：history 已由调用方截到容量窗口(ROAD_CAP)，本件从窗口头部起填格(beads[i])——
   // 桌面渲首 6×cols、紧凑渲首 2×cols（与原 beadRoad / 锁底 road 逐格同源，分毫不变）。
   const beads = (slide ? roadWindow(history, { cols, rows: nRows }) : history).map(h => beadFor(tab, h.sum, h.half))
+  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, (bead ?? 18) + 2) }, [beads.length, bead])
+
   return (
     <div style={{ position: 'relative', zIndex: 1, ...(cmp ? {} : { flex: '0 0 auto' }), ...style }}>
       <div style={cmp
@@ -49,7 +54,7 @@ export default function HalfTimeRoad({ history = [], tab, onTab, isMobile = fals
         ))}
       </div>
       <style>{ROAD_FX_CSS}</style>
-      <div style={{
+      <div ref={roadScrollRef} style={{
         overflowX: 'auto', borderRadius: cmp ? 8 : 10,
         background: HALFTIME.strip, border: '1px solid rgba(255,255,255,0.1)', padding: cmp ? 3 : 6,
       }}>
@@ -61,7 +66,7 @@ export default function HalfTimeRoad({ history = [], tab, onTab, isMobile = fals
           {Array.from({ length: cols * nRows }).map((_, i) => {
             const b = beads[i]
             return (
-              <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{
+              <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && beads.length > 0 && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{
                 width: cell, height: cell, borderRadius: '50%',
                 background: b ? b.c : 'rgba(255,255,255,0.05)',
                 border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',

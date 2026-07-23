@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'   // #47 A 案：右端锚定
 // #41 单15：NumberUp 珠盘路墙（号码/位数/大小 页签 + 6×N 珠矩阵）——从 NumberUp.jsx beadRoad 机械切片。
 // beadFor 走本页显示口径（号码/尾位奇偶/大小；跟 GoldenBootRoad 一样属珠盘显示分类，非命中判定表，
 // 数值只经引擎 pad2 与 25 分界，禁二份命中表）。props {history,tab,onTab,cols,rows,style}（照 GoldenBootRoad
@@ -5,7 +6,7 @@
 // history = 号码数组 [n,...]（原页 state / 多桌 /round/history 派生）；style 覆外框边距（原页 18px / 多桌 0）。
 import { COLORS, RADIUS, NUMBERUP } from '../../components/shell/tokens'
 import { pad2 } from '../markets/numberup'
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'   // #47：路珠动效（共用）
 
 // 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照 Derby/HalfTime 先例分离）
 const ROAD_TABS = ['NUMBER', 'DIGIT', 'H-L']
@@ -20,6 +21,10 @@ export default function NumberUpRoad({ history = [], tab, onTab, cols = 20, rows
   // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
   //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   const beads = (slide ? roadWindow(history, { cols, rows }) : history.slice(-(cols * rows))).map(n => beadFor(tab, n))
+  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, (bead ?? 18) + 2) }, [beads.length, bead])
+
   return (
     <div style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, ...style }}>
       <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
@@ -34,7 +39,7 @@ export default function NumberUpRoad({ history = [], tab, onTab, cols = 20, rows
         ))}
       </div>
       <style>{ROAD_FX_CSS}</style>
-      <div style={{
+      <div ref={roadScrollRef} style={{
         overflowX: 'auto', borderRadius: 10,
         background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
       }}>
@@ -46,7 +51,7 @@ export default function NumberUpRoad({ history = [], tab, onTab, cols = 20, rows
           {Array.from({ length: cols * rows }).map((_, i) => {
             const b = beads[i]
             return (
-              <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{
+              <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && beads.length > 0 && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{
                 width: bead, height: bead, borderRadius: '50%',
                 background: b ? b.c : 'rgba(255,255,255,0.05)',
                 border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',

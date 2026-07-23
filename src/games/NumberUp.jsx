@@ -27,11 +27,12 @@ import { RULES } from './markets-ui/numberupRules'               // #41 单15：
 
 // —— 引擎常量块已剪切到 ./markets/numberup（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { pad2, drawNumber, deriveNum, ODDS, hitsOf, round2, MARKETS } from './markets/numberup'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { drawNumber, deriveNum, ODDS, MARKETS, hitsOf }
 
 // ---------- 换人牌舞台时间轴（rAF 内使用，毫秒）：十位先定、个位后定 ----------
 // 开奖动画总时长（收到 drawn → 举牌 LED 翻数演完 → 结算 + 回写余额）；须 < 服务器 numberup idle(8s)
+const EMPTY_ROAD = []   // #47 桌面门闩：播种未到货时喂它 → 桌面珠墙也渲骨架（模块级稳定引用）
 const DRAW_ANIM_MS = 6500
 const G = GAME_BY_ID['NumberUp']
 
@@ -47,7 +48,8 @@ const DESK_ROAD = { cols: 30, rows: 6 }
 //   同时喂桌面 beadRoad 与手机内联珠格；ROAD_CAP 同样双端共用且手机从切片头部取，
 //   故两者都必须解耦、钉回原值。
 const MOBILE_ROAD_CAP = 120
-const MOBILE_ROAD_COLS = 20
+// #47 双端一致·A 案：手机路珠列数升到与桌面同标 30（6 行已同）
+const MOBILE_ROAD_COLS = 30
 
 // 种子上期 + 种子历史（值域 0–49，真开奖逐期顶掉）
 const SEED_LAST = deriveNum(38)
@@ -104,6 +106,11 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   const [rulesOpen, setRulesOpen] = useState(false)   // 玩法说明抽屉
   const [picks, setPicks] = useState(() => new Set())
   // #47 动效：仅 WS 真新珠时记新珠索引，【按房存】（单值会被后台快房覆盖，首批实测踩过）。
+  // #47 首帧闪变治理：播种未到货前不渲染珠墙（骨架占位，几何不变），到货后一次成型。
+  //   实测根因：先渲染 SEED_ROAD 假种子珠(24/30颗=4~5列)，~450ms 后播种到货跳到 70+颗(12~13列)，
+  //   视觉即「闪一下、几列变多列」。网格行列/珠径全程未变(6×30×18 恒定)，非重排、非锚定跳。
+  //   ⚠ 语义是「播种流程已结束（含被门控跳过）」——否则不播种的场景会永远卡骨架。
+  const [roadSeeded, setRoadSeeded] = useState(false)
   const [freshByRoom, setFreshByRoom] = useState({})
   const [roadTab, setRoadTab] = useState('NUMBER')
   const [userAcc, setUserAcc] = useState({ pick: true, digit: true, side: true })   // 手机手风琴玩家手动折叠态（默认三盘区全展开）；纯 UI，不动下注 state
@@ -294,7 +301,8 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
     }
-    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    Promise.all(ROOMS.map((r) => seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })))
+      .then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRoomKey, hasRail])
@@ -471,12 +479,14 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   const ROAD_COLS = MOBILE_ROAD_COLS
   // #47 专单：手机内联珠格改吃列滑窗口（本款手机实为 20×2，非 10×5 —— 见 ROAD_COLS/:722）。
   const roadItems = roadWindow(history, { cols: ROAD_COLS, rows: 6 })
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, roadItems.length, 18 + 2) }, [roadItems.length])
   // #47 专单：动效手机也上（fresh 索引按各面窗口长度换算）
   const mobFresh = freshFor(freshByRoom[selectedRoomKey] ?? -1, history.length, roadItems.length)
   const beads = roadItems.map(n => beadFor(roadTab, n))
   // ---- 珠盘路（切件；桌面 6×20；手机三段版另有 2 行内联）----
   const beadRoad = (
-    <NumberUpRoad history={history} tab={roadTab} onTab={setRoadTab}
+    <NumberUpRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab}
       cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
       freshIndex={freshByRoom[selectedRoomKey] ?? -1}
       style={{ margin: isMobile ? '0 12px 10px' : hasRail ? '0 auto 10px' : '0 18px 10px' }} />   /* #47：hasRail 档归零侧边距 */
@@ -720,13 +730,16 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
               }}>{ROAD_TAB_LABELS[t]}</button>
             ))}
           </div>
-          <div style={{ overflowX: 'auto', borderRadius: 8, background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+          {/* #47 A 案：30×6 珠18，598 > 390 → 横滑，右端锚定最新珠 */}
+          <div ref={roadScrollRef} style={{ overflowX: 'auto', borderRadius: 8, background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
             <style>{ROAD_FX_CSS}</style>{/* #47 专单：手机动效同一份 CSS */}
             <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`, gap: 2, width: 'max-content' }}>
               {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-                const b = beads[i]
+                // #47 首帧闪变：播种未到货 → 珠位留空（骨架），几何不变，到货后一次成型
+                const b = roadSeeded ? beads[i] : undefined
                 // #47 专单：手机也上弹入/游标动效（同一份 CSS）
-                const cls = i === mobFresh ? ROAD_FX_FRESH : (b == null && i === beads.length ? ROAD_FX_NEXT : undefined)
+                // #47 骨架期纯静态：播种未到货一律无游标/弹入（roadSeeded 前置）
+                const cls = !roadSeeded ? undefined : i === mobFresh ? ROAD_FX_FRESH : (b == null && i === beads.length ? ROAD_FX_NEXT : undefined)
                 return (
                   <span key={i} className={cls} style={{
                     width: 18, height: 18, borderRadius: '50%',

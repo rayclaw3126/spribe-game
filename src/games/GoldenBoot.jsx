@@ -91,6 +91,10 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   const [picks, setPicks] = useState(() => new Set())
   // #47 动效：仅 WS 真新珠时记新珠索引，【按房存】（单值会被后台快房覆盖）。
   const [freshByRoom, setFreshByRoom] = useState({})
+  // #47 首帧闪变治理：播种未到货前手机珠墙只渲染骨架（本地珠/WS珠不先画），到货一次成墙。
+  //   ⚠ 仅手机档门闩，桌面 history 恒 road【零碰已收】。语义含「播种流程终结（成功/失败兜底皆置 true）」。
+  const [roadSeeded, setRoadSeeded] = useState(false)
+  const EMPTY_ROAD = []
   const [roadTab, setRoadTab] = useState('WINNER')
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())   // 展示用假注单，每期换血
 
@@ -240,10 +244,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   const apiRef = useRef(api)
   useEffect(() => { apiRef.current = api })
   useEffect(() => {
-    // #47 ⚠ 生死线：本款 gameCard 桌手共用，historyByRoom 也是共享 state —— 播种会把手机路珠
-    //   从「~30 颗种子珠」灌成「120 颗真历史」（实测基线 有珠30 → 现版 有珠120）。几何量虽全同，
-    //   但珠数变了即违反「手机逐字节同基线」。故播种只在 hasRail（≥1280）档进行。
-    if (!hasRail) return undefined
+    // #47 手机播种解禁：删 hasRail 门控 → 手机也拉真历史（桌面 hasRail=true 本就通过，零碰）
     let cancelled = false
     const PAGE = 50
     const SEED_TARGET = roadSeedTarget(DESK_ROAD)
@@ -272,7 +273,8 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
     }
-    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    Promise.all(ROOMS.map((r) => seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })))
+      .then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRoomKey, hasRail])
@@ -391,11 +393,12 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
 
   // ---- 珠盘路（切件；真历史滚动，容量 6×20）----
   const beadRoad = (
-    <GoldenBootRoad history={history} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+    <GoldenBootRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
       /* #47 ⚠ 本款 gameCard 桌手共用 → 路珠三个尺寸参数必须 hasRail 门控；
          手机不传（undefined）走件内默认 20×6/珠18，与基线逐字节相同。 */
-      cols={hasRail ? DESK_ROAD.cols : undefined} rows={hasRail ? DESK_ROAD.rows : undefined}
-      bead={hasRail ? 24 : undefined}
+      /* #47 A 案：手机也吃 30×6（与桌面同标），仅珠径按档 24/18 */
+      cols={DESK_ROAD.cols} rows={DESK_ROAD.rows}
+      bead={hasRail ? 24 : 18}
       /* #47 专单：本款 gameCard 桌手共用 —— slide 只给非 hasRail 面（手机/窄桌面），
          ≥1280 桌面面维持已收状态零碰（页面侧已窗口化，件内再开窗虽幂等，仍按铁律不传）。 */
       slide={!hasRail}

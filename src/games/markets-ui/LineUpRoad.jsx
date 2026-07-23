@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'   // #47 A 案：右端锚定
 // #41 单16：LineUp 珠盘路墙（大小 / 单双 / 段位 页签 + 20×6 珠矩阵）——从 LineUp.jsx beadRoad 机械切片。
 // 判定走引擎口径（ROAD_VIEWS.judge，段位复用 MARKETS zone-* .hit，禁二份表）。props {history,tab,onTab,isMobile,cols,rows,style}：
 // history = 整局总和数组 [total,...]（原页 state road / 多桌 /round/history 派生）；判定一律从整值 total 派生。
@@ -5,7 +6,7 @@
 // 手机三段锁死的内联 2 行路珠留在 LineUp.jsx（分毫不变），与本件同读 lineupRoadViews.ROAD_VIEWS（单一出处）。
 import { COLORS, RADIUS, DERBY } from '../../components/shell/tokens'
 import { ROAD_VIEWS } from './lineupRoadViews'
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'   // #47：路珠动效（共用）
 
 export default function LineUpRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, slide = false, style }) {
   // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
@@ -13,6 +14,10 @@ export default function LineUpRoad({ history = [], tab, onTab, isMobile = false,
   const roadBead = bead ?? (isMobile ? 18 : 14)   // #47：可选 bead，默认原值（移动端大一档，桌面压一档保总高）
   const curView = ROAD_VIEWS.find(v => v.key === tab) || ROAD_VIEWS[0]   // 路珠视角（切了两端一致）
   const beads = slide ? roadWindow(history, { cols, rows }) : history.slice(-(cols * rows))
+  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, (bead ?? 18) + 2) }, [beads.length, bead])
+
   return (
     <div style={{ flex: '0 0 auto', position: 'relative', zIndex: 1, ...style }}>
       <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
@@ -29,7 +34,7 @@ export default function LineUpRoad({ history = [], tab, onTab, isMobile = false,
         })}
       </div>
       <style>{ROAD_FX_CSS}</style>
-      <div style={{
+      <div ref={roadScrollRef} style={{
         overflowX: 'auto', borderRadius: 10,
         background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 6,
       }}>
@@ -43,7 +48,7 @@ export default function LineUpRoad({ history = [], tab, onTab, isMobile = false,
             const n = beads[i]
             const d = n != null ? curView.judge(n) : null
             // #47 动效：新珠弹入（仅 WS 真新珠）／下一空格呼吸游标（只此一格）
-            const cls = i === freshIndex ? ROAD_FX_FRESH : (d == null && i === beads.length ? ROAD_FX_NEXT : undefined)
+            const cls = i === freshIndex ? ROAD_FX_FRESH : (d == null && beads.length > 0 && i === beads.length ? ROAD_FX_NEXT : undefined)
             return (
               <span key={i} className={cls} style={{
                 width: roadBead, height: roadBead, borderRadius: '50%',

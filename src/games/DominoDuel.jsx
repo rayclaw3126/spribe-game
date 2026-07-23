@@ -35,6 +35,8 @@ export { rollTiles, deriveRound, ODDS, MARKETS, hitsOf, pushesOf }
 
 // ---------- 开奖动画时长（#43 单3：收到 drawn → 翻牌演出 → 结算显示 + 回写余额）----------
 // 须 < 服务器 idle(13s)。翻牌 ~3.5s（FLIP_END+揭比分）+ 悬念保留 → 6s 后翻 settled（揭胜负+彩带+余额落定才跳）。
+// #47 首帧闪变：播种未到货时喂它 → 珠墙渲成骨架；模块级常量保稳定引用（新建数组会触发件内 effect）
+const EMPTY_ROAD = []
 const DRAW_ANIM_MS = 6000
 // #47 定案（全端规则）：【路珠不填满，右端恒留空最后两列】。
 // 数据上限 = (列数 − 2) × 行数 —— 桌面 30 列 × 6 行 → (30−2)×6 = 168 颗。
@@ -88,6 +90,11 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   const [lastRound, setLastRound] = useState(SEED_LAST)
   const [road, setRoad] = useState(SEED_ROAD)
   // #47 动效：仅 WS 真新珠时记新珠索引；首灌一律置 -1 → 不弹入。本款单房，无需按房区分。
+  // #47 首帧闪变治理：播种未到货前不渲染珠墙（骨架占位，几何不变），到货后一次成型。
+  //   实测根因：先渲染 SEED_ROAD 假种子珠(24/30颗=4~5列)，~450ms 后播种到货跳到 70+颗(12~13列)，
+  //   视觉即「闪一下、几列变多列」。网格行列/珠径全程未变(6×30×18 恒定)，非重排、非锚定跳。
+  //   ⚠ 语义是「播种流程已结束（含被门控跳过）」——否则不播种的场景会永远卡骨架。
+  const [roadSeeded, setRoadSeeded] = useState(false)
   const [freshIdx, setFreshIdx] = useState(-1)
   const [roadTab, setRoadTab] = useState('H/A')   // 珠盘路视角（手机/桌面共用一个 state）
   const [userAcc, setUserAcc] = useState({ main: true, totals: true, goals: true, correct: false })   // 手机手风琴（波胆高赔默认收，余默认全开）
@@ -483,7 +490,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       setFreshIdx(-1)
       const latest = acc[0]?.roundNo
       if (latest) roadRecordedRef.current = latest
-    })().catch(() => { /* 静默：保留种子珠 */ })
+    })().catch(() => { /* 静默：保留种子珠 */ }).then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
   }, [hasRail])
 
@@ -534,7 +541,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   // 珠盘路墙（页签/比例条/珠矩阵/判定 ddBeadFor）已切至 ./markets-ui/DominoDuelRoad；road 存整局 [hs,as] 逐期派生。
   // 桌面 rows=6/bead=(手机18/桌面14)；手机锁底 rows=2/bead=15（原页两处尺寸差，外部传参，视觉原样）。
   const beadRoad = (
-    <DominoDuelRoad history={road} tab={roadTab} onTab={setRoadTab}
+    <DominoDuelRoad history={roadSeeded ? road : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab}
       /* #47 首批：30 列 × 6 行 × 珠径 24 → 30×24+29×2=778 ≤ 内容可用宽 786，吃满 800 线。
          本 beadRoad 变量【仅桌面 gameCard:490 使用】，手机在 623 行另有独立实例，故可直写不门控。 */
       cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24} tabFs={10} ratioFs={9.5} pad={6} radius={10}
@@ -699,10 +706,10 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       {/* ③ 锁底：珠盘路多视角 pill + 注栏（原样搬） */}
       <div style={{ flex: '0 0 auto' }}>
         {/* #47 专单：动效手机也上 —— fresh 索引按手机面窗口长度换算（桌 30×6 与手机 20×2 长度不同） */}
-        <DominoDuelRoad history={road} slide tab={roadTab} onTab={setRoadTab}
+        <DominoDuelRoad history={roadSeeded ? road : EMPTY_ROAD} slide tab={roadTab} onTab={setRoadTab}
           freshIndex={freshFor(freshIdx, road.length, roadWindow(road, { cols: 20, rows: 6 }).length)}
           /* #47 手机高墙档：2 行 15px 小条 → 20×6 珠18，可用 (20−2)×6 = 108 */
-          cols={20} rows={6} bead={18} tabFs={9.5} ratioFs={8.5} pad={3} radius={8}
+          cols={30} rows={6} bead={18} tabFs={9.5} ratioFs={8.5} pad={3} radius={8}
           style={{ padding: '4px 12px 0', position: 'relative', zIndex: 1 }} />
         <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{

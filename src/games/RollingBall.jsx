@@ -13,7 +13,7 @@ import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
 import { ROLLINGBALL_LABEL as RL } from '../lib/betKeyLabels'   // #S3 档位中文名单一出处（搬家回引，视觉零变）
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口 + 动效（共用）
+import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口 + 动效（共用）
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
 // X2：连开 3 球引擎 + 剩余池动态赔率 + 逐球结算状态机（前 19 卡无此结构）。
@@ -1007,7 +1007,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   )
 
   // ---- ③ 珠盘路（第1球大小单轨，抄 Line Up）----
-  const ROAD_COLS = 20
+  // #47 双端一致·A 案：手机路珠列数升到与桌面同标 30（本款 per-player 本地流，两端喂同一份 road ref → 天然一致）
+  const ROAD_COLS = 30
   // #47 刀2：原 roadBead(桌面 14) 已被 deskBead 取代；手机竖版珠格自带写死 14px，不引用本变量，故删。
   const deskBead = 24                        // 桌面统一珠径：30×24 + 29×2 = 778 ≤ 786 可用宽
   const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 当前视角（桌手同一份 ROAD_VIEWS）
@@ -1017,6 +1018,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   // #47 专单：手机竖版同吃列滑窗口（20×2 → 可用 36 珠）。本款 3 颗/局，N 每局 +3、mod 2 交替，
   //   故 35/36 会逐局翻转 —— 全场最快的滑动节奏，相位错在此最先暴露（轨迹见交活）。
   const beads = roadWindow(viewBeads, { cols: ROAD_COLS, rows: 6 })
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, 18 + 2) }, [beads.length])
   const mobFreshFrom = freshCount > 0 ? beads.length - freshCount : -1   // #47 专单：手机面自己的新珠区间
   const deskBeads = roadWindow(viewBeads, DESK_ROAD)   // 桌面：列对齐滑动窗口（163–168 浮动，右恒空 2 列）
   const freshFrom = freshCount > 0 ? deskBeads.length - freshCount : -1   // 本局新珠区间起点
@@ -1288,7 +1291,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
               )
             })}
           </div>
-          <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+          {/* #47 A 案：30×6 珠18，598 > 390 → 横滑，右端锚定最新珠 */}
+          <div ref={roadScrollRef} style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
             <style>{ROAD_FX_CSS}</style>{/* #47 专单：手机动效同一份 CSS */}
             <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`, gap: 2, width: 'max-content' }}>
               {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {

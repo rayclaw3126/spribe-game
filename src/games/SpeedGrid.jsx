@@ -104,6 +104,10 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   const road = roadByRoom[selectedRoomKey] ?? SEED_ROAD
   // #47 动效：仅 WS 真新珠时记新珠索引，【按房存】（单值会被后台快房覆盖）。
   const [freshByRoom, setFreshByRoom] = useState({})
+  // #47 首帧闪变治理：播种未到货前手机珠墙只渲染骨架（本地珠/WS珠不先画），到货一次成墙。
+  //   ⚠ 仅手机档门闩，桌面 history 恒 road【零碰已收】。语义含「播种流程终结（成功/失败兜底皆置 true）」。
+  const [roadSeeded, setRoadSeeded] = useState(false)
+  const EMPTY_ROAD = []
   const [roadTab, setRoadTab] = useState('BS')   // 珠盘路视角（手机/桌面共用一个 state）
   const [result, setResult] = useState(null)           // { champ, hits:Set, winTotal, perKeyOutcome }
   const [toasts, setToasts] = useState([])
@@ -238,7 +242,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
   const apiRef = useRef(api)
   useEffect(() => { apiRef.current = api })
   useEffect(() => {
-    if (!hasRail) return undefined
+    // #47 手机播种解禁：删 hasRail 门控 → 手机也拉真历史（桌面 hasRail=true 本就通过，零碰）
     let cancelled = false
     const PAGE = 50
     const SEED_TARGET = roadSeedTarget(DESK_ROAD)
@@ -266,7 +270,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgRoadRoundRef.current[r.key] = acc[0]?.roundNo
     }
-    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    Promise.all(ROOMS.map((r) => seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })))
+      .then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRoomKey, hasRail])
@@ -502,9 +507,10 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
 
       {/* ③ 珠盘路（切件）：history=road 整值 → 组件内 roadTab 派生 大小/单双/红黑（判定走引擎） */}
       {/* #47 ⚠ gameCard 桌手共用 → 路珠三参必须 hasRail 门控，手机不传走件内默认 20×6/珠18 */}
-      <SpeedGridRoad history={road} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
-        cols={hasRail ? DESK_ROAD.cols : undefined} rows={hasRail ? DESK_ROAD.rows : undefined}
-        bead={hasRail ? 24 : undefined}
+      <SpeedGridRoad history={roadSeeded ? road : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+        /* #47 A 案：手机也吃 30×6（与桌面同标），仅珠径按档 24/18 */
+      cols={DESK_ROAD.cols} rows={DESK_ROAD.rows}
+        bead={hasRail ? 24 : 18}
         /* #47 专单：本款 gameCard 桌手共用 —— slide 只给非 hasRail 面（手机/窄桌面），
            ≥1280 桌面面维持已收状态零碰（页面侧已窗口化，件内再开窗虽幂等，仍按铁律不传）。 */
         slide={!hasRail}

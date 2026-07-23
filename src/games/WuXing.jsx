@@ -17,7 +17,7 @@ import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import WuXingStage from './stages/WuXingStage'
 import WuXingMarkets from './markets-ui/WuXingMarkets'   // #41 单16：盘口区切件（视觉原样）
 import WuXingRoad from './markets-ui/WuXingRoad'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）         // #41 单16：珠盘路墙（判定走引擎）
+import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, roadAnchorLeft, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）         // #41 单16：珠盘路墙（判定走引擎）
 import { RULES } from './markets-ui/wuxingRules'         // #41 单16：玩法说明内容（共享）
 import { WUXING, ROAD_VIEWS } from './markets-ui/wuxingShared'   // #41 单16：五行五段/珠盘视角（原页 mobile 段 + 切件同源）
 
@@ -45,6 +45,7 @@ export { drawKeno, deriveRound, ODDS, MARKETS, hitsOf }
 
 // ---------- 轮次常量 ----------
 // 相位/期号/倒计时全走服务器排期器（useRoundRoom）；本地只保留开奖舞台动画时长。
+const EMPTY_ROAD = []   // #47 桌面门闩：播种未到货时喂它 → 桌面珠墙也渲骨架（模块级稳定引用）
 const DRAW_ANIM_MS = 4500   // 收到 drawn → 开奖舞台演完 → 结算回写；须 < 服务器 wuxing idle(5500ms)
 // #47 定案（全端规则）：【路珠不填满，右端恒留空最后两列】。
 // 数据上限 = (列数 − 2) × 行数 —— 桌面 30 列 × 6 行 → (30−2)×6 = 168 颗。
@@ -127,6 +128,11 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const road = roadByRoom[selectedRoomKey] ?? SEED_ROAD
   // #47 动效：仅 WS 真新珠时记新珠索引。⚠ 必须【按房存】—— 单值会被后台快房追珠覆盖，
   //   导致选中房刚亮起的高亮被瞬间清掉（实测 2.2s 内即消失）。首灌/切房一律清该房 → 不弹入。
+  // #47 首帧闪变治理：播种未到货前不渲染珠墙（骨架占位，几何不变），到货后一次成型。
+  //   实测根因：先渲染 SEED_ROAD 假种子珠(24/30颗=4~5列)，~450ms 后播种到货跳到 70+颗(12~13列)，
+  //   视觉即「闪一下、几列变多列」。网格行列/珠径全程未变(6×30×18 恒定)，非重排、非锚定跳。
+  //   ⚠ 语义是「播种流程已结束（含被门控跳过）」——否则不播种的场景会永远卡骨架。
+  const [roadSeeded, setRoadSeeded] = useState(false)
   const [freshByRoom, setFreshByRoom] = useState({})
   const [roadView, setRoadView] = useState('bs')   // 手机路珠视角（默认大小）；纯显示
   const [userAcc, setUserAcc] = useState({ main: true, dtud: true, parlay: true, wuxing: true })   // 4 盘区手风琴（默认全展开）；纯 UI
@@ -310,7 +316,8 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         else bgDrawRoundRef.current[r.key] = latest
       }
     }
-    for (const r of ROOMS) seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })
+    Promise.all(ROOMS.map((r) => seedRoom(r).catch(() => { /* 静默：保留种子珠 */ })))
+      .then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRoomKey, hasRail])
@@ -495,10 +502,14 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
 
   // ---- ② 盘区（主盘/龙虎上下/过关/五行）：已切至 ./markets-ui/WuXingMarkets（键区单一出处），下方 JSX 直接组装。----
   // ---- ③ 珠盘路：桌面切件 ./markets-ui/WuXingRoad（页签/判定单一出处，history=road 整值派生）；mobile 段 2 行走自身内联（ROAD_VIEWS 复用）。----
-  const ROAD_COLS = 20
+  // #47 双端一致：手机路珠列数升到与桌面同标 30（6 行已同）→ 与桌面吃同一段窗口，逐颗对得上
+  const ROAD_COLS = 30
   // #47 专单：手机内联珠格改吃列滑窗口（按手机自己的 20×2 开窗 → 可用 (20−2)×2 = 36 珠）。
   //   ⚠ 几何零碰：珠径 15 / 格数 40 / 盒尺寸一字未动，只改「填几颗」。
   const mobileBeads = roadWindow(road, { cols: ROAD_COLS, rows: 6 })
+  // A 案锚定右端：新珠落格后把横滚条推到最右，保证「最新珠 + 右侧两空列」恒在视口
+  const roadScrollRef = useRef(null)
+  useEffect(() => { roadAnchorLeft(roadScrollRef.current, mobileBeads.length, 18 + 2) }, [mobileBeads.length])
   // #47 专单：动效手机也上 —— 桌面 fresh 索引按各自窗口长度换算到手机面（禁直接复用，长度不同会落错格）
   const mobFresh = freshFor(freshByRoom[selectedRoomKey] ?? -1, road.length, mobileBeads.length)
   const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 路珠视角（手机/桌面共用 roadView，切了两端一致）
@@ -543,7 +554,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
           顺序恢复 开奖→盘口→垫片→路珠→注栏；路珠保持 30×6 大珠满珠贴筹码条。 */}
       <div style={{ flex: '1 0 auto' }} />
 
-      <WuXingRoad history={road} tab={roadView} onTab={setRoadView} isMobile={isMobile}
+      <WuXingRoad history={roadSeeded ? road : EMPTY_ROAD} tab={roadView} onTab={setRoadView} isMobile={isMobile}
         cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
       freshIndex={freshByRoom[selectedRoomKey] ?? -1}
         style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
@@ -736,13 +747,16 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
               )
             })}
           </div>
-          <div style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
+          {/* #47 A 案：30×6 珠18（与桌面同标），598 > 390 → 横滑，右端锚定最新珠 */}
+          <div ref={roadScrollRef} style={{ overflowX: 'auto', borderRadius: 8, background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', padding: 3 }}>
             <style>{ROAD_FX_CSS}</style>{/* #47 专单：手机动效同一份 CSS */}
             <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(6, 18px)', gridTemplateColumns: `repeat(${ROAD_COLS}, 18px)`, gap: 2, width: 'max-content' }}>
               {Array.from({ length: ROAD_COLS * 6 }).map((_, i) => {
-                const n = mobileBeads[i]
+                // #47 首帧闪变：播种未到货 → 珠位留空（骨架），几何不变，到货后一次成型
+                const n = roadSeeded ? mobileBeads[i] : undefined
                 // #47 专单：手机也上弹入/游标动效（同一份 CSS）
-                const cls = i === mobFresh ? ROAD_FX_FRESH : (n == null && i === mobileBeads.length ? ROAD_FX_NEXT : undefined)
+                // #47 骨架期纯静态：播种未到货一律无游标/弹入（roadSeeded 前置）
+                const cls = !roadSeeded ? undefined : i === mobFresh ? ROAD_FX_FRESH : (n == null && i === mobileBeads.length ? ROAD_FX_NEXT : undefined)
                 const d = n != null ? curView.judge(n) : null
                 return (
                   <span key={i} className={cls} style={{

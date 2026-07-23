@@ -64,6 +64,19 @@ export function roundSeq(roundNo) {
 // 起因：桌面与手机/多桌用同一个 fresh 信号，但各自窗口长度不同（桌 163–168、手机 35–36），
 //   直接复用索引会落到错误格子甚至越界。fresh 语义恒为「本面最后一颗」，故只需判断
 //   源索引是否仍指向源窗口末颗（= 动效仍在生效），是则返回目标窗口末颗，否则 -1。
+// #47 双端一致·A 案：横滑路珠的【右端锚定】。
+// 目标：最新珠 + 右侧 2 空列恒在视口内，玩家进页即看到最新，往左滑看更早历史。
+//
+// ⚠ 不能用 el.scrollLeft = el.scrollWidth —— 珠子从左往右填，未满窗时右端是【空格】，
+//   锚 scrollWidth 会把视口滚到一片空白（五行实测 62 颗珠时整屏空）。
+//   正解：锚到「最后一颗实珠所在列 + reserve 空列」的右边界，未满窗时自然停在 0。
+export function roadAnchorLeft(el, beadCount, colW, rows = 6, reserve = ROAD_RESERVE_COLS) {
+  if (!el || !colW) return
+  const lastCol = Math.ceil((beadCount || 0) / rows)
+  const want = (lastCol + reserve) * colW - el.clientWidth
+  el.scrollLeft = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, want))
+}
+
 export function freshFor(srcIndex, srcLen, dstLen) {
   if (!(srcIndex >= 0) || srcLen <= 0 || dstLen <= 0) return -1
   return srcIndex === srcLen - 1 ? dstLen - 1 : -1
