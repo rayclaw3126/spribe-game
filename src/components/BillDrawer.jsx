@@ -68,6 +68,15 @@ const MARK = {
   hit: { t: '✓', c: COLORS.green }, lose: { t: '✗', c: COLORS.slate }, push: { t: '退', c: COLORS.amber },
   refund: { t: '退', c: COLORS.amber },
 }
+// #公期化 单2（裁定③）：本行是否「全服公期局」的注 —— 判据 = selections 的键带球序命名空间前缀
+// b1:/b2:/b3:（公期滚球注单 key 的形态）。公期局 player_id 恒 NULL，走 GET /round/:id 的就地验必 404，
+// 故这类行不亮「验」签。老 per-player 滚球局是裸 key，其余 20 款也永不出现该前缀 → 恒 false，判定零变。
+function isPublicRoundBet(it) {
+  const sel = it && it.selections
+  if (!sel || typeof sel !== 'object') return false
+  return Object.keys(sel).some((k) => /^b[123]:/.test(k))
+}
+
 // #S2 注单明细：settle_detail=[{key,outcome,payout}] 合法非空才走子行；防 null/形状异常/切 tab 脏帧全回落 null。
 // 行头派彩改显 round2(Σ本行 detail 派彩)（与子行永远对齐）；Σ > 本行 payout(轮总聚合,钳制后) → 触顶标记。
 function betDetail(it) {
@@ -442,7 +451,13 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
                           >#{it.round_id}</span>
                         )}
                         {/* #B2 就地验小签：per-player 款 + 已结算(win/lose 粗判)才亮；进行中/退注不显 */}
-                        {PER_PLAYER_VERIFY_GAMES.has(it.game) && it.round_id != null && (it.outcome === 'win' || it.outcome === 'lose') && (
+                        {/* #公期化 单2（裁定③）：滚球现有两种局型，白名单是【按款】的分不出来 ——
+                            公期局(v:2)的 rounds.player_id 恒 NULL，GET /round/:id 归属校验必 404，
+                            验签亮着点下去只会给玩家一个「该局不存在」，是误导。判据取本行 selections 的
+                            球序命名空间前缀 b1:/b2:/b3:（公期局注单 key 的形态，单1b 定），有前缀=公期局→不亮。
+                            老 per-player 局是裸 key（big/red/num-40…），isPublicRoundBet 恒 false → 照亮照绿，零回归。
+                            其余 20 款的 selections 里永不出现 b\d: 前缀 → 判定路径逐字节不变。 */}
+                        {PER_PLAYER_VERIFY_GAMES.has(it.game) && !isPublicRoundBet(it) && it.round_id != null && (it.outcome === 'win' || it.outcome === 'lose') && (
                           <span
                             onClick={() => toggleVerify(it.round_id)}
                             style={{

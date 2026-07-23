@@ -8,16 +8,22 @@ import WinToast from '../components/shell/WinToast'
 import { makeFeedBots } from '../components/shell/arenaFx'
 import { useSfxMuted } from '../components/shell/bgmManager'
 import GameTopBar from '../components/shell/GameTopBar'
-import SeedFairness from '../components/shell/SeedFairness'
+import CommitRevealFairness from '../components/CommitRevealFairness'
 import HowToPlay from '../components/shell/HowToPlay'
 import { GAME_BY_ID } from '../gameRegistry'
 import { usePlayerApi } from '../lib/playerApi'
+// #公期化 单2：滚球标准房改全服公期六段制 —— 相位/期号/倒计时/球号/封盘全读服务端 WS 七帧。
+import { useRoundRoom } from '../hooks/useRoundRoom'
+import RollingBallPhaseBar, { PoolBadge } from './markets-ui/RollingBallPhaseBar'
+import { ballWindowOf, ballKeyOf } from './markets-ui/rollingBallPhase'
 import { ROLLINGBALL_LABEL as RL } from '../lib/betKeyLabels'   // #S3 档位中文名单一出处（搬家回引，视觉零变）
 import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口 + 动效（共用）
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
-// X2：连开 3 球引擎 + 剩余池动态赔率 + 逐球结算状态机（前 19 卡无此结构）。
-//   逐球开：pendingRef 锁 3 球，逐球揭示；每球独立押注窗 → 开球 → 结算 → 重算下球赔率。
+// X2：连开 3 球引擎 + 剩余池动态赔率 + 六段公期相位（前 19 卡无此结构）。
+//   #公期化 单2：本页已从 per-player 三球流改【全服公期六段制】—— 相位/期号/倒计时/球号/封盘
+//   全部读服务端 /ws/rounds 的七帧（bet1→draw1→bet2→draw2→bet3→draw3→settle），
+//   本地零相位机、零本地开奖；三颗球由服务端建局时一次生成、逐帧揭示（闸1 只发已开球）。
 //   动态赔率（逆向报告公式，禁改）：odds_k = round(R_key × (76-k) / c_k, 2)
 //     k = 球序 1-3；c_k = 该键剩余池号码数 = 初始计数 − 已开出属该键球数。
 //   R 标定（单据定稿 2026-07-06，全键入 94-97.5% 带）：单号 0.9523；
@@ -25,7 +31,9 @@ import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} 
 //     组合独立 R_组合 0.955，odds_k = round(0.955×(76-k)/c_combo, 2)，
 //     c_combo = 组合剩余计数（大单 = 剩余池「大且单」数）。第1球四键=3.77，
 //     小双计数 18（38 偶数落大侧）→ 3.98；两者 RTP 均 ≈95.5%。
-// 算钱路径：placeBets() 唯一扣注入口，settleBall() 每球一次赔付点。
+// 算钱路径（#公期化 单2 后）：confirmBets() 唯一扣注入口 —— bet 窗内即时 POST
+//   /round/rollingball/bet，后端当场 debit，余额只认响应 balanceAfter；
+//   赔付点在 settle 帧的 effect C，三态/派彩/余额【全认服务端 settleInfo】，前端不算钱。
 
 // ---------- 引擎（纯函数区，禁副作用）----------
 const RED = new Set(Array.from({ length: 75 }, (_, i) => i + 1).filter(n => ((n - 1) % 4) < 2))
@@ -211,8 +219,8 @@ const RULES = [
     body: '· 想稳押大小单双红蓝，中奖率约一半；想搏大赔押单号或组合。\n· 越到后面的球，剩余池越小、赔率越高，可留意后续球的机会。\n· 本游戏理论返还率约 95%，属娱乐性质，理性游戏。',
   },
 ]
-const ROUND_DATE = 'SS20260706'
 const SEED_LAST = [21, 44, 7]          // 上局回顾种子（真开奖逐期顶掉）
+const EMPTY_BALLS = []                 // #公期化 单2：稳定引用，避免每渲染造新数组触发下游 effect
 // 珠盘路种子：整局 3 球号码形态（每局 3 个互不相同的 1-75，符合无放回），首屏各视角即有料。
 const SEED_ROAD = [
   [42, 17, 63], [8, 51, 29], [70, 34, 5], [23, 68, 11], [56, 2, 39],
@@ -245,7 +253,7 @@ const ROWS = [
   { slot: 'row-t5', name: RL['row-t5'], range: '3行×25号' },
 ]
 
-// ---------- 滚球舞台（draw 相位；目标已锁于 pendingRef，动画只读）----------
+// ---------- 滚球舞台（draw 相位；目标 = 服务端 draw 帧的球号，动画只读不产值）----------
 // 1-75 快闪滚号 → 减速定格真值（末球慢放）；canvas 单 rAF，key=期号+球序重挂载；
 // StrictMode 双挂载由 cleanup 兜底；prefers-reduced-motion 直出终态帧不发声。
 function RollStage({ target, isLast, size, sfx }) {
@@ -334,7 +342,7 @@ function RollStage({ target, isLast, size, sfx }) {
 
 // ---------- betting 等待区暖场球（号码快跳障眼动效）----------
 // setInterval 驱动（非 rAF → __RB_RAF_ACTIVE 不新增环）；伪随机滚号 = 确定性 scramble
-// （不碰引擎 RNG，纯展示）；开奖真值仍锁于 pendingRef，本球只是暖场障眼。
+// （不碰引擎 RNG，纯展示）；开奖真值在服务端，本球只是暖场障眼。
 function BettingBall({ size }) {
   const [n, setN] = useState(37)
   const cntRef = useRef(0)
@@ -385,34 +393,49 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   const [betsPlaced, setBetsPlaced] = useState(() => new Map())
   const [feedBets, setFeedBets] = useState(() => makeFeedBots())
 
-  // ---- 逐球结算状态机 ----
-  // phase: b{1-3}-{bet|draw|settle}；ballIdx / sub 由 phase 解析
-  const [phase, setPhase] = useState('b1-bet')
-  const [countdown, setCountdown] = useState(BET_T)
-  const [roundNo, setRoundNo] = useState(88)
+  // ============ #公期化 单2：数据源 = 服务端六段房（本地零相位机、零本地开奖）============
+  //
+  // 退役的东西（原 per-player 三球流）：500ms 本地心跳状态机、phaseRef/cdRef、pendingRef（本地球槽）、
+  //   roundIdRef 多步线程、pendingDataRef、transitioningRef、以及「窗口关闭时 POST /rollingball/play
+  //   顺带开球」那条钱路。现在球是服务器建局时一次生成、逐帧揭示的，前端只镜像。
+  // 保留的东西：舞台/球槽/珠盘路/SFX/手风琴/几何 —— 一个像素不动，只换喂给它们的数据源。
+  const room = useRoundRoom(playerToken, G.backendId)
+
+  // 相位派生（全部只读 room，本地不产相位）：
+  //   ballIdx = 当前【押注窗】的球序，单一出处 ballWindowOf(revealed) = 已开球数
+  //             （与后端 /rollingball/bet 相位闸同源判据，也正是 oddsFor 第二参要的量）
+  //   sub     = 'bet' | 'draw' | 'settle'（沿用原页三分法，下游 JSX 一行不改）
+  const ph = room.phase
+  const revealed = room.revealed || EMPTY_BALLS
+  const ballIdx = Math.min(2, ballWindowOf(revealed))
+  const isSeg = /^(bet|draw)[123]$/.test(ph) || ph === 'settle'   // 是否已收到六段帧（ready 门闩用）
+  const sub = ph === 'settle' ? 'settle' : ph.startsWith('draw') ? 'draw' : 'bet'
+  // 封盘（lockedMs 缓冲）判定：服务端【不为锁帧单独发帧】（那会插进七帧序），故 live 路径靠
+  //   本地派生 —— bet 帧的 endsAt 就是【下注截止】，倒计时归零即进 2s 缓冲；服务端 betsLocked
+  //   只在 snapshot（中途进场）里带，两条一起兜。封盘期一律不可点不可投，与后端 409 同步。
+  const isBetSeg = /^bet[123]$/.test(ph)
+  const locked = isBetSeg && (room.betsLocked || (room.countdownMs || 0) <= 0)
+  const betting = isBetSeg && !locked
+  const countdown = Math.ceil((room.countdownMs || 0) / 500)   // 原页以 0.5s tick 计数，此处折算保持下游一致
+  const roundNo = room.roundNo
+
   const [lastRound, setLastRound] = useState(SEED_LAST)   // 上局回顾
   const [road, setRoad] = useState(SEED_ROAD)
   const [result, setResult] = useState(null)              // { idx, ball, hits:Set, win }
   const [toasts, setToasts] = useState([])
-  const [, forceTick] = useState(0)                       // pendingRef 揭示后触发重渲
+  // 本局已投（跨窗保留整局）：Map<复合key `b1:big`, {stake, odds}>；新一局 bet1 清空
+  const [stakedByKey, setStakedByKey] = useState(() => new Map())
+  const [flying, setFlying] = useState(false)             // 下注 POST 进行中，防连点双投
 
-  const phaseRef = useRef('b1-bet')
-  const cdRef = useRef(BET_T)
   const picksRef = useRef(picks)
-  const betsRef = useRef(new Map())                       // 当前球注单 key→{stake,odds}
   const betRef = useRef(bet)
   const balanceRef = useRef(serverBalance)
-  const pendingRef = useRef(null)                         // 本局已开球（按步现派，逐球从后端填入）
-  const roundIdRef = useRef(null)                         // 后端本局 roundId（多步线程）
-  const pendingDataRef = useRef(null)                     // 当前球后端返回（settleBall 消费）
-  const transitioningRef = useRef(false)                  // 开球 POST 进行中，防 tick 重入
+  const stakedRef = useRef(new Map())
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
-  const roadRecordedRef = useRef(null)                    // 珠盘路整局记账去重：存已记的 roundId，防 StrictMode 双调用重复入
-
-  const ballIdx = Number(phase[1]) - 1
-  const sub = phase.slice(3)   // bet | draw | settle
-  const betting = sub === 'bet'
+  const roadRecordedRef = useRef(null)                    // 珠盘路整局记账去重：存已记的 roundNo，防 StrictMode 双调用重复入
+  const settledRoundRef = useRef(null)                    // settle 结算展示去重
+  const clearedRoundRef = useRef(null)                    // 新一局清盘去重
 
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
   const audioRef = useRef({ ctx: null, muted: false })
@@ -538,112 +561,93 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
     timersRef.current.push(tm)
   }
 
-  const stagedTotal = () => [...betsRef.current.values()].reduce((a, b) => round2(a + b.stake), 0)
 
-  // 唯一赔付点：结算第 idx 球——命中/赔付/余额全认后端 perKeyOutcome（锁定 odds 在后端算）
-  function settleBall(idx) {
-    const data = pendingDataRef.current
-    const n = data ? data.ball : pendingRef.current?.[idx]
-    let win = 0
-    const hits = new Set()
-    if (data) {
-      for (const [k, v] of Object.entries(data.perKeyOutcome || {})) if (v.outcome === 'hit') hits.add(k)
-      win = Number(data.ballPayout || 0)
-      if (data.balanceAfter != null) setServerBalance(Number(data.balanceAfter))   // 余额只认后端
-    }
-    if (win > 0) { pushToast(`第${idx + 1}球命中`, win); sfxHit() }
-    setResult({ idx, ball: n, hits, win })
-    if (idx === 2) sfxFinal()   // 三球齐 → 终场哨
-    // 珠盘路整局记账移到 endRound（一局恰记一次完整 3 球，见下）——此处不再写 road。
-  }
+  // ============ 相位驱动 effects（全部只读 room，本地不产相位、不产开奖）============
 
-  // 单心跳驱动状态机（500ms/tick）；StrictMode 双挂载由 cleanup 兜底
+  // A. 新一局 bet1：清盘（选中/本局已投/上局结算展示），并把上一局三球落进「上局回顾」+ 珠盘路。
+  //    去重靠 roundNo（StrictMode 双挂载/重复帧都只生效一次）。
   useEffect(() => {
-    const id = setInterval(async () => {
-      if (transitioningRef.current) return   // 开球 POST 进行中，别再 tick
-      cdRef.current -= 1
-      if (cdRef.current > 0) { setCountdown(cdRef.current); return }
-      const ph = phaseRef.current
-      const bi = Number(ph[1]) - 1
-      const sb = ph.slice(3)
-      const go = (next, ticks) => {
-        phaseRef.current = next; setPhase(next)
-        cdRef.current = ticks; setCountdown(ticks)
+    if (ph !== 'bet1' || !roundNo || clearedRoundRef.current === roundNo) return
+    clearedRoundRef.current = roundNo
+    stakedRef.current = new Map(); setStakedByKey(new Map())
+    picksRef.current = new Set(); setPicks(new Set())
+    setResult(null)
+    setBetsPlaced(new Map())
+    setFeedBets(makeFeedBots())
+    setNetErr(null)
+  }, [ph, roundNo])
+
+  // B. 每颗球开出（draw 帧）：舞台定格由 RollStage 自己吃 target，这里只补音效。
+  useEffect(() => {
+    if (!/^draw[123]$/.test(ph)) return
+    // 落球 tick 由 RollStage 内部触发；此处只在第三颗球时留终场哨给 settle（见 C）
+  }, [ph])
+
+  // C. settle 帧：唯一结算展示点 —— 三态/派彩/余额【全认服务端 settleInfo】，本地不算钱。
+  //    珠盘路整局记一次（3 颗），上局回顾更新。去重靠 roundNo。
+  useEffect(() => {
+    if (ph !== 'settle' || !roundNo || settledRoundRef.current === roundNo) return
+    settledRoundRef.current = roundNo
+    const balls = (room.drawResult?.revealed || room.revealed || []).slice(0, 3)
+    if (balls.length !== 3) return
+
+    const si = room.settleInfo
+    const mine = si && si.roundNo === roundNo ? si : null
+    // 盘面格用裸 key，settleInfo 给的是复合 key：只把【第 3 球】（settle 时盘面显示的那颗）
+    // 的命中映射回裸键贴到格子上；三颗球的完整三态由 RollingBallPhaseBar 逐球呈现，不混淆。
+    const hits = new Set()
+    let win = 0
+    if (mine) {
+      for (const v of mine.yourResult || []) {
+        if (v.outcome !== 'lose' && v.key.startsWith('b3:')) hits.add(v.key.slice(3))
       }
-      // 本局收尾 → 回新局（清 roundId/已开球；无注/失败/开满 3 球共用）
-      const endRound = () => {
-        if (pendingRef.current?.length === 3) {
-          setLastRound(pendingRef.current)
-          // 珠盘路：整局结束记一次完整 3 球号码；按 roundId 去重（StrictMode 双调用防重）。
-          const rid = roundIdRef.current
-          if (rid != null && roadRecordedRef.current !== rid) {
-            roadRecordedRef.current = rid
-            const balls = pendingRef.current.slice()
-            // #47 收官：storage 只截局数；列滑窗口在渲染期按【珠】开（见 deskBeads），
-            //   否则窗口拿到的是局数、mod rows 相位全错，会钉成满 28 列。
-            setRoad(r => [...r, balls].slice(-ROUND_CAP))
-            setFreshCount(BEADS_PER_ROUND)   // 本局 3 颗一起弹入（首挂无珠，天然不触发）
-          }
-        }
-        roundIdRef.current = null
-        pendingRef.current = []
-        pendingDataRef.current = null
-        betsRef.current = new Map(); setBetsPlaced(new Map())
-        picksRef.current = new Set(); setPicks(new Set())
-        setResult(null)
-        setFeedBets(makeFeedBots())
-        setRoundNo(x => x + 1)
-        go('b1-bet', BET_T)
-      }
-      if (sb === 'bet') {
-        // 本球下注窗关：有注则 POST 开本球（每球≥1注，串 roundId）；无注则本局收尾（零敞口无害）
-        if (betsRef.current.size === 0) { endRound(); return }
-        transitioningRef.current = true
-        try {
-          const body = { bets: Object.fromEntries([...betsRef.current].map(([k, v]) => [k, v.stake])) }
-          if (bi > 0 && roundIdRef.current) body.roundId = roundIdRef.current   // 续球线程 roundId
-          const data = await api.apiPlay(G.backendId, body, { autoBalance: false })
-          roundIdRef.current = data.roundId
-          pendingDataRef.current = data
-          if (!Array.isArray(pendingRef.current)) pendingRef.current = []
-          pendingRef.current[bi] = data.ball   // ← 后端本球号（动画停这里，不本地随机）
-          forceTick(x => x + 1)
-          transitioningRef.current = false
-          go(`b${bi + 1}-draw`, DRAW_T)
-        } catch (e) {
-          setNetErr(e.message)
-          pendingDataRef.current = null
-          transitioningRef.current = false
-          endRound()   // 开球失败：结束本局（暂存注未扣钱）
-        }
-      } else if (sb === 'draw') {
-        settleBall(bi)
-        go(`b${bi + 1}-settle`, SETTLE_T)
-      } else {
-        // 结算完毕 → 下一球 或 本局收尾（后端 status settled 即本局结束）
-        const done = bi >= 2 || pendingDataRef.current?.status === 'settled'
-        if (!done) {
-          betsRef.current = new Map(); setBetsPlaced(new Map())
-          picksRef.current = new Set(); setPicks(new Set())
-          setResult(null)
-          go(`b${bi + 2}-bet`, BET_T)   // 开下一球押注窗（赔率随剩余池，含已开球）
-        } else {
-          endRound()
-        }
-      }
-    }, TICK_MS)
-    return () => clearInterval(id)
-    // 引擎全程走 refs，空依赖单心跳
+      win = Number(mine.totalPayout || 0)
+      if (mine.balanceAfter != null) setServerBalance(Number(mine.balanceAfter))   // 余额只认后端
+      if (win > 0) { pushToast('本局命中', win); sfxHit() }
+    }
+    setResult({ idx: 2, ball: balls[2], hits, win })
+    setLastRound(balls)
+    sfxFinal()   // 三球齐 → 终场哨
+    if (roadRecordedRef.current !== roundNo) {
+      roadRecordedRef.current = roundNo
+      // #47 收官：storage 只截局数；列滑窗口在渲染期按【珠】开（见 deskBeads）
+      setRoad(r => [...r, balls].slice(-ROUND_CAP))
+      setFreshCount(BEADS_PER_ROUND)   // 本局 3 颗一起弹入
+    }
+    // room.settleInfo 可能比 settle 帧晚到一拍 → 依赖里带上它，晚到时补跑一次（去重键已置故只补状态）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [ph, roundNo, room.settleInfo])
+
+  // C2. settleInfo 晚到补写（settle 帧已消费过去重键时，仍要把三态/派彩/余额补上）
+  useEffect(() => {
+    const si = room.settleInfo
+    if (!si || si.roundNo !== roundNo || ph !== 'settle') return
+    const hits = new Set()
+    for (const v of si.yourResult || []) if (v.outcome !== 'lose' && v.key.startsWith('b3:')) hits.add(v.key.slice(3))
+    const win = Number(si.totalPayout || 0)
+    if (si.balanceAfter != null) setServerBalance(Number(si.balanceAfter))
+    setResult(r => (r && r.win === win ? r : { idx: 2, ball: (room.drawResult?.revealed || [])[2], hits, win }))   // hits 同上：只含第 3 球裸键
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room.settleInfo, roundNo, ph])
+
+  // 窗口一变：盘面格的持注 chip 按【本窗】复合 key 重新派生（整局总表 stakedByKey 不清，
+  //   跨窗持注由 RollingBallPhaseBar 的逐球已投额呈现）。
+  useEffect(() => {
+    const pfx = `b${ballIdx + 1}:`
+    setBetsPlaced(new Map([...stakedRef.current].filter(([c]) => c.startsWith(pfx)).map(([c, v]) => [c.slice(3), v])))
+  }, [ballIdx, roundNo])
 
   // ---- 动态赔率表（当前押注球）----
-  const revealedBefore = pendingRef.current ? pendingRef.current.slice(0, ballIdx) : []
+  // 判据与后端逐位同源：oddsFor(裸key, ballIdx, 已开球) —— 返 null = 死键（已开号 / c_k=0），
+  // 界面即置灰不可点。禁在此手抄任何「不可押名单」。
+  const revealedBefore = revealed.slice(0, ballIdx)
   const oddsAt = key => oddsFor(key, ballIdx, revealedBefore)
+  // 本窗复合 key（b1:/b2:/b3:）：前缀由 ballIdx 派生，与后端相位闸同源
+  const ckey = key => ballKeyOf(ballIdx, key)
 
   const toggleSel = key => {
-    if (phaseRef.current.slice(3) !== 'bet') return
-    if (oddsAt(key) == null) return   // 不可押（已开号）
+    if (!betting) return
+    if (oddsAt(key) == null) return   // 不可押（已开号/池耗尽）
     setPicks(s => {
       const n = new Set(s)
       if (n.has(key)) n.delete(key); else n.add(key)
@@ -652,37 +656,48 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
     })
   }
 
-  // 唯一暂存点：暂存本球注（不扣钱，钱只在开球 POST 那一刻走）
-  function placeBets(entries) {
-    if (phaseRef.current.slice(3) !== 'bet') return false
-    let total = 0
-    entries.forEach(({ stake }) => { total = round2(total + stake) })
-    // 暂存不扣钱：本球已暂存 + 本次不能超过后端余额
-    if (!entries.size || total <= 0 || (serverBalance != null && total > round2(serverBalance - stagedTotal()))) return false
-    setNetErr(null)
-    entries.forEach((v, k) => {
-      const prev = betsRef.current.get(k)
-      betsRef.current.set(k, { stake: round2((prev?.stake || 0) + v.stake), odds: v.odds })
-    })
-    setBetsPlaced(new Map(betsRef.current))
-    return true
-  }
-  function confirmBets() {
+  // 唯一下注入口（#公期化 单2）：bet 窗内【即时 POST】/round/rollingball/bet，后端当场 debit。
+  //   · 余额只认响应的 balanceAfter（apiPost 默认自动回写，故这里不手动 setServerBalance）
+  //   · 幂等键 uuid（genIdemKey）；服务端自己加 pub- 前缀与老 /play 分域，前端零感知
+  //   · 400（跨窗/死键/负注/超限）与 409（round_locked：封盘或非 bet 段）照排期器成例出提示、不扣钱
+  async function confirmBets() {
     const amount = betRef.current
-    if (amount < 1) return
-    const entries = new Map()
-    picksRef.current.forEach(k => {
-      const o = oddsFor(k, Number(phaseRef.current[1]) - 1, pendingRef.current ? pendingRef.current.slice(0, Number(phaseRef.current[1]) - 1) : [])
-      if (o != null) entries.set(k, { stake: amount, odds: o })
-    })
-    if (placeBets(entries)) { picksRef.current = new Set(); setPicks(new Set()) }
+    if (amount < 1 || flying || !betting) return
+    const keys = [...picksRef.current].filter(k => oddsAt(k) != null)
+    if (!keys.length) return
+    const bets = Object.fromEntries(keys.map(k => [ckey(k), amount]))
+    const oddsSnap = Object.fromEntries(keys.map(k => [ckey(k), oddsAt(k)]))
+    setFlying(true)
+    setNetErr(null)
+    try {
+      await api.apiPost('/round/rollingball/bet', { bets, idempotencyKey: api.genIdemKey('rb') })
+      // 受理成功 → 记进本局已投（跨窗保留整局，settle 后由新一局 bet1 清）
+      const next = new Map(stakedRef.current)
+      for (const k of keys) {
+        const c = ckey(k)
+        const prev = next.get(c)
+        next.set(c, { stake: round2((prev?.stake || 0) + amount), odds: oddsSnap[c] })
+      }
+      stakedRef.current = next
+      setStakedByKey(next)
+      setBetsPlaced(new Map([...next].filter(([c]) => c.startsWith(`b${ballIdx + 1}:`))
+        .map(([c, v]) => [c.slice(3), v])))
+      picksRef.current = new Set(); setPicks(new Set())
+    } catch (e) {
+      setNetErr(e?.data?.error === 'round_locked' ? '本窗已封盘，请等下一个押注窗' : e.message)
+    } finally {
+      setFlying(false)
+    }
   }
 
   const confirmTotal = round2(bet * picks.size)
-  const confirmOk = betting && picks.size > 0 && bet >= 1 && (serverBalance == null || confirmTotal <= round2(serverBalance - stagedTotal()))
-  const revealedCount = ballIdx + (sub === 'bet' ? 0 : 1)
-  const drawnBalls = pendingRef.current ? pendingRef.current.slice(0, revealedCount) : []
-  const curNum = sub === 'bet' ? null : pendingRef.current?.[ballIdx]
+  const confirmOk = betting && !flying && picks.size > 0 && bet >= 1
+    && (serverBalance == null || confirmTotal <= round2(serverBalance))
+  // draw 段：服务端该帧已把本球放进 revealed，故球序 = revealed.length-1，球号 = 末位
+  const drawIdx = Math.max(0, revealed.length - 1)
+  const rollTarget = sub === 'draw' ? revealed[drawIdx] : null
+  // 当前展示球：draw 段是正在滚的这颗，settle 段是第 3 颗
+  const curNum = sub === 'bet' ? null : (sub === 'settle' ? revealed[2] : revealed[ballIdx])
 
   // ---- 样式件（选中=金框；命中=绿框；已开号不可押=压暗）----
   const cellBase = (key, bg) => {
@@ -748,9 +763,15 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   )
 
   // ---- 顶栏 ----
-  const lowTime = betting && countdown <= 10   // 末 5s 催注（数字变红放大）
+  // #公期化 单2 (f)：ready 门闩 —— 快照/首帧到货前（connecting、无期号）不画任何相位内容，
+  //   否则会先画一帧「bet1 第1球押注中」，快照一到又跳到真实段（如 bet2），就是首帧闪。
+  //   门闩键带 roundNo：换局也走同一条路径，不会拿上一局的段号画新局。
+  const ready = room.connected && !!roundNo && isSeg
+  const lowTime = ready && betting && countdown <= 10   // 末 5s 催注（数字变红放大）
   const secs = String(Math.ceil(countdown / 2)).padStart(2, '0')
-  const phaseInfo = betting
+  const phaseInfo = !ready
+    ? { text: room.roomError === 'invalid_room' ? '房间不可用' : '连接中…', c: DERBY.dim }
+    : betting
     ? { text: `⏱ 押注 第${ballIdx + 1}球 00:`, c: lowTime ? DERBY.away : DERBY.sel }
     : sub === 'draw'
       ? { text: `第${ballIdx + 1}球开球中…`, c: DERBY.orange }
@@ -762,7 +783,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       color: phaseInfo.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
     }}>
       {phaseInfo.text}
-      {betting && (
+      {ready && betting && (
         <span data-cd style={lowTime ? {
           display: 'inline-block', color: DERBY.away, fontSize: 15,
           fontFamily: "'Space Grotesk', sans-serif",
@@ -774,9 +795,11 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   const topBar = (
     <>
       <GameTopBar balance={serverBalance ?? 0} venue={G.venue ?? G.displayName}
-        roundId={`${ROUND_DATE}-${String(roundNo).padStart(3, '0')}`}
+        roundId={roundNo || '连接中…'}
         phaseChip={phaseChipNode} onBack={onBack} onHowTo={() => setRulesOpen(true)} onFairness={() => setFairOpen(true)} />
-      <SeedFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName} playerToken={playerToken} game={G.backendId} />
+      <CommitRevealFairness open={fairOpen} onClose={() => setFairOpen(false)} venue={G.venue ?? G.displayName}
+        round={room.commit ? { ...room.commit, commitHash: room.commit.serverSeedHash } : null}
+        game={G.backendId} drawResult={room.drawResult} />
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
@@ -804,12 +827,13 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
         <span style={{ color: sub === 'draw' ? DERBY.orange : DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>
           {betting ? `押注 · 第${ballIdx + 1}球` : sub === 'draw' ? '开球中' : `第${ballIdx + 1}球已开`}
         </span>
-        {sub === 'draw' && pendingRef.current ? (
+        {sub === 'draw' && rollTarget != null ? (
           // draw 相位：canvas 滚球定格（1-75 快闪 → 真值），末球慢放
-          <RollStage key={`${roundNo}-roll-${ballIdx}`} target={pendingRef.current[ballIdx]}
-            isLast={ballIdx === 2} size={isMobile ? 56 : 66} sfx={stageSfx} />
+          // #公期化 单2：target 换成【服务端 draw 帧的球号】，动画停后端球，前端零本地开奖
+          <RollStage key={`${roundNo}-roll-${drawIdx}`} target={rollTarget}
+            isLast={drawIdx === 2} size={isMobile ? 56 : 66} sfx={stageSfx} />
         ) : betting ? (
-          // betting 期：暖场号码快跳（障眼动效，非 rAF；真值仍锁 pendingRef）
+          // betting 期：暖场号码快跳（障眼动效，非 rAF；真值在服务端，本地永不产球）
           <BettingBall size={isMobile ? 56 : 66} />
         ) : (
           <span style={{
@@ -851,7 +875,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
         {[0, 1, 2].map(i => {
           // 球槽定格才亮：当前球 draw 相位滚号未定 → 槽仍暗，settle 时点亮
           const lit = i < ballIdx || (i === ballIdx && sub === 'settle')
-          const n = pendingRef.current ? pendingRef.current[i] : undefined
+          const n = revealed[i]
           return (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flex: '0 0 auto' }}>
               <span style={{ color: i === ballIdx ? DERBY.gold : DERBY.dim, fontSize: 9, fontWeight: 900 }}>第 {i + 1} 球</span>
@@ -887,45 +911,21 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   )
 
   // ---- ② 盘区：球位指示 + 9 类玩法 ----
+  // #公期化 单2：球次条整块换成共用件 RollingBallPhaseBar（四态 + 跨窗持注 + settle 逐球三态/派彩）。
+  //   桌面/手机两分支引的都是这一个 ballSwitch 变量 → 共用件单一出处；单3 多桌 TableCard 直接
+  //   import 同一件传 compact 即可，禁二写。容器/内边距/字号/圆角/配色在件内逐字节照搬原实现。
   const ballSwitch = (
-    <div style={{ display: 'flex', gap: 4, marginBottom: isMobile ? 5 : 6, flexWrap: 'wrap', alignItems: 'center' }}>
-      {[0, 1, 2].map(i => {
-        const done = i < ballIdx || (i === ballIdx && !betting)
-        const active = i === ballIdx
-        return (
-          <span key={i} style={{
-            padding: '4px 12px', borderRadius: RADIUS.pill,
-            background: active ? DERBY.sel : done ? 'rgba(53,208,127,0.14)' : 'rgba(0,0,0,0.35)',
-            color: active ? '#083a1b' : done ? DERBY.sel : DERBY.dim,
-            border: `1px solid ${active ? DERBY.sel : done ? 'rgba(53,208,127,0.45)' : 'rgba(255,255,255,0.2)'}`,
-            fontSize: hasRail ? 13 : 11, fontWeight: 900, letterSpacing: 0.3, whiteSpace: 'nowrap',
-          }}>第{i + 1}球{done && drawnBalls[i] != null ? ` ${String(drawnBalls[i]).padStart(2, '0')}` : active ? ' ◀ 押注中' : ''}</span>
-        )
-      })}
-      {/* 剩余池收缩可视化：75→74→73 每球定后跳动（key 由值驱动，CSS 无 rAF）
-          #47 刀1：桌面放大档改挂主盘【组头】行（见 poolBadge）；手机仍留在球次条内，逐位不动。 */}
-      {!hasRail && <span style={{
-        marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
-        padding: '3px 10px', borderRadius: RADIUS.pill,
-        background: 'rgba(0,0,0,0.35)', border: `1px solid ${DERBY.gold}`,
-        color: DERBY.gold, fontSize: 10, fontWeight: 900, whiteSpace: 'nowrap',
-      }}>剩余池 <span key={75 - ballIdx} style={{ display: 'inline-block', animation: 'rbPoolBump 0.4s ease-out', fontFamily: "'Space Grotesk', sans-serif", fontSize: 12 }}>{75 - ballIdx}</span></span>}
-      {ballIdx > 0 && (
-        <span style={{ color: DERBY.orange, fontSize: 9, fontWeight: 800, whiteSpace: 'nowrap' }}>
-          赔率已按剩余池重算
-        </span>
-      )}
-    </div>
+    <RollingBallPhaseBar
+      phase={ready ? ph : 'connecting'} revealed={ready ? revealed : EMPTY_BALLS}
+      betsLocked={locked} countdownMs={ready ? room.countdownMs : 0}
+      stakedByKey={new Map([...stakedByKey].map(([k, v]) => [k, v.stake]))}
+      settleResult={room.settleInfo?.roundNo === roundNo ? room.settleInfo?.yourResult : null}
+      totalPayout={room.settleInfo?.roundNo === roundNo ? room.settleInfo?.totalPayout : 0}
+      isMobile={isMobile} hasRail={hasRail}
+    />
   )
   // #47 刀1：剩余池徽标（桌面放大档随组头走）
-  const poolBadge = (
-    <span style={{
-      marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
-      padding: '3px 10px', borderRadius: RADIUS.pill,
-      background: 'rgba(0,0,0,0.35)', border: `1px solid ${DERBY.gold}`,
-      color: DERBY.gold, fontSize: 10, fontWeight: 900, whiteSpace: 'nowrap',
-    }}>剩余池 <span key={75 - ballIdx} style={{ display: 'inline-block', animation: 'rbPoolBump 0.4s ease-out', fontFamily: "'Space Grotesk', sans-serif", fontSize: 12 }}>{75 - ballIdx}</span></span>
-  )
+  const poolBadge = <PoolBadge cur={ballIdx} />   // 共用件同一份实现（禁二写）
   // 组头行：桌面放大档把徽标并到组头右端；手机/窄桌面走原纯组头（逐位不动）
   const headRow = (text, badge = null) => (
     hasRail

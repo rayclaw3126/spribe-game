@@ -22,6 +22,18 @@ import { useState, useRef, useEffect } from 'react'
 // 断线自动重连（指数退避，上限 10s）；重连 onopen 主动 {type:'sync'} 拉快照恢复相位。
 
 // #42 单2：room 为空/未传 → 不拼 &room=，服务端落该款【标准房】（与房化前逐字节同行为）。
+// ============ #公期化 单2：六段房（滚球）相位名表 —— 纯加法，其余 9 款永不命中 ============
+//
+// 滚球标准房是全仓【唯一】的六段房（服务端 roundHub RB_SEGMENTS）：一局七帧
+//   bet1 → draw1 → bet2 → draw2 → bet3 → draw3 → settle
+// 它的相位名与三跳链（betting/locked/drawn/settled/idle）【零交集】，所以下面两处并入
+// 只是给这套新名字开路，9 款的相位名一个都不会落进新分支——行为逐字节不变。
+// 同理，segIdx/revealed/betsLocked/ball 四个字段只有六段房的帧才带，9 款的帧里根本没有
+// （服务端不发），故对应的 setState 在 9 款上永不触发，连一次多余渲染都不会多。
+const SEG_BET_PHASES = new Set(['bet1', 'bet2', 'bet3'])
+const SEG_TIMED_PHASES = new Set(['bet1', 'draw1', 'bet2', 'draw2', 'bet3', 'draw3', 'settle'])
+const EMPTY_REVEALED = []   // 模块级稳定引用：避免每次重置都造新数组触发下游 effect
+
 function buildRoundsWsUrl(token, game, room) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const base = `${proto}://${window.location.host}/ws/rounds?token=${encodeURIComponent(token)}&game=${encodeURIComponent(game)}`
@@ -38,6 +50,11 @@ export function useRoundRoom(playerToken, game, room) {
   const [commit, setCommit] = useState(null)
   const [connected, setConnected] = useState(false)
   const [roomError, setRoomError] = useState(null)   // #42：'invalid_room' —— 服务端 1008 拒房，禁重连
+  // #公期化 单2：六段房专属（9 款恒为初值，其帧不带这些字段 → setState 永不触发）
+  const [segIdx, setSegIdx] = useState(0)            // 当前段下标 0-5
+  const [revealed, setRevealed] = useState(EMPTY_REVEALED)   // 已揭示球（闸1：服务端只发已开的）
+  const [betsLocked, setBetsLocked] = useState(false)        // bet 窗关后的锁帧缓冲期
+  const [lastBall, setLastBall] = useState(null)             // 最近一帧 draw 的球号（舞台定格用）
 
   const wsRef = useRef(null)
   const endsAtRef = useRef(null)          // 当前 timed 相位的结束时间戳（服务器 ms）；非 timed 相位为 null
@@ -71,6 +88,7 @@ export function useRoundRoom(playerToken, game, room) {
     setDrawResult(null); setSettleInfo(null); setCommit(null)
     setRoomError(null); setConnected(false)
     setCountdownMs(0)
+    setSegIdx(0); setRevealed(EMPTY_REVEALED); setBetsLocked(false); setLastBall(null)
   }
 
   // 倒计时：单一 500ms 心跳，永远从 endsAt 重算剩余（不累加，避免漂移/后台节流误差）。
@@ -96,8 +114,17 @@ export function useRoundRoom(playerToken, game, room) {
       // 房化前没人用故一直被丢掉。现在它是下注的房凭证——后端按它在该款所有房里定位当期房。
       if (msg.roundId !== undefined) setRoundId(msg.roundId)
 
+      // #公期化 单2：六段房字段透传（只在帧真带时 set；9 款的帧不带 → 一次都不触发）。
+      //   revealed 是闸1 的唯一出口：服务端只发已开球，前端照单全收即天然不含未开球。
+      if (msg.segIdx !== undefined) setSegIdx(msg.segIdx)
+      if (Array.isArray(msg.revealed)) setRevealed(msg.revealed)
+      if (msg.betsLocked !== undefined) setBetsLocked(!!msg.betsLocked)
+      else if (SEG_BET_PHASES.has(p)) setBetsLocked(false)   // bet 帧到达即开窗（锁定由本地倒计时接管）
+      if (msg.ball !== undefined) setLastBall(msg.ball)
+
       // 倒计时基准：timed 相位取 endsAt（快照可能只带 remainingMs，则由本地时钟折算）。
-      if (p === 'betting' || p === 'locked' || p === 'idle') {
+      // 六段房【每一段】都是 timed（含 settle 的 4s 展示窗），故整表并入。
+      if (p === 'betting' || p === 'locked' || p === 'idle' || SEG_TIMED_PHASES.has(p)) {
         const endsAt = msg.endsAt != null ? msg.endsAt
           : (msg.remainingMs != null ? Date.now() + msg.remainingMs : null)
         endsAtRef.current = endsAt
@@ -107,12 +134,16 @@ export function useRoundRoom(playerToken, game, room) {
         setCountdownMs(0)
       }
 
-      // 开奖结果：betting 是新一期起点，清空上期开奖/结算；drawn/settled/idle 带 result 则填。
-      if (p === 'betting') { setDrawResult(null); setSettleInfo(null) }
+      // 开奖结果：betting（六段房是 bet1）是新一期起点，清空上期开奖/结算；带 result 的帧则填。
+      // 六段房：bet1 同时把上一局的球/段号清干净（服务端 bet1 帧带 revealed:[] 已覆盖，此处兜底）。
+      if (p === 'betting' || p === 'bet1') {
+        setDrawResult(null); setSettleInfo(null)
+        if (p === 'bet1') setLastBall(null)
+      }
       if (msg.result != null) setDrawResult(msg.result)
 
-      // 承诺/揭晓：betting 带 hash/clientSeed/nonce（承诺，无明文）；reveal 态带 serverSeed。
-      if (p === 'betting') {
+      // 承诺/揭晓：betting（六段房 bet1）带 hash/clientSeed/nonce（承诺，无明文）；reveal 态带 serverSeed。
+      if (p === 'betting' || p === 'bet1') {
         setCommit({ roundNo: msg.roundNo, serverSeedHash: msg.serverSeedHash ?? null, clientSeed: msg.clientSeed ?? null, nonce: msg.nonce ?? null, serverSeed: null })
       } else if (msg.serverSeed || msg.serverSeedHash) {
         setCommit((c) => ({
@@ -184,5 +215,9 @@ export function useRoundRoom(playerToken, game, room) {
     // 相位/数值全由 WS 分发；重连只依赖 token + game + room（#42：room 一变即断旧连新）
   }, [playerToken, game, room])
 
-  return { phase, roundNo, roundId, countdownMs, drawResult, settleInfo, commit, connected, roomError }
+  return {
+    phase, roundNo, roundId, countdownMs, drawResult, settleInfo, commit, connected, roomError,
+    // #公期化 单2 六段房专属（9 款恒 0/[]/false/null，读了也无害）
+    segIdx, revealed, betsLocked, lastBall,
+  }
 }
