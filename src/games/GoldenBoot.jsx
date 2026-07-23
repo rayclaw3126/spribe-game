@@ -71,7 +71,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   // #B3 刀2·裁定：subRow 插槽在 1280 档是 GameTopBar 物理宽（实测 75px，铁律不破/不换行/不缩噪点车图）。
   //   窄档(1280–1439)走 inline 形态（多桌验过的现成货）：冠亚必显、季军放不下则 ellipsis 隐没
   //   —— 同「场馆名窄档护钮隐没=预期」7-17 判例（顶栏是速览位，前三全貌开奖区本有）。
-  //   ≥1440 中栏够宽 → default 三名照旧全显，不误伤；<1280(无右栏/手机)中栏宽也走 default。
+  //   ≥1440 中栏够宽 → default 大车（主力档视觉品质优先，窄了隐没季军=B3 判例），不误伤；<1280(无右栏/手机)中栏宽也走 default。
   const narrowSubRow = useMediaQuery('(min-width: 1280px) and (max-width: 1439px)')
   // #47 三批·对表硬指标：660→800。四区的 maxWidth 全在 hasRail 分支内，手机(390)永不进 → 天然零感。
   const RAIL_MAXW = 800

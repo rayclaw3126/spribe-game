@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { COLORS, DERBY, RADIUS, LAYOUT, MONO } from './tokens'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
-import { INSTANT_VERIFY, fieldsOf } from './instantVerify'
-import { sha256Hex } from '../../../server/src/lib/seededRng.js'
+import { INSTANT_VERIFY, fieldsOf, verifyRound, deepEqVerify } from './instantVerify'   // #内务刀1：验整局收编进 verifyRound
 
 // 可验证公平抽屉 — 共享件。壳（定位/圆角/动画/遮罩/抓手/标题行）1:1 抄 HowToPlay.jsx，
 // 暗色皮同取 DERBY 系（球场绿卡底 + 金顶边/段标 + 浅绿正文），禁自编 hex。
@@ -29,13 +28,7 @@ const PLACEHOLDER = {
   streak: '例如 5',
 }
 
-// 顺序无关规范化深比（keno drawn / plinko path 是数组，需深比；数组保原序）。
-const canon = (v) => {
-  if (Array.isArray(v)) return v.map(canon)
-  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) o[k] = canon(v[k]); return o }
-  return v
-}
-const deepEq = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b))
+// #内务刀1：canon/deepEq 收编 —— 深比统一用 instantVerify.deepEqVerify（实现逐字节同，消 B2 挂的两份）。
 const fmtVal = (v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))
 // 手填的「后端开出值」宽松解析：数组既收 JSON（[1,2,3]）也收逗号列（1,2,3）；数字收数字；其余按字符串。
 function parseExpected(raw, sample) {
@@ -148,6 +141,8 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
   // 用【局内】的 client_seed/nonce/needs 喂注册表 —— 玩家一个字段都不用手抄，也就无从抄错。
   // serverSeed 仍取上方轮换揭晓的明文（vSeed）：先用 result_hash 校验这把种子确实是本局承诺的那把，
   // 再重算 —— 否则「种子对不上」会被误读成「服务端作弊」。
+  // #内务刀1：验整局一体化收编 —— 手写 GET/:id + terminal/nonce/hash/needs + derive + deepEq
+  //   整段替换为 verifyRound（instantVerify 单一出处），错误统一走返回 code 的文案，行为逐字节等价。
   async function doVerifyWhole() {
     const rid = wRid.trim()
     if (!rid) return
@@ -155,26 +150,12 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
     if (!seed) { setWOut({ error: '请先「轮换种子」拿到 serverSeed 明文（或在上方手填）' }); return }
     setWBusy(true); setWOut(null)
     try {
-      const row = await seedApi(`/round/${encodeURIComponent(rid)}`, { token: playerToken })
-      const sp = INSTANT_VERIFY[row.game]
-      if (!sp) { setWOut({ error: `本局是 ${row.game}，该游戏暂不支持本地重算` }); return }
-      if (!TERMINAL.has(row.status)) { setWOut({ error: `本局还在进行中（${row.status}），终局后才可验（活局的未开区域按设计不落库/不下发）` }); return }
-      const R = row.result || {}
-      if (R.nonce == null) { setWOut({ error: '本局记录缺 nonce，无法重算（补落 nonce 之前的老局）' }); return }
-      // 承诺校验：sha256(明文种子) 必须等于本局落库的 result_hash
-      if (row.result_hash && sha256Hex(seed) !== row.result_hash) {
-        setWOut({ error: '这把 serverSeed 不是本局承诺的那把（sha256 与本局 result_hash 不符）—— 本局属于另一轮种子，请用对应的揭晓明文' })
-        return
-      }
-      const missing = sp.needs.filter((nd) => R[nd.key] == null)
-      if (missing.length) { setWOut({ error: `本局记录缺重算要素（${missing.map((m) => m.key).join('/')}）` }); return }
-      const got = sp.derive(seed, row.client_seed ?? '', R.nonce, R)
-      const rows = fieldsOf(sp, R).map((f) => ({ f, want: R[f], got: got[f], ok: deepEq(R[f], got[f]) }))
-      setWOut({ rows, allOk: rows.length > 0 && rows.every((r) => r.ok), game: row.game, status: row.status, nonce: R.nonce })
-    } catch (e) {
-      setWOut({ error: e.message === '该局不存在' ? '该局不存在（或不属于你）' : (e.message || '重算异常') })
+      const res = await verifyRound(rid, { token: playerToken, serverSeed: seed })
+      if (res.error) { setWOut({ error: res.error }); return }
+      setWOut({ rows: res.rows, allOk: res.allOk, game: res.game, status: res.status, nonce: res.nonce })
     } finally { setWBusy(false) }
   }
+
 
   const canSetClient = current && current.nonce === 0
   // 主字段 = 本款第一个靶（dice→roll / keno→drawn / roulette→n / plinko→path / limbo→finalMult / streak→idx）
@@ -182,7 +163,7 @@ export default function SeedFairness({ open, onClose, venue, playerToken, game }
   const mainField = spec ? fieldsOf(spec, vExtra)[0] : null
   const vLocalOk = vLocal != null && vLocal !== 'ERR'
   const expected = vLocalOk ? parseExpected(vBackend, vLocal[mainField]) : undefined
-  const vMatch = vLocalOk && expected !== undefined && deepEq(expected, vLocal[mainField])
+  const vMatch = vLocalOk && expected !== undefined && deepEqVerify(expected, vLocal[mainField])
   // needs 齐了才让点重算（plinko 缺 rows / streak 缺 risk 时 derive 必炸）
   const extrasReady = !spec || spec.needs.every((nd) => String(vExtra[nd.key] ?? '').trim() !== '')
 
