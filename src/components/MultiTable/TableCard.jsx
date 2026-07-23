@@ -330,7 +330,9 @@ export default function TableCard({ id, room, playerToken, onLogout, stakedAmt, 
           <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column' }}>
             {cfg ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 10px' }}>
-                <cfg.Markets chipMode isMobile isDesk={false} openMode="first"
+                {/* #公期化 单3：附加 room prop —— 滚球只读卡体要读相位/已开球；其余 9 件是解构签名，
+                    未列的 prop 直接忽略（不 spread 到 DOM），行为逐字节不变。 */}
+                <cfg.Markets room={room} chipMode isMobile isDesk={false} openMode="first"
                   onPick={(key) => (mode === 'quick' ? onQuickBet : onAddBet)(id, key, gbLabel(key), oddsStr(gid, key))}
                   stakes={stakes || {}} disabled={room.phase !== 'betting'} flying={gbFlying} hits={gbHits} />
               </div>

@@ -3187,6 +3187,11 @@ function safeResultForView(game, status, result) {
 const HISTORY_GAMES = new Set([
   'speedgrid', 'numberup', 'derbyday', 'dominoduel', 'hattrick',
   'goldenboot', 'halftime', 'wuxing', 'lineup',
+  // #公期化 单3：滚球公期化后有了全服公共开奖流，解锁公共历史（右栏近期开奖 / 路珠播种 / 多桌卡）。
+  //   ⚠ 只放【公期 settled 满 3 球】：老 per-player 局 round_no 恒 NULL，被下方 `round_no IS NOT NULL`
+  //     天然挡掉；void 残局（缺球退注）status 非 settled 也进不来；再加一条 v:2 + 满 3 球的显式谓词
+  //     兜底，宁可少给不可给出半局（半局灌进路珠 = 珠序错位，比空着恶劣）。
+  'rollingball',
 ]);
 // #42 多房：?room=<房段> 可选。
 //   · 不传 → 该款【标准房】单流（COALESCE(room,'30s') = '30s'）——旧前端零碰，行为与房化前一致。
@@ -3214,6 +3219,14 @@ router.get('/history/:game', requireAuth, async (req, res, next) => {
         WHERE game = $1 AND status = 'settled' AND round_no IS NOT NULL
           AND COALESCE(room, $4) = $5
           AND ($2::bigint IS NULL OR id < $2)
+          -- #公期化 单3：滚球专属两条谓词（其余 9 款 result 无 'v' 键 → 两条恒真，行为零变）。
+          --   result->>'v' = '2' 只放公期局；jsonb_array_length(revealed)=3 只放开满三球的完整局。
+          AND ($1 <> 'rollingball' OR result->>'v' = '2')
+          AND ($1 <> 'rollingball' OR jsonb_array_length(result->'revealed') = 3)
+          -- 纵深防御：无种局挡在门外。正常路径下 roundHub 必在 draw3 同批写 server_seed，
+          -- 故这条对生产恒真；它挡的是「result 齐但种子缺」的畸形局（如直接 INSERT 的测试残渣）——
+          -- 那种局吐出去，前端 commit-reveal 行拿不到明文，验不了公平却看着像能验。
+          AND ($1 <> 'rollingball' OR server_seed IS NOT NULL)
         ORDER BY id DESC LIMIT $3`,
       // $4 = 默认房【常量】，$5 = 请求的房。
       // ⚠ 两者必须分开传：写成 COALESCE(room,$4)=$4 的话，room IS NULL 时 COALESCE 返回 $4、
@@ -3224,10 +3237,16 @@ router.get('/history/:game', requireAuth, async (req, res, next) => {
     // 供前端行内 commit-reveal 验证（sha256(serverSeed)==serverSeedHash）。禁出任何注单/资金字段。
     // 单V1：nonce 现随 result JSONB 落库（roundHub reveal），此处直读透出；
     // 公平链升级前的老局 result 无 nonce 字段 → ?? null（前端显「该局早于公平链升级」）。
+    // #公期化 单3（裁定②）：滚球公期局的 result 是 { revealed:[b1,b2,b3], nonce, status, v:2 }，
+    //   没有 drawResult 字段。为守住「drawResult = 各款开奖对象」这条跨款契约（前端 roadItem(dr)/
+    //   formatDraw(dr) 全按它取值），滚球分支把三球【包一层】成 { revealed:[...] } 再吐。
+    //   其余 9 款走原表达式，一个字节不改。
     const items = result.rows.map((r) => ({
       id: r.id,
       roundNo: r.round_no,
-      drawResult: r.result?.drawResult ?? null,
+      drawResult: game === 'rollingball'
+        ? (Array.isArray(r.result?.revealed) ? { revealed: r.result.revealed } : null)
+        : (r.result?.drawResult ?? null),
       serverSeedHash: r.result_hash,
       clientSeed: r.client_seed,
       serverSeed: r.server_seed,

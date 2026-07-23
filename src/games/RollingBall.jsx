@@ -15,9 +15,9 @@ import { usePlayerApi } from '../lib/playerApi'
 // #公期化 单2：滚球标准房改全服公期六段制 —— 相位/期号/倒计时/球号/封盘全读服务端 WS 七帧。
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import RollingBallPhaseBar, { PoolBadge } from './markets-ui/RollingBallPhaseBar'
-import { ballWindowOf, ballKeyOf } from './markets-ui/rollingBallPhase'
+import { ballWindowOf, ballKeyOf, isBetsLocked } from './markets-ui/rollingBallPhase'
 import { ROLLINGBALL_LABEL as RL } from '../lib/betKeyLabels'   // #S3 档位中文名单一出处（搬家回引，视觉零变）
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口 + 动效（共用）
+import { roadWindow, roadSeedTarget, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口 + 动效（共用）
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
 // X2：连开 3 球引擎 + 剩余池动态赔率 + 六段公期相位（前 19 卡无此结构）。
@@ -413,9 +413,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   // 封盘（lockedMs 缓冲）判定：服务端【不为锁帧单独发帧】（那会插进七帧序），故 live 路径靠
   //   本地派生 —— bet 帧的 endsAt 就是【下注截止】，倒计时归零即进 2s 缓冲；服务端 betsLocked
   //   只在 snapshot（中途进场）里带，两条一起兜。封盘期一律不可点不可投，与后端 409 同步。
-  const isBetSeg = /^bet[123]$/.test(ph)
-  const locked = isBetSeg && (room.betsLocked || (room.countdownMs || 0) <= 0)
-  const betting = isBetSeg && !locked
+  const locked = isBetsLocked(room)      // #单3：派生收编进 rollingBallPhase.js，与多桌只读卡同源
+  const betting = /^bet[123]$/.test(ph) && !locked
   const countdown = Math.ceil((room.countdownMs || 0) / 500)   // 原页以 0.5s tick 计数，此处折算保持下游一致
   const roundNo = room.roundNo
 
@@ -629,6 +628,53 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
     setResult(r => (r && r.win === win ? r : { idx: 2, ball: (room.drawResult?.revealed || [])[2], hits, win }))   // hits 同上：只含第 3 球裸键
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.settleInfo, roundNo, ph])
+
+  // ============ #公期化 单3 (b)：珠盘路【真历史播种】（照 #47 LineUp 成例）============
+  //
+  // 单2 是纯 live 累计（进页空盘，靠本局慢慢攒）；公期化后有了全服公共开奖流，进页即拉真历史灌满。
+  //
+  // ⚠ 滚球独有的换算（裁定③）：本款【一局落 3 颗珠】（BEADS_PER_ROUND=3，第1/2/3球顺序入列），
+  //   而 roadSeedTarget 给的是【珠数】目标。故要拉的【局数】= ceil(SEED_TARGET / 3)，
+  //   直接拿珠数当局数拉会只灌到 1/3、右侧留一大片空。其余 9 款是 1 珠/局，无此换算。
+  //
+  // ⚠ seed↔live 以 roundNo 为界：灌完把最新期号写进 roadRecordedRef，settle effect 追同一期时
+  //   `roadRecordedRef.current !== roundNo` 自然为假 → 跳过，无重复珠；期号连续故无跳局。
+  // ⚠ 首灌不是「真新珠」：freshCount 置 0，避免一次灌 160+ 颗整屏爆闪（#47 药方）。
+  // ⚠ hasRail 不做门控（#47 手机播种已解禁）：桌面手机同拉同一条 /round/history 链路。
+  // 失败静默保留种子珠；只读，钱层零碰。
+  const apiRef = useRef(api)
+  useEffect(() => { apiRef.current = api })
+  const [roadSeeded, setRoadSeeded] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    const PAGE = 50
+    const SEED_BEADS = roadSeedTarget(DESK_ROAD)                 // 目标【珠数】（比 usable 多一整列）
+    const SEED_ROUNDS = Math.ceil(SEED_BEADS / BEADS_PER_ROUND)  // → 折成【局数】（滚球 3 珠/局）
+    const PAGES = Math.ceil(SEED_ROUNDS / PAGE)
+    ;(async () => {
+      const acc = []
+      let cursor = null
+      for (let pg = 0; pg < PAGES && acc.length < SEED_ROUNDS; pg++) {
+        const cs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+        const d = await apiRef.current.apiGet(`/round/history/${G.backendId}?limit=${PAGE}${cs}`)
+        const items = d?.items || []
+        if (!items.length) break
+        acc.push(...items)
+        cursor = d?.nextCursor
+        if (!cursor) break
+      }
+      if (cancelled || !acc.length) return
+      // 接口新→旧、路珠旧→新故 reverse；每局取三球数组（与 live 侧 setRoad 存的形状完全一致）
+      const rounds = acc.slice(0, SEED_ROUNDS).reverse()
+        .map((it) => it?.drawResult?.revealed)
+        .filter((b) => Array.isArray(b) && b.length === 3)
+      if (!rounds.length) return
+      setRoad(rounds.slice(-ROUND_CAP))
+      setFreshCount(0)                       // 首灌非真新珠 → 不弹入
+      roadRecordedRef.current = acc[0]?.roundNo ?? null   // seed↔live 分界：最新一局已入账
+    })().catch(() => { /* 静默：保留种子珠 */ }).then(() => { if (!cancelled) setRoadSeeded(true) })
+    return () => { cancelled = true }
+  }, [])
 
   // 窗口一变：盘面格的持注 chip 按【本窗】复合 key 重新派生（整局总表 stakedByKey 不清，
   //   跨窗持注由 RollingBallPhaseBar 的逐球已投额呈现）。
@@ -1014,7 +1060,9 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 当前视角（桌手同一份 ROAD_VIEWS）
   // #47 收官：road 存整局 [b1,b2,b3]；先按当前视角展开成【珠】，再各自取窗口。
   //   ⚠ 展开在过窗口之前 —— 窗口按珠算整列滑动，喂局数会算错相位。
-  const viewBeads = roadBeadsOf(curView, road)
+  // #47 首帧闪治理（单3 b）：播种未到货前喂空数组 → 珠墙渲成骨架（格子/几何一个像素不变，
+  //   只是珠位留空），历史到货后一次成型；否则会先画一屏本地种子珠、真历史一到全屏跳变。
+  const viewBeads = roadSeeded ? roadBeadsOf(curView, road) : EMPTY_BALLS
   // #47 专单：手机竖版同吃列滑窗口（20×2 → 可用 36 珠）。本款 3 颗/局，N 每局 +3、mod 2 交替，
   //   故 35/36 会逐局翻转 —— 全场最快的滑动节奏，相位错在此最先暴露（轨迹见交活）。
   const beads = roadWindow(viewBeads, { cols: ROAD_COLS, rows: 6 })

@@ -46,6 +46,9 @@ import DerbyDayMarkets from '../../games/markets-ui/DerbyDayMarkets'
 import DerbyDayRoad from '../../games/markets-ui/DerbyDayRoad'
 import { RULES as DERBYDAY_RULES } from '../../games/markets-ui/derbydayRules'
 import { hitsOf as hitsOfDerby, deriveMatch as deriveMatchDerby } from '../../games/markets/derbyday'
+// #公期化 单3：滚球【只读卡】—— Markets 位放的是只读卡体（不接钱路），Road 位放迷你路珠。
+import RollingBallCardPanel from '../../games/markets-ui/RollingBallCardPanel'
+import RollingBallRoad from '../../games/markets-ui/RollingBallRoad'
 
 export const MARKETS_UI = {
   GoldenBoot: {
@@ -157,5 +160,19 @@ export const MARKETS_UI = {
     hitsOf: (dr) => (Array.isArray(dr?.home20) && Array.isArray(dr?.away20) ? hitsOfDerby(deriveMatchDerby({ home20: dr.home20, away20: dr.away20 })) : undefined),
     // 珠盘存整局 [htHome,htAway,ftHome,ftAway]（beadFor 解构用）
     roadItem: (dr) => { if (!Array.isArray(dr?.home20) || !Array.isArray(dr?.away20)) return null; const m = deriveMatchDerby({ home20: dr.home20, away20: dr.away20 }); return [m.htHome, m.htAway, m.ftHome, m.ftAway] },
+  },
+  // —— #公期化 单3：滚球【只读卡】（裁定①：卡内可投归单4）——
+  //   Markets 位 = RollingBallCardPanel（四态相位条 + 三球槽 + 「请进单页投注」轻提示，零钱路）；
+  //   Road   位 = RollingBallRoad（迷你路珠，单视角大小，播种同 /round/history 管道）；
+  //   hitsOf 不给（只读卡无中奖高亮需求，卡内也点不了盘口）；
+  //   roadItem 直取 drawResult.revealed（后端单3 已把公期三球包成 {revealed}），一局 3 珠由 Road 件展开。
+  RollingBall: {
+    Markets: RollingBallCardPanel,
+    Road: RollingBallRoad,
+    Podium: null,
+    rules: [],
+    roadTab0: 'BS',
+    roadCols: 12,
+    roadItem: (dr) => (Array.isArray(dr?.revealed) && dr.revealed.length === 3 ? dr.revealed : null),
   },
 }

@@ -6,18 +6,19 @@
 //   · 纯假值：CHIP_VALUES（筹码档）/ ONLINE_COUNT（在线数）
 import { GAME_BY_ID } from '../../gameRegistry'
 
-// —— 左栏分组（款序照 #41 指定：竞速PK 2 + 轮次彩 5 + 对决 2 = 9 款；不含 RollingBall）——
+// —— 左栏分组（竞速PK 2 + 轮次彩 6 + 对决 2 = 10 款；#公期化 单3 起含 RollingBall）——
 export const RAIL_GROUPS = [
   { key: 'pk',    label: '竞速PK', ids: ['GoldenBoot', 'SpeedGrid'] },
-  { key: 'lotto', label: '轮次彩', ids: ['HalfTime', 'NumberUp', 'HatTrick', 'WuXing', 'LineUp'] },
+  // #公期化 单3：滚球公期化后成为第 10 张桌（registry cat 本就是 lotto；rooms:[] 无快房 → 不进 SPEED_KEYS）。
+  { key: 'lotto', label: '轮次彩', ids: ['HalfTime', 'NumberUp', 'HatTrick', 'WuXing', 'LineUp', 'RollingBall'] },
   { key: 'duel',  label: '对决',   ids: ['DerbyDay', 'DominoDuel'] },
 ]
 
 // 「我的最爱」：#44 已接大厅真收藏——收藏源由 App 的 favIds 经 props 下发（前端 id），
 // GameRail 内取 favIds ∩ ALL_TABLE_IDS 渲染（街机收藏不在多桌 9 款内自动滤掉）；本文件不再存占位。
 
-export const ALL_TABLE_IDS = RAIL_GROUPS.flatMap(g => g.ids)     // 9 款全集
-export const CATALOG = ALL_TABLE_IDS                             // 目录 = 9 款
+export const ALL_TABLE_IDS = RAIL_GROUPS.flatMap(g => g.ids)     // 10 款全集（单3 起含滚球）
+export const CATALOG = ALL_TABLE_IDS                             // 目录 = 10 款
 export const DEFAULT_TABLES = CATALOG.slice(0, 4)               // 默认前 4 款上桌（#42 单9 未改：极速桌手动开）
 
 // ============================================================================
@@ -45,7 +46,7 @@ export const tableKey = (id, room) => (room ? `${id}@${room}` : id)
 // > 1 而非 > 0：单房款写的是 rooms: []，多房款写两枚。
 export const SPEED_IDS  = ALL_TABLE_IDS.filter(id => (GAME_BY_ID[id]?.rooms?.length ?? 0) > 1)
 export const SPEED_KEYS = SPEED_IDS.map(id => tableKey(id, '15s'))
-export const TABLE_KEYS = [...ALL_TABLE_IDS, ...SPEED_KEYS]      // 16 = 9 标准 + 7 极速
+export const TABLE_KEYS = [...ALL_TABLE_IDS, ...SPEED_KEYS]      // 17 = 10 标准 + 7 极速
 
 // 左栏「极速」组：排在现有三组之后（拍板），组内款序沿用 ALL_TABLE_IDS 序。
 export const SPEED_GROUP = { key: 'speed', label: '极速 15秒', ids: SPEED_KEYS }

@@ -31,3 +31,14 @@ export function phaseStateOf(i, { phase, revealed, betsLocked }) {
   if (phase === `bet${i + 1}`) return betsLocked ? 'locked' : 'betting'
   return 'wait'
 }
+
+// —— 封盘（lockedMs 缓冲）派生【单一出处】（#公期化 单3 收编）——
+// 服务端【不为锁帧单独发帧】（那会插进七帧序），故 live 路径必须本地派生：bet 帧的 endsAt 就是
+// 【下注截止】，倒计时归零即进 2s 缓冲；服务端 betsLocked 只在 snapshot（中途进场）里带，两条一起兜。
+// 单页与多桌只读卡共用本函数，禁各写各的。
+export function isBetsLocked(room) {
+  if (!room) return false
+  const ph = room.phase
+  if (!/^bet[123]$/.test(ph || '')) return false
+  return !!room.betsLocked || (room.countdownMs || 0) <= 0
+}

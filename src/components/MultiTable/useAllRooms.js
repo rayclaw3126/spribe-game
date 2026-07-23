@@ -1,7 +1,7 @@
 import { useRoundRoom } from '../../hooks/useRoundRoom'
 
 // #41 单3：多桌一次性起 9 条 /ws/rounds（每款一条，定案不改后端）。
-// #42 单9：再加 7 条 15s 快房 → 共 16 条，返回表按【复合桌键】（见 mockData 的 gameIdOf/roomOf）。
+// #42 单9：再加 7 条 15s 快房 → 16 条；#公期化 单3 再加滚球标准房 → 共 17 条，返回表按【复合桌键】（见 mockData 的 gameIdOf/roomOf）。
 // 固定条数的 useRoundRoom 调用（顺序/数量恒定，合规 rules-of-hooks），返回按桌键的 room 表。
 // WS 常驻——滚出视口只停「渲染」（TableCard 内 IO gate），不断连接。
 //
@@ -21,6 +21,9 @@ export function useAllRooms(token) {
   const LineUp     = useRoundRoom(token, 'lineup')
   const DerbyDay   = useRoundRoom(token, 'derbyday')
   const DominoDuel = useRoundRoom(token, 'dominoduel')
+  // #公期化 单3：滚球标准房（六段房）。useRoundRoom 单2 已做纯加法改造，seg 字段随帧透传；
+  //   本款无快房（registry rooms:[]），故只此一条。16 → 17 条常驻 WS。
+  const RollingBall = useRoundRoom(token, 'rollingball')
   // —— 快房 7 条（键 = `${id}@15s`）——
   const GoldenBoot15 = useRoundRoom(token, 'goldenboot', '15s')
   const SpeedGrid15  = useRoundRoom(token, 'speedgrid', '15s')
@@ -30,7 +33,7 @@ export function useAllRooms(token) {
   const WuXing15     = useRoundRoom(token, 'wuxing', '15s')
   const LineUp15     = useRoundRoom(token, 'lineup', '15s')
   return {
-    GoldenBoot, SpeedGrid, HalfTime, NumberUp, HatTrick, WuXing, LineUp, DerbyDay, DominoDuel,
+    GoldenBoot, SpeedGrid, HalfTime, NumberUp, HatTrick, WuXing, LineUp, DerbyDay, DominoDuel, RollingBall,
     'GoldenBoot@15s': GoldenBoot15,
     'SpeedGrid@15s': SpeedGrid15,
     'HalfTime@15s': HalfTime15,
