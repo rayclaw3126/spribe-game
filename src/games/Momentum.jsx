@@ -634,6 +634,11 @@ export default function Momentum({ serverBalance, setServerBalance, playerToken,
         {labeledBay(0)}
         {labeledBay(1)}
       </div>
+      {/* #B3 刀1：手机也挂投注流「你」行（照 Aviator 手机成例 :1051，maxHeight 而非 fill）。
+          桌面挂点 :603 不动；displayBets 已含「你」行；BetFeed 零碰只传 props。 */}
+      <div style={{ marginTop: 14 }}>
+        <BetFeed bets={displayBets} myBets={[]} online={914} maxHeight={300} />
+      </div>
     </GameLayout>
   )
 }

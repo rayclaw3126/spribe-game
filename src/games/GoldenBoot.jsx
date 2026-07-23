@@ -68,6 +68,11 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   const isDesk = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
   // 单S5：≥1280 有右栏、中栏变窄 → 舞台/盘区/珠盘/下注条同 maxWidth 居中，下注条与盘口板左右沿对齐。门控 ≥1280，<1280 逐位不变。
   const hasRail = useMediaQuery('(min-width: 1280px)')
+  // #B3 刀2·裁定：subRow 插槽在 1280 档是 GameTopBar 物理宽（实测 75px，铁律不破/不换行/不缩噪点车图）。
+  //   窄档(1280–1439)走 inline 形态（多桌验过的现成货）：冠亚必显、季军放不下则 ellipsis 隐没
+  //   —— 同「场馆名窄档护钮隐没=预期」7-17 判例（顶栏是速览位，前三全貌开奖区本有）。
+  //   ≥1440 中栏够宽 → default 三名照旧全显，不误伤；<1280(无右栏/手机)中栏宽也走 default。
+  const narrowSubRow = useMediaQuery('(min-width: 1280px) and (max-width: 1439px)')
   // #47 三批·对表硬指标：660→800。四区的 maxWidth 全在 hasRail 分支内，手机(390)永不进 → 天然零感。
   const RAIL_MAXW = 800
   // desk mode narrows the card by the 340px feed — below 1200px viewport the
@@ -354,7 +359,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
       color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{phaseChip.text}</span>
   )
-  const subRowNode = <GoldenBootPodium order={lastRace.order} isMobile={isMobile} />   // 上局前三名信息条（切件）
+  const subRowNode = <GoldenBootPodium order={lastRace.order} isMobile={isMobile} inline={narrowSubRow} />   // 上局前三名信息条（切件）
   // #42 速度 tab 条（形态A，抽件渲染）：色值传本款 tokens，件内零硬编码主题色。
   const roomTabs = renderRoomTabs({ tokens: { sel: GOLDENBOOT.sel, strip: GOLDENBOOT.strip, dim: GOLDENBOOT.dim }, isMobile })
 
