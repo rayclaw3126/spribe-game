@@ -1,3 +1,4 @@
+import { phaseKindOf, isTimedPhase } from './roomPhase'
 import { MULTI_DARK as M, COLORS } from '../shell/tokens'
 import { RAIL_GROUPS, SPEED_GROUP, ALL_TABLE_IDS, gameIdOf, nameOf, nameOfBackend } from './mockData'
 
@@ -30,9 +31,11 @@ function TopBoard({ top }) {
 // 断线（room.connected=false）相位点转灰；恢复自动回正（纯显示，退避重连在 useRoundRoom）
 const dotColor = (room) => (
   room && room.connected === false ? M.txtMute
-    : room?.phase === 'betting' ? M.betting
-      : room?.phase === 'locked' ? M.locked
-        : (room?.phase === 'drawn' || room?.phase === 'settled') ? M.drawing
+    // #单4 (b)：归一走 phaseKindOf —— 六段房（滚球）的 bet1/draw2/settle 等名字在这里才认得出，
+    //   否则全落末尾兜底色（灰），左栏滚球那行相位点永远不亮。
+    : phaseKindOf(room) === 'betting' ? M.betting
+      : phaseKindOf(room) === 'locked' ? M.locked
+        : (phaseKindOf(room) === 'drawing' || phaseKindOf(room) === 'settled') ? M.drawing
           : M.txtMute
 )
 // 右侧小字：betting/idle 走倒计时 mm:ss，其余走相位短字
@@ -42,9 +45,13 @@ const fmtMs = (ms) => {
 }
 function railTail(room) {
   if (!room) return '…'
-  if (room.phase === 'betting' || room.phase === 'idle') return room.countdownMs > 0 ? fmtMs(room.countdownMs) : '—'
-  if (room.phase === 'locked') return '封'
-  if (room.phase === 'drawn' || room.phase === 'settled') return '开'
+  // #单4 (b)：六段房每一段都有倒计时（含 settle 展示窗），故 isTimedPhase 归一判定；
+  //   封盘/开球中各自出「封」「开」，与三跳链视觉同款。
+  const kind = phaseKindOf(room)
+  if (kind === 'locked') return '封'
+  if (kind === 'drawing') return '开'
+  if (isTimedPhase(room)) return room.countdownMs > 0 ? fmtMs(room.countdownMs) : '—'
+  if (kind === 'settled') return '开'
   return '…'
 }
 
@@ -65,7 +72,7 @@ function RailRow({ id, room, active, star, onSelect }) {
       <span style={{
         flex: '0 0 auto', fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
         // 最后 5 秒（betting/idle 且 ≤5000ms）转红
-        color: room && (room.phase === 'betting' || room.phase === 'idle') && room.countdownMs > 0 && room.countdownMs <= 5000 ? M.danger : M.txtMute,
+        color: room && isTimedPhase(room) && room.countdownMs > 0 && room.countdownMs <= 5000 ? M.danger : M.txtMute,
       }}>{railTail(room)}</span>
     </button>
   )
