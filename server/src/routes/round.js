@@ -3004,6 +3004,12 @@ const TERMINAL_STATUSES = new Set(['settled', 'cashed', 'bust']);
 function safeResultForView(game, status, result) {
   if (!result) return result;
   if (TERMINAL_STATUSES.has(status)) return result;
+  // #公期化 单1a 闸2：全服公期局（result.v===2，滚球六段制）非终局【整个 result 字段都不返】。
+  //   为什么比白名单更狠：公期局是全场共享的一局，任何一个玩家提前多知道半颗球都是全场性事故；
+  //   库里 result 本就只含已开球（roundHub persistRevealed 逐球落，裁定②），这层是纵深防御第二道。
+  //   ⚠ 只掐 v===2 的公期局：老 per-player 滚球局（无 v 字段，status='playing'）照走下面的白名单，
+  //     进行中局面照常显示，零回归；终局验公平走上面 TERMINAL_STATUSES 全返，也照旧。
+  if (result.v === 2) return null;
   const allow = PLAYING_RESULT_WHITELIST[game];
   if (!allow) return null;
   const out = {};

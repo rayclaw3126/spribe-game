@@ -96,10 +96,81 @@ export function remainingPool(revealed) {
   return pool;
 }
 
+// #公期化 A+：一把 rng 连抽整局三球（无放回），一次生成 [b1,b2,b3]。
+//   与 drawBall 逐球现派逐位等价——都是「从当前剩余池 floor(U×len) 抽」，只是这里一把 rng 连抽三次、
+//   一次出全（供全服公期局建局时承诺整局）。验公平：玩家用同一 (serverSeed,clientSeed,nonce) 造同一把
+//   rng 连抽三球即复现。⚠ 无放回：每抽一球即从剩余池剔除，第 2/3 球的池随前球演化（顺序铁律）。
+export function drawThree(rng) {
+  const balls = [];
+  for (let i = 0; i < 3; i++) balls.push(drawBall(remainingPool(balls), rng));
+  return balls;
+}
+
 // 合法盘口 key 校验：num-1..75 / GROUPS 键 / COMBO 键。
 export function isValidKey(key) {
   if (key.startsWith('num-')) { const N = Number(key.slice(4)); return Number.isInteger(N) && N >= 1 && N <= 75; }
   return Object.prototype.hasOwnProperty.call(GROUPS, key) || Object.prototype.hasOwnProperty.call(COMBO, key);
+}
+
+// ============ #公期化 单1a：全服公期局的「球序命名空间」复合 key ============
+//
+// 裁定①：公期六段制下同一局有三个加注窗，同一个盘口在不同球上是【不同注】——押第 2 球红
+//   与押第 3 球红既不同赔率（池随前球演化）也不同结果。故公期局注单 key 一律带球序前缀：
+//   `b1:red` / `b2:big-odd` / `b3:num-42`。hits / pushes / oddsByKey 全按复合 key 走，
+//   settleRound 侧只多一行 `oddsByKey?.[key] ?? engine.MARKETS[key].odds`。
+//
+// ⚠ 老 per-player 局（round.js /rollingball/play）用【裸 key】+ 每球一行 bets，不带前缀，
+//   两套 key 空间天然不撞（老局 selections 里永不出现 `b\d:`），互不干扰。
+const BALL_KEY_RE = /^b([123]):(.+)$/;
+
+// 复合 key → { ballIdx(0-2), marketKey }；非法/裸 key → null。
+export function parseBallKey(key) {
+  const m = typeof key === 'string' ? BALL_KEY_RE.exec(key) : null;
+  if (!m) return null;
+  const marketKey = m[2];
+  if (!isValidKey(marketKey)) return null;
+  return { ballIdx: Number(m[1]) - 1, marketKey };
+}
+export function isValidBallKey(key) { return parseBallKey(key) !== null; }
+export function ballKeyOf(ballIdx, marketKey) { return `b${ballIdx + 1}:${marketKey}`; }
+
+// 全盘口 key 表（裸 key）：num-1..75 + GROUPS 键 + COMBO 键 = 93 个。
+export const ALL_MARKET_KEYS = [
+  ...Array.from({ length: 75 }, (_, i) => `num-${i + 1}`),
+  ...Object.keys(GROUPS),
+  ...Object.keys(COMBO),
+];
+
+// 滚球无 push（每球必开，逐 key 只有中/不中两态）。
+export const HAS_PUSH = false;
+
+// 整局命中汇总：balls = 【已开球】数组（≤3，逐球揭示中就是前 k 颗），返回复合 key 口径的
+//   { hits, pushes, oddsByKey }。
+//   · betKeys 省略 → 枚举全部 93 盘口 × 已开球数（≤279 条，纯内存，无需先查 bets）。
+//   · 赔率逐球取 oddsFor(marketKey, ballIdx, 该球开出前的已开号)，与老 per-player 逐球现派
+//     【同一函数同一口径】——禁在调用方手抄第二份赔率。
+//   · 该球【尚未开出】(ballIdx >= balls.length) → 既不进 hits 也不进 oddsByKey：残局补结时
+//     缺球注天然判不出，由上层「满 3 球才补结、否则退 void」兜住（裁定②/④）。
+//   · odds 为 null（号已开/池耗尽，不可押）→ 同样跳过；该 key 无放回下也不可能命中。
+export function hitsForBalls(balls, betKeys) {
+  const hits = new Set();
+  const pushes = new Set();   // 恒空：HAS_PUSH=false
+  const oddsByKey = {};
+  const keys = betKeys
+    ? [...betKeys]
+    : balls.flatMap((_, i) => ALL_MARKET_KEYS.map((k) => ballKeyOf(i, k)));
+  for (const key of keys) {
+    const p = parseBallKey(key);
+    if (!p) continue;
+    const { ballIdx, marketKey } = p;
+    if (ballIdx >= balls.length) continue;       // 未开球：不判不赔
+    const before = balls.slice(0, ballIdx);      // 本球开出前的已开号（无放回演化）
+    const odds = oddsFor(marketKey, ballIdx, before);
+    if (odds == null) continue;                  // 不可押
+    oddsByKey[key] = odds;
+    if (hitOf(marketKey, balls[ballIdx])) hits.add(key);
+  }
+  return { hits, pushes, oddsByKey };
 }
 
 export { isRed, R_BS, R_COMBO, R_SINGLE };

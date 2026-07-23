@@ -27,6 +27,8 @@ import * as goldenBootEngine from '../game/goldenBoot.js';
 import * as halfTimeEngine from '../game/halfTime.js';
 import * as wuXingEngine from '../game/wuXing.js';
 import * as lineUpEngine from '../game/lineUp.js';
+// #公期化 单1a：滚球从 per-player 三球流改全服公期六段制，本文件是它的相位机宿主。
+import * as rollingBallEngine from '../game/rollingBall.js';
 // 单V2：9 款开奖派生 spin 抽到单一出处 roundSpins.js（本 ROOM_ENGINES.spin 回引它）；
 // 前端 LocalVerify 同 import 同一份——禁两处手抄。此为 import 等价搬家，结算逻辑零变。
 import { ROUND_SPINS } from '../game/roundSpins.js';
@@ -125,7 +127,39 @@ const ROOM_ENGINES = {
     hasPush: lineUpEngine.HAS_PUSH,
     spin: ROUND_SPINS.lineup,
   },
+  // —— #公期化 单1a：滚球是本表里【唯一】的六段房（segMode:'triple'），接口与上面 9 款不同 ——
+  //    · 无 spin：整局三球在【建局那一刻】一把 rng 一次生成（drawAll），逐段揭示，不是开奖时才抽。
+  //    · 无 MARKETS：赔率是动态的（随剩余池演化），由 hitsForBalls 逐球现算成 oddsByKey 带出来，
+  //      settleRound 侧 `oddsByKey?.[key] ?? engine.MARKETS[key].odds` 这一行接住——本 engine
+  //      永远走左支，故 MARKETS 缺席不触发（?? 左值非空即短路，不求值右侧）。
+  //    · isValidMarketKey 用【复合 key】口径 isValidBallKey（`b2:red`），见 rollingBall.js 裁定①。
+  rollingball: {
+    prefix: 'RB',
+    segMode: 'triple',
+    isValidMarketKey: rollingBallEngine.isValidBallKey,
+    hasPush: rollingBallEngine.HAS_PUSH,
+    drawAll: rollingBallEngine.drawThree,
+    hitsForBalls: rollingBallEngine.hitsForBalls,
+  },
 };
+
+// —— #公期化 单1a：滚球六段表（段仍六个，帧七个：settle 是 draw3 的尾窗，不是新段）——
+//
+// bet1 15s → draw1 5s → bet2 8s → draw2 5s → bet3 8s → draw3 5s(+settle 4s) = 50s/局。
+// ⚠ 裁定②（locked 缓冲）：每个 bet 段的 ms 是【含尾部 lockedMs 的总长】——下注窗开
+//   `ms - lockedMs`，然后静默锁 lockedMs 再开球。故 bet1 实开 13s / bet2·bet3 实开 6s，
+//   总长仍是上表的 50s（若把 locked 加在段外，一局会变 56s，与定案的「约 50s」不符）。
+//   锁定期【不单独发帧】——发了帧序就成 bet1→locked→draw1→…，与验收断言⑤的七帧序不符；
+//   锁定态靠 bet 帧自带的 endsAt(下注截止)/segEndsAt(开球时刻)/lockedMs 三字段自证，
+//   服务端侧由 room.betsLocked 承载（单1b 的下注端点读它拒单）。
+const RB_SEGMENTS = [
+  { phase: 'bet1', ms: 15000, draw: null },
+  { phase: 'draw1', ms: 5000, draw: 0 },
+  { phase: 'bet2', ms: 8000, draw: null },
+  { phase: 'draw2', ms: 5000, draw: 1 },
+  { phase: 'bet3', ms: 8000, draw: null },
+  { phase: 'draw3', ms: 5000, draw: 2, terminal: true },   // 尾接 settle 4s（settleMs）
+];
 
 // ============ #42 单1：房配置（一款可多房）============
 //
@@ -174,6 +208,15 @@ const ROOM_CONFIGS = [
   // —— #42 单6 铺量：五行 / 首发阵容（idle 各继承 5500，同上方注释）——
   { key: 'wuxing:15s', gameName: 'wuxing', room: '15s', prefix: 'WX15', timings: { bettingMs: 15000 } },
   { key: 'lineup:15s', gameName: 'lineup', room: '15s', prefix: 'LU15', timings: { bettingMs: 15000 } },
+  // —— #公期化 单1a：滚球标准房（本表【唯一】带 segments 的房）——
+  //    带 segments ⇒ 走六段相位机；上面 16 房无 segments ⇒ 原 betting→locked→drawn 三跳链
+  //    一个字节不动（裁定④「六段只对滚球房生效」的落点就是这个字段的有无）。
+  //    timings：bettingMs/idleMs 对本房无意义（节奏由 RB_SEGMENTS 定），只用 lockedMs(2000，
+  //    引 DEFAULT_TIMINGS 现成常量，禁新造数字) + settleMs(4000，draw3 尾部结算展示窗)。
+  {
+    key: 'rollingball', gameName: 'rollingball', room: null, prefix: 'RB',
+    timings: { settleMs: 4000 }, segments: RB_SEGMENTS,
+  },
 ];
 
 // 某款的所有房 key（下注相位闸按 roundId 在该款所有房里定位当期房用）
@@ -191,9 +234,16 @@ let started = false;
 
 // 私密字段（serverSeed）只活在 room 内存里，reveal 前不出现在任何广播/快照/日志。
 function makeRoom(cfg) {
-  const { key, gameName, room, prefix, timings } = cfg;
+  const { key, gameName, room, prefix, timings, segments } = cfg;
   const engine = ROOM_ENGINES[gameName];
   return {
+    // #公期化 单1a：六段房专属字段（segments=null 的 16 房这几项恒为初值，从不被读）。
+    segments: segments || null,   // 有 = 六段相位机；无 = 原三跳链
+    segIdx: 0,                    // 当前段下标（0-5）
+    balls: [],                    // 整局三球：建局一次生成，【只活在内存】，逐球揭示
+    revealed: [],                 // 已揭示球（闸1 的唯一出口：广播/快照只许读这个）
+    betsLocked: false,            // bet 段尾部 lockedMs 缓冲期 = true（单1b 下注端点读它拒单）
+    segEndsAt: null,              // 当前段结束时刻（bet 段 = 开球时刻，比 endsAt 晚 lockedMs）
     roomKey: key,
     gameName,
     room,                                   // 落 rounds.room 的值（null = 该款标准房）
@@ -277,6 +327,11 @@ async function runBetting(room) {
   room.serverSeedHash = serverSeedHash;
   room.drawResult = null;
   room.roundId = null;
+  // 六段房逐局重置（16 房这三行是无害空写）
+  room.segIdx = 0;
+  room.balls = [];
+  room.revealed = [];
+  room.betsLocked = false;
 
   // 共享 round 行：betting 阶段先落，bets 才有 round_id 可挂。
   // 只落承诺 result_hash + client_seed；server_seed 与 result 一律 NULL（drawn 才 reveal）。
@@ -296,6 +351,16 @@ async function runBetting(room) {
     room.phase = 'idle';
     room.endsAt = Date.now() + room.timings.idleMs;
     room.timer = setTimeout(() => { room.nonce += 1; runBetting(room).catch(logLoopErr(roomKey)); }, room.timings.idleMs);
+    return;
+  }
+
+  // ============ #公期化 单1a：六段分叉点（全文件唯一一处）============
+  // 有 segments ⇒ 建局即一把 rng 一次生成整局三球（只入内存，DB 只有 result_hash 承诺），
+  //   然后交给 runSegment 逐段推进；下面的「广播 betting + setTimeout(runLocked)」原三跳链
+  //   属于其余 16 房，一个字节不动。
+  if (room.segments) {
+    room.balls = engine.drawAll(makeSeededRng(serverSeed, clientSeed, nonce));
+    runSegment(room);
     return;
   }
 
@@ -376,11 +441,164 @@ async function runDrawn(room) {
   runIdle(room);
 }
 
+// ============ #公期化 单1a：六段相位机（只跑带 segments 的房 = 滚球标准房）============
+//
+// 七帧一局：bet1 → draw1 → bet2 → draw2 → bet3 → draw3 → settle（六段，settle 是 draw3 尾窗）。
+//
+// 闸1（WS 增量，防先知）：整局三球建局即定但【只活在 room.balls 内存】；对外任何一帧/快照只许读
+//   room.revealed（已揭示球）。draw_k 帧只带第 k 球，bet_{k+1} 帧只带累加的已开球，
+//   【全量三球 + serverSeed 明文只在 settle 帧落地】。写广播时只要不碰 room.balls 就不会漏。
+//
+// 闸2 的库侧（裁定②）：result 逐球落库——draw_k 落 revealed 的前 k 颗，任何时刻 DB 里都不含未开球。
+//   故「非终局 result 只含已开球」是写入侧的天然不变量，不靠读侧遮挡。
+function runSegment(room) {
+  const seg = room.segments[room.segIdx];
+  if (!seg) { console.error(`[roundHub:${room.roomKey}] segIdx ${room.segIdx} 越界，回落 idle`); return runIdle(room); }
+  if (seg.draw == null) return runBetSegment(room, seg);
+  return runDrawSegment(room, seg).catch(logLoopErr(room.roomKey));
+}
+
+// —— bet 段：开窗 (ms - lockedMs) → 静默锁 lockedMs（不发帧）→ 推进到下一段开球 ——
+function runBetSegment(room, seg) {
+  const openMs = Math.max(0, seg.ms - room.timings.lockedMs);
+  room.phase = seg.phase;
+  room.betsLocked = false;
+  room.endsAt = Date.now() + openMs;                        // 下注截止
+  room.segEndsAt = room.endsAt + room.timings.lockedMs;     // 开球时刻
+  broadcast(room, {
+    type: 'phase',
+    phase: seg.phase,
+    segIdx: room.segIdx,
+    roundNo: room.roundNo,
+    roundId: room.roundId,
+    endsAt: room.endsAt,
+    durationMs: openMs,
+    lockedMs: room.timings.lockedMs,
+    segEndsAt: room.segEndsAt,
+    // 闸1：只累加【已揭示】球（bet1 恒为空数组）
+    revealed: [...room.revealed],
+    // 承诺三要素只在开局帧给一次（与三跳链的 betting 帧同口径）
+    ...(room.segIdx === 0
+      ? { serverSeedHash: room.serverSeedHash, clientSeed: room.clientSeed, nonce: room.nonce }
+      : {}),
+  });
+  room.timer = setTimeout(() => {
+    // 裁定②：窗关后 lockedMs 缓冲——给「窗末刻刚通过相位判定的 HTTP 下注」留提交窗口，
+    // 保证任何被接受的注都在开球之前落库（与三跳链 runLocked 同一理由、同一常量）。
+    room.betsLocked = true;
+    room.timer = setTimeout(() => { room.segIdx += 1; runSegment(room); }, room.timings.lockedMs);
+  }, openMs);
+}
+
+// —— draw 段：揭第 k 球 → 逐球落库（只落已开）→ 只广播该球 → 停 ms → 推进 ——
+//    terminal(draw3)：同批落全量三球 + server_seed 明文 + status='drawn'，但【帧里不给】；
+//    5s 后进 settle。
+async function runDrawSegment(room, seg) {
+  const k = seg.draw;
+  room.phase = seg.phase;
+  room.betsLocked = true;
+  room.revealed = room.balls.slice(0, k + 1);
+  room.endsAt = Date.now() + seg.ms;
+  room.segEndsAt = room.endsAt;
+
+  await persistRevealed(room, !!seg.terminal);
+
+  broadcast(room, {
+    type: 'phase',
+    phase: seg.phase,
+    segIdx: room.segIdx,
+    roundNo: room.roundNo,
+    roundId: room.roundId,
+    endsAt: room.endsAt,
+    durationMs: seg.ms,
+    ball: room.balls[k],      // 闸1：本帧只给这一球
+    ballIdx: k,
+    revealed: [...room.revealed],
+  });
+
+  room.timer = setTimeout(() => {
+    if (seg.terminal) { runSettle(room).catch(logLoopErr(room.roomKey)); return; }
+    room.segIdx += 1;
+    runSegment(room);
+  }, seg.ms);
+}
+
+// —— 逐球落库：result 只含已开球（裁定②的写入侧不变量）——
+//    非终局：只 UPDATE result，rounds.status 留 'betting'（残局恢复据此退 void）。
+//    终局：同批落 server_seed 明文 + status='drawn'（三球已全部广播，reveal 不再有未来信息）；
+//         若此刻崩溃，恢复扫到「drawn + 满 3 球」→ 补结（裁定②/④）。
+async function persistRevealed(room, terminal) {
+  const result = {
+    revealed: [...room.revealed],
+    nonce: room.nonce,
+    status: terminal ? 'drawn' : 'playing',
+    v: 2,   // 公期局标记（老 per-player 局无此字段），供闸2/单1c 双路径区分
+  };
+  try {
+    if (terminal) {
+      await query(
+        `UPDATE rounds SET result = $1::jsonb, server_seed = $2, status = 'drawn' WHERE id = $3`,
+        [JSON.stringify(result), room.serverSeed, room.roundId],
+      );
+    } else {
+      await query(`UPDATE rounds SET result = $1::jsonb WHERE id = $2`, [JSON.stringify(result), room.roundId]);
+    }
+  } catch (err) {
+    console.error(`[roundHub:${room.roomKey}] 第 ${room.revealed.length} 球落库失败：`, err.message);
+  }
+}
+
+// —— settle（draw3 尾窗 4s）：全量 result + serverSeed 明文只在此帧落地 → 结算全场 → 下一期 ——
+async function runSettle(room) {
+  const { engine, roomKey } = room;
+  room.phase = 'settle';
+  room.betsLocked = true;
+  room.drawResult = { revealed: [...room.balls] };
+
+  // 逐球现算命中 + 动态赔率（复合 key 口径，单一出处 rollingBall.hitsForBalls）
+  const { hits, pushes, oddsByKey } = engine.hitsForBalls(room.balls);
+
+  room.endsAt = Date.now() + room.timings.settleMs;
+  room.segEndsAt = room.endsAt;
+  broadcast(room, {
+    type: 'phase',
+    phase: 'settle',
+    segIdx: room.segIdx,
+    roundNo: room.roundNo,
+    roundId: room.roundId,
+    endsAt: room.endsAt,
+    durationMs: room.timings.settleMs,
+    result: { revealed: [...room.balls], balls: [...room.balls], status: 'settled' },
+    serverSeed: room.serverSeed,   // 明文只此一帧
+  });
+
+  await settleRound(room, hits, pushes, oddsByKey);
+
+  try {
+    await query(
+      `UPDATE rounds SET result = $1::jsonb, status = 'settled' WHERE id = $2`,
+      [JSON.stringify({ revealed: [...room.balls], nonce: room.nonce, status: 'settled', v: 2 }), room.roundId],
+    );
+  } catch (err) {
+    console.error(`[roundHub:${roomKey}] settled 落库失败：`, err.message);
+  }
+
+  // settle 窗本身就是「结算展示」停顿（= 三跳链的 idle 之于开奖动画），故不再叠 runIdle，
+  // 一局恰好 50s、恰好七帧。
+  room.timer = setTimeout(() => {
+    room.nonce += 1;
+    runBetting(room).catch(logLoopErr(roomKey));
+  }, room.timings.settleMs);
+}
+
 // —— 结算：SELECT 本期全部 pending bets → 逐玩家逐 key 三态 → 赢/push credit、全输 distributeLoss ——
 // 幂等/恰好一次：每玩家事务内先「守 pending 翻转 outcome」（rowCount=0 即已结算，跳过），
 // 再 credit（幂等键 rgs-<roundId>-<playerId>-<betId>，#P0 后为每注行粒度；ledger 唯一键兜底）。
 // 单玩家失败记日志继续结其他人。
-async function settleRound(room, hits, pushes) {
+// #公期化 单1a 唯一改动：新增可选第 4 参 oddsByKey（滚球动态赔率），三跳链 16 房照旧传 3 参
+// （oddsByKey === undefined）。credit / 幂等键 rgs-<roundId>-<playerId>-<betId> / distributeLoss /
+// cap 全路径一个字节不动。
+async function settleRound(room, hits, pushes, oddsByKey) {
   const { engine, gameName, roundId, roomKey } = room;
   const maxPayout = String(maxPayoutFor(gameName));
 
@@ -409,7 +627,9 @@ async function settleRound(room, hits, pushes) {
       const a = Number(amt);
       if (!engine.isValidMarketKey(key)) continue; // 理论不达（下注端点已校验），防御跳过
       if (hits.has(key)) {
-        const p = round2(a * engine.MARKETS[key].odds);
+        // 赔率来源：滚球走 oddsByKey（逐球现算，随剩余池演化）；其余 16 房走静态 MARKETS 表。
+        // ⚠ ?? 左值非空即短路 → 滚球 engine 无 MARKETS 也不会触发右侧求值。
+        const p = round2(a * (oddsByKey?.[key] ?? engine.MARKETS[key].odds));
         yourResult.push({ key, outcome: 'hit', payout: p });
         rawTotalPayout += p;
       } else if (engine.hasPush && pushes.has(key)) {
@@ -531,6 +751,22 @@ function buildSnapshot(room) {
     serverSeedHash: room.serverSeedHash,
     nonce: room.nonce,
   };
+  // #公期化 单1a 闸1（快照侧）：中途进场/重连【只给已揭示球】——否则绕开 WS 增量就能偷看未开球。
+  //   出口只有 room.revealed 一个，room.balls 在此分支里从不被读（settle 段的全量走 drawResult，
+  //   那时三球早已逐帧公开）。
+  if (room.segments) {
+    snap.segIdx = room.segIdx;
+    snap.revealed = [...room.revealed];
+    snap.betsLocked = room.betsLocked;
+    snap.endsAt = room.endsAt;
+    snap.segEndsAt = room.segEndsAt;
+    snap.remainingMs = Math.max(0, (room.endsAt || 0) - Date.now());
+    if (room.phase === 'settle') {
+      snap.result = room.drawResult;     // 三球已全公开
+      snap.serverSeed = room.serverSeed; // 已 reveal
+    }
+    return snap;
+  }
   if (room.phase === 'betting' || room.phase === 'locked' || room.phase === 'idle') {
     snap.endsAt = room.endsAt;
     snap.remainingMs = Math.max(0, (room.endsAt || 0) - Date.now());
@@ -562,7 +798,19 @@ async function fetchPlayerBalance(playerId) {
 export function getRoomState(roomKey) {
   const room = rooms.get(roomKey);
   if (!room) return null;
-  return { phase: room.phase, roundNo: room.roundNo, roundId: room.roundId, endsAt: room.endsAt, roomKey: room.roomKey };
+  // #公期化 单1a：六段房多带三字段（segMode/seg 下标 / betsLocked），供单1b 的下注端点判
+  //   「当前是哪个加注窗、是否已进 locked 缓冲」；16 房这三项恒为 undefined/null/false，读侧无感。
+  return {
+    phase: room.phase,
+    roundNo: room.roundNo,
+    roundId: room.roundId,
+    endsAt: room.endsAt,
+    roomKey: room.roomKey,
+    segMode: room.engine.segMode || null,
+    segIdx: room.segments ? room.segIdx : null,
+    betsLocked: room.betsLocked,
+    revealed: room.segments ? [...room.revealed] : null,
+  };
 }
 
 // #42：按 roundId 在【该款所有房】里定位「当期且正在 betting」的那一房。
@@ -636,17 +884,29 @@ function roomNameOf(req) {
 // 复算走 settleDerive 单一出处（与 scripts/repair_stuck_bets.mjs 同一份），禁手写第二份判定。
 // 韧性：整体 try/catch 兜底，单轮失败记日志继续下一轮，恢复失败绝不阻断排期器启动
 //   （失败的轮下次启动会再被扫到——幂等键保证重试安全）。
-async function recoverOrphans() {
+//
+// #公期化 单1a 第三条路径（裁定②/④）：滚球公期局。判据【只看球数，不看状态】——
+//   result 满 3 球 → 补结（走 hitsForBalls + oddsFor 独立复算分支，settleDerive 的 ENGINES
+//   里没有 rollingball，它那套 drawResult/静态 MARKETS 口径对滚球根本不适用）；
+//   result <3 球或 NULL → 全注退款 + 轮置 void。宁退不错结。
+//   ⚠ 老 per-player 滚球局不受影响：它们的 status 是 'playing'/'settled'，压根不在
+//     `status IN ('betting','drawn')` 的扫描面里（实测库中 30 playing / 7 settled / 0 betting|drawn）。
+//
+// opts.onlyRoundIds：仅供 smoke 定向验残局（把恢复面钉死在自己造的那几轮上，不误伤同库在跑的
+//   16 房活局）。生产调用零参数 → 走全量，行为与改动前逐字节一致。
+export async function recoverOrphans(opts = {}) {
+  const { onlyRoundIds = null } = opts;
   let orphans;
   try {
     orphans = (await query(
-      `SELECT id, game, round_no, status, result FROM rounds
+      `SELECT id, game, player_id, round_no, status, result FROM rounds
         WHERE game = ANY($1) AND status IN ('betting', 'drawn')
+          AND ($2::bigint[] IS NULL OR id = ANY($2::bigint[]))
         ORDER BY id`,
       // #42：按【款】扫，不是按房 key —— ROOMS_TO_START 现在装的是 roomKey（含 'speedgrid:15s'），
       //   拿它查 rounds.game 一条都扫不到（game 列恒为裸款名）。GAMES_TO_RECOVER 是去重后的款名，
       //   两房的孤儿一起收；复算走 settleDerive 按 game 命中引擎，房维度对恢复天然无感。
-      [GAMES_TO_RECOVER],
+      [GAMES_TO_RECOVER, onlyRoundIds],
     )).rows;
   } catch (err) {
     console.error('[roundHub:recover] 扫孤儿轮失败（跳过恢复，不阻断启动）：', err.message);
@@ -664,7 +924,8 @@ async function recoverOrphans() {
         `SELECT id, player_id, amount, selections FROM bets WHERE round_id = $1 AND outcome = 'pending'`,
         [round.id],
       )).rows;
-      if (round.status === 'drawn') await recoverDrawnRound(round, bets, stat);
+      if (round.game === 'rollingball') await recoverRollingBallRound(round, bets, stat);
+      else if (round.status === 'drawn') await recoverDrawnRound(round, bets, stat);
       else await recoverBettingRound(round, bets, stat);
     } catch (err) {
       stat.err++;
@@ -746,7 +1007,73 @@ async function recoverBettingRound(round, bets, stat) {
     }
   }
   if (bets.length === 0) stat.voidEmpty++;
-  await query(`UPDATE rounds SET status = 'void' WHERE id = $1 AND status = 'betting'`, [round.id]);
+  // 置 void 时按【本轮被扫到的那个状态】收口：既有 16 房走到这里恒为 'betting'（语义等价，
+  // 逐字节无变化）；滚球缺球残局可能是 'drawn'（三球没写全就断电），也必须退得掉——
+  // 裁定②「<3 球或 NULL 一律退 void」，宁退不错结。
+  await query(`UPDATE rounds SET status = 'void' WHERE id = $1 AND status = $2`, [round.id, round.status]);
+}
+
+// c) 滚球公期局（裁定②/④）：判据只看球数，不看状态。
+//    满 3 球 → 独立复算补结；<3 球或 NULL → 走 b) 全注退款置 void。
+//    ⚠ 为什么不走 settleDerive.computeDetail：那份是「drawResult + 静态 MARKETS 表」口径，
+//      滚球既无 drawResult（用 revealed 三球）也无 MARKETS（赔率随剩余池逐球演化）。
+//      判定与赔率仍走单一出处 rollingBall.hitsForBalls / oddsFor，禁在此手抄第二份公式；
+//      三态循环的形状与 settleRound 一致（与 computeDetail 之于 settleRound 同样的对照关系）。
+async function recoverRollingBallRound(round, bets, stat) {
+  const revealed = Array.isArray(round.result?.revealed) ? round.result.revealed : [];
+  if (revealed.length < 3) {
+    console.log(`[roundHub:recover] ⚠ 滚球残局 round#${round.id} ${round.round_no || '(无期号)'} 只开出 ${revealed.length}/3 球 → 全注退款置 void（宁退不错结）`);
+    return recoverBettingRound(round, bets, stat);
+  }
+  const { hits, oddsByKey } = rollingBallEngine.hitsForBalls(revealed);
+  for (const bet of bets) {
+    const yourResult = [];
+    let raw = 0;
+    for (const [key, amt] of Object.entries(bet.selections || {})) {
+      const a = Number(amt);
+      if (!rollingBallEngine.isValidBallKey(key)) continue;   // 防御：非复合 key 不结
+      const odds = oddsByKey[key];
+      if (hits.has(key) && odds != null) {
+        const p = round2(a * odds);
+        yourResult.push({ key, outcome: 'hit', payout: p });
+        raw += p;
+      } else {
+        yourResult.push({ key, outcome: 'lose', payout: 0 });
+      }
+    }
+    const capped = await capPayout(round.game, raw);
+    const win = Number(capped) > 0;
+    const done = await withTransaction(async (client) => {
+      const flip = await client.query(
+        `UPDATE bets SET outcome = $2, settle_detail = $3 WHERE id = $1 AND outcome = 'pending' RETURNING id`,
+        [bet.id, win ? 'win' : 'lose', JSON.stringify(yourResult)],
+      );
+      if (flip.rowCount === 0) return false;   // 已被正常结算，跳过，绝不重复派彩
+      if (win) {
+        await credit(client, {
+          playerId: bet.player_id,
+          amount: capped,
+          type: `${round.game}_payout`,
+          idempotencyKey: `rgs-${round.id}-${bet.player_id}-${bet.id}`,   // 原键：与 settleRound 撞键即证明已派
+          roundId: round.id,
+        });
+      } else {
+        const pr = await client.query('SELECT agent_id FROM players WHERE id = $1', [bet.player_id]);
+        const agentId = pr.rows[0]?.agent_id;
+        if (agentId) await distributeLoss(client, { playerId: bet.player_id, agentId, roundId: round.id, lossAmount: bet.amount });
+      }
+      return true;
+    });
+    if (done) {
+      stat.settled++;
+      stat.payout = round2(stat.payout + Number(capped));
+      console.log(`[roundHub:recover] ${win ? '💰' : '·'} 补结算 bet#${bet.id} rollingball ${round.round_no} 注$${bet.amount} → ${win ? 'win' : 'lose'} 派$${round2(Number(capped))}`);
+    }
+  }
+  await query(
+    `UPDATE rounds SET result = $2::jsonb, status = 'settled' WHERE id = $1 AND status IN ('betting', 'drawn')`,
+    [round.id, JSON.stringify({ ...(round.result || {}), revealed, status: 'settled', v: 2 })],
+  );
 }
 
 /**
@@ -812,7 +1139,11 @@ export async function startRoundHub(wss) {
     recoverSeq(room.gameName, room.engine.prefix, dateKeyNow()).then((mx) => {
       room.dateKey = dateKeyNow();
       room.seq = mx; // 首个 runBetting 会 +1
-      console.log(`[roundHub:${key}] 排期器启动（前缀 ${room.engine.prefix}-，betting ${room.timings.bettingMs}ms/idle ${room.timings.idleMs}ms），当日已用序号 ${mx}，下一期 ${mx + 1}`);
+      // 六段房打段表（bettingMs/idleMs 对它无意义，打了会误导）；16 房打原节奏，一字不改。
+      const rhythm = room.segments
+        ? `六段 ${room.segments.map((s) => `${s.phase} ${s.ms}ms`).join('→')}+settle ${room.timings.settleMs}ms，locked ${room.timings.lockedMs}ms 含在 bet 段尾`
+        : `betting ${room.timings.bettingMs}ms/idle ${room.timings.idleMs}ms`;
+      console.log(`[roundHub:${key}] 排期器启动（前缀 ${room.engine.prefix}-，${rhythm}），当日已用序号 ${mx}，下一期 ${mx + 1}`);
       runBetting(room).catch(logLoopErr(key));
     });
   }
