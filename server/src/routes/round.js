@@ -1550,6 +1550,153 @@ router.post('/rollingball/play', requireAuth, requireType('player'), async (req,
   }
 });
 
+// ==================================================================
+// POST /round/rollingball/bet —— #公期化 单1b：滚球【公期局】三窗按球下注（仅玩家）
+// ==================================================================
+//
+// 与上面老 bespoke /rollingball/play 的关系：**两条路，互不相干，老路一字未动**。
+//   · 老 /play = per-player 局（玩家自己的一局三球、逐球现派逐球即结、裸 key、敞口 0）；
+//   · 新 /bet  = 全服公期局（roundHub 六段相位机开的那一局，全场共享 roundId、复合 key
+//     `b1:/b2:/b3:`、注挂 pending 由 settle 段统一结算）。本端点【不开奖、不结算】。
+//
+// 钱层骨架机械照抄 makeScheduledRoundHandler（那个共享工厂本体零碰，只复用它的只读助手
+//   findScheduledBet/getBalance）：idempotencyKey 必填 → bets 对象/条目数/每 amount 严格 >0
+//   → 服务端 Σ 过 assertBetWithinLimits → 幂等先查 → 相位闸（debit 之前）→ 事务内
+//   debit + INSERT bets(selections, outcome='pending') → 返 balanceAfter；23505 回幂等。
+//
+// 三条本单新逻辑（其余全是抄的）：
+//   a) 相位闸：读 getRoomState 的 segMode/phase/betsLocked/revealed（裁定①双向自证，见下）
+//   b) 三窗按球限盘：bet_k 窗【只】收 `b{k}:` 前缀的键，跨窗键一律 400
+//   c) 白名单全部引擎派生：parseBallKey 内建 isValidKey 校验裸键；再过
+//      oddsFor(marketKey, ballIdx, revealed) —— 返 null 即「已开号 / c_k=0」死键，拒。
+//      禁在本文件手抄任何键表/赔率公式。
+//
+// ⚠ 敞口口径（裁定②，明示不治）：老 per-player 是「每球一局、每球独立风控、敞口 0」；公期局
+//   三窗注挂【同一个 roundId】，同一玩家单局在飞注额可达 3×maxBet。本单不加局级敞口闸，
+//   与已接排期器的 16 房同构，靠注行级 maxPayout cap 兜底。
+const RB_BET_MAX_KEYS = rollingBallEngine.ALL_MARKET_KEYS.length;   // 裁定③：引擎自算（93），禁手抄
+
+router.post('/rollingball/bet', requireAuth, requireType('player'), async (req, res, next) => {
+  try {
+    const playerId = req.user.sub;
+    const { bets, idempotencyKey } = req.body || {};
+
+    // —— 静态入参校验（照 makeScheduledRoundHandler 口径，逐条对应）——
+    if (!idempotencyKey) return res.status(400).json({ error: '参数不完整：idempotencyKey 必填' });
+    if (!bets || typeof bets !== 'object' || Array.isArray(bets)) {
+      return res.status(400).json({ error: 'bets 必须是 {ballKey: amount} 对象' });
+    }
+    const betEntries = Object.entries(bets);
+    if (betEntries.length < 1) return res.status(400).json({ error: 'bets 不能为空' });
+    if (betEntries.length > RB_BET_MAX_KEYS) {
+      return res.status(400).json({ error: `下注项过多（上限 ${RB_BET_MAX_KEYS}）` });
+    }
+
+    // —— 相位闸（在 debit 之前；裁定①双向自证）——
+    // 窗号派生源 = revealed.length（已开球数 == 下一颗待开球的 ballIdx，和 oddsFor 第二参是
+    //   同一个量），不是 segIdx/2 —— 后者等于在本文件手抄「段表是 bet,draw,bet,draw,bet,draw」
+    //   这个布局。再用 phase === `bet{ballIdx+1}` 做第二条独立派生互证：两者不一致（相位机正
+    //   处于 draw/settle 段、或段表被改过）一律 409，绝不落到「按错误的球收注」。
+    const rs = getRoomState('rollingball');
+    if (!rs || rs.segMode !== 'triple' || !rs.roundId) {
+      return res.status(409).json({ error: 'round_locked' });
+    }
+    const ballIdx = Array.isArray(rs.revealed) ? rs.revealed.length : -1;
+    if (ballIdx < 0 || ballIdx > 2 || rs.phase !== `bet${ballIdx + 1}`) {
+      return res.status(409).json({ error: 'round_locked' });
+    }
+    // 锁帧缓冲期（bet 窗关后 lockedMs 到开球之间）：窗已关，绝不能再收注——收了就是对着
+    // 即将开出的球下注。同样拒在 debit 之前。
+    if (rs.betsLocked) return res.status(409).json({ error: 'round_locked' });
+
+    const revealed = rs.revealed;
+    const wantPrefix = ballIdx + 1;   // 本窗只收 b{wantPrefix}: 前缀
+
+    // —— 逐键校验：跨窗拒 / 假键拒 / 死键拒 / 负注拒（全部在 debit 之前）——
+    let total = 0;
+    const oddsSnapshot = {};
+    for (const [key, amt] of betEntries) {
+      const parsed = rollingBallEngine.parseBallKey(key);   // 内建裸键 isValidKey 校验
+      if (!parsed) return res.status(400).json({ error: `非法盘口 key：${key}（公期局须用 b1:/b2:/b3: 前缀）` });
+      if (parsed.ballIdx !== ballIdx) {
+        return res.status(400).json({
+          error: `本窗只收第 ${wantPrefix} 球盘口（b${wantPrefix}:），该键属第 ${parsed.ballIdx + 1} 球：${key}`,
+        });
+      }
+      // 死键：已开号（无放回）/ 组合键剩余计数 c_k=0 —— 引擎说了算，本文件不判
+      const odds = rollingBallEngine.oddsFor(parsed.marketKey, ballIdx, revealed);
+      if (odds == null) return res.status(400).json({ error: `盘口不可押（已开号/号池耗尽）：${key}` });
+      const a = Number(amt);
+      if (!Number.isFinite(a) || !(a > 0)) return res.status(400).json({ error: `下注金额必须 > 0（key ${key}）` });
+      oddsSnapshot[key] = odds;
+      total += a;
+    }
+    const totalStr = total.toFixed(2);
+
+    // 风控前置：按服务端算出的总额校验（RiskError 由全局中间件转 4xx）
+    assertBetWithinLimits('rollingball', totalStr);
+
+    // 幂等先查：重复请求直接回已受理信息，不重复扣钱。
+    const dup = await findScheduledBet(idempotencyKey, 'rollingball');
+    if (dup) {
+      return res.json({
+        roundNo: dup.round_no,
+        roundId: dup.round_id,
+        accepted: true,
+        balanceAfter: await getBalance(playerId),
+        idempotent: true,
+      });
+    }
+
+    const roundId = rs.roundId;
+    const roundNo = rs.roundNo;
+    const selections = Object.fromEntries(betEntries.map(([k, a]) => [k, Number(a)]));
+
+    try {
+      const balanceAfter = await withTransaction(async (client) => {
+        const { balanceAfter: after } = await debit(client, {
+          playerId,
+          amount: totalStr,
+          type: 'rollingball_bet',
+          idempotencyKey,
+          roundId,
+        });
+        await client.query(
+          `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome, selections)
+           VALUES ($1, $2, $3::numeric, $4, 'pending', $5::jsonb)`,
+          [roundId, playerId, totalStr, idempotencyKey, JSON.stringify(selections)],
+        );
+        return after;
+      });
+
+      // odds 快照【仅供前端显示】：结算一律以 settle 段 hitsForBalls 现算的 oddsByKey 为准
+      //   （两者同一个 oddsFor(marketKey, ballIdx, 该球开出前已开号)，本窗内恒等——本窗未开球，
+      //   revealed 不会再变；故这份快照与结算值天然一致，但权威仍在结算侧）。
+      return res.json({
+        roundNo, roundId, accepted: true, balanceAfter, idempotent: false,
+        ballIndex: ballIdx, phase: rs.phase, odds: oddsSnapshot,
+      });
+    } catch (err) {
+      if (err.code === '23505') {
+        // 唯一键冲突（并发重复请求）：回查已受理记录按幂等命中返回，不重复扣钱。
+        const existing = await findScheduledBet(idempotencyKey, 'rollingball');
+        if (existing) {
+          return res.json({
+            roundNo: existing.round_no,
+            roundId: existing.round_id,
+            accepted: true,
+            balanceAfter: await getBalance(playerId),
+            idempotent: true,
+          });
+        }
+      }
+      throw err;
+    }
+  } catch (err) {
+    return next(err);
+  }
+});
+
 /** 按幂等键查询已存在的 plinko 局（跨事务的普通查询，不加锁），带上开奖结果供幂等返回 */
 async function findPlinkoBetByIdempotencyKey(idempotencyKey) {
   const result = await query(
