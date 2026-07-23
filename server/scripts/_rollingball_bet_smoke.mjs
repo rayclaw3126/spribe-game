@@ -204,7 +204,9 @@ const betRows = (await query(
   [roundId, ALICE_ID])).rows;
 check('⑤ 三窗三注全部落在同一公期 roundId 下', betRows.length === 3, `rows=${betRows.length}`);
 for (const [k, a, key] of PLACED) {
-  const row = betRows.find((b) => b.idempotency_key === key);
+  // 单1c c 条：公期局落库幂等键带 `pub-` 前缀（与老 /play 的裸键分域），故按前缀键回查。
+  // 客户端入参仍是裸 key，重放语义不变——这里查的是【服务端落库形态】。
+  const row = betRows.find((b) => b.idempotency_key === `pub-${key}`);
   const want = hits.has(k) ? 'win' : 'lose';
   const wantPay = hits.has(k) ? Math.round(a * oddsByKey[k] * 100) / 100 : 0;
   check(`⑤ ${k} 注行 outcome=${want} 且 settle_detail 派彩==离线复算 $${wantPay}`,

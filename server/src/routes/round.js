@@ -1636,8 +1636,15 @@ router.post('/rollingball/bet', requireAuth, requireType('player'), async (req, 
     // 风控前置：按服务端算出的总额校验（RiskError 由全局中间件转 4xx）
     assertBetWithinLimits('rollingball', totalStr);
 
+    // 幂等键命名空间隔离（单1c c 条）：公期局落库/回查一律用 `pub-` 前缀，与老 /rollingball/play
+    //   的裸键分域。两路的 rounds.game 同为 'rollingball'，findScheduledBet 只按
+    //   (idempotency_key, game) 查——不加前缀的话，玩家先后拿同一个 key 打两个端点，第二次会被
+    //   误判成重放而静默不受理（钱没扣、注没挂，玩家以为下上了）。ledger 的 debit 幂等键同前缀，
+    //   两域在流水层也不互撞。对客户端【零感知】：入参仍是裸 key，重放语义一字不变。
+    const pubKey = `pub-${idempotencyKey}`;
+
     // 幂等先查：重复请求直接回已受理信息，不重复扣钱。
-    const dup = await findScheduledBet(idempotencyKey, 'rollingball');
+    const dup = await findScheduledBet(pubKey, 'rollingball');
     if (dup) {
       return res.json({
         roundNo: dup.round_no,
@@ -1658,13 +1665,13 @@ router.post('/rollingball/bet', requireAuth, requireType('player'), async (req, 
           playerId,
           amount: totalStr,
           type: 'rollingball_bet',
-          idempotencyKey,
+          idempotencyKey: pubKey,
           roundId,
         });
         await client.query(
           `INSERT INTO bets (round_id, player_id, amount, idempotency_key, outcome, selections)
            VALUES ($1, $2, $3::numeric, $4, 'pending', $5::jsonb)`,
-          [roundId, playerId, totalStr, idempotencyKey, JSON.stringify(selections)],
+          [roundId, playerId, totalStr, pubKey, JSON.stringify(selections)],
         );
         return after;
       });
@@ -1679,7 +1686,7 @@ router.post('/rollingball/bet', requireAuth, requireType('player'), async (req, 
     } catch (err) {
       if (err.code === '23505') {
         // 唯一键冲突（并发重复请求）：回查已受理记录按幂等命中返回，不重复扣钱。
-        const existing = await findScheduledBet(idempotencyKey, 'rollingball');
+        const existing = await findScheduledBet(pubKey, 'rollingball');
         if (existing) {
           return res.json({
             roundNo: existing.round_no,
@@ -3144,7 +3151,11 @@ const PLAYING_RESULT_WHITELIST = {
   // rollingball：已开球 + 逐球结算（按步现派，result 本就无未开球）；白名单为纵深防御
   rollingball: ['revealed', 'balls', 'status'],
 };
-const TERMINAL_STATUSES = new Set(['settled', 'cashed', 'bust']);
+// #公期化 单1c：'void' 收进终局态。void = 局已作废（孤儿轮退注置 void），未开的球随局一起
+//   永不存在——已死的局没有未来信息可偷，partial revealed 全返无先知价值，反而是玩家核对退款
+//   凭据所必需。对老局逐字节无影响：退 void 的老轮 result 恒为 NULL，`if (!result) return result`
+//   在上一行就返回了，走不到这里。
+const TERMINAL_STATUSES = new Set(['settled', 'cashed', 'bust', 'void']);
 
 // 终局（settled/cashed/bust）给全 result（此刻雷位/牌序公开无所谓，正好供验证）；
 // 非终局（playing/pending）按游戏白名单只挑安全字段，未知游戏一律不给 result 细节。

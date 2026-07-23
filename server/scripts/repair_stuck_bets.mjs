@@ -14,7 +14,9 @@ import { query, pool, withTransaction } from '../src/db.js';
 import { credit } from '../src/lib/wallet.js';
 // 复算四件（ENGINES/computeDetail/capPayout/drawOf）+ round2 抽到 src/game/settleDerive.js 单一出处，
 // 与 roundHub recoverOrphans（孤儿注恢复）共用同一份判定，禁在本脚本回抄副本。
-import { ENGINES, computeDetail, capPayout, drawOf, round2 } from '../src/game/settleDerive.js';
+// #公期化 单1c：复算入口统一改走 detailFor(round, bet) 分发器——常规 9 款内部仍是原
+//   drawOf + computeDetail 老路（逐字节不变），滚球走 bespoke 双口径分支（v:2 公期 / v1 老局）。
+import { ENGINES, capPayout, detailFor, round2 } from '../src/game/settleDerive.js';
 
 const EXECUTE = process.argv.includes('--execute');
 const MODE = EXECUTE ? 'EXECUTE（动钱）' : 'DRY-RUN（只读）';
@@ -31,14 +33,27 @@ function detailEq(a, b) {
   return true;
 }
 
-// ============ 硬闸：9 款对拍已正常结算行 ============
-async function calibrationGate() {
-  console.log('\n========== 硬闸对拍（9 款已结算行 re-derive vs ledger 实付）==========');
+// ============ 硬闸：对拍已正常结算行 ============
+//
+// #公期化 单1c 裁定③【样本硬闸收窄】：只对【本次卡单 population 里真出现的款】要求对拍样本。
+//   原口径是「全 9 款逐款要 ≥2 样本，任一款样本不足即阻断 --execute」——加了第 10 款（滚球）后，
+//   一个跟本次补派毫无关系的款样本不足，就能把其余款的补派一起锁死，这是纯粹的连坐。
+//   收窄后：population 外的款【不要求样本、不复算、不影响放行】；population 内的款照旧
+//   【全体阻断】（任一款对拍不等 → --execute 整体停手，绝不只跳过该款）。
+//   population 为空 → 无事可做，自然放行。
+async function calibrationGate(gamesInScope) {
+  const scope = [...gamesInScope];
+  if (scope.length === 0) {
+    console.log('\n========== 硬闸对拍 ==========\n  （本次卡单 population 为空，无款需对拍，放行）');
+    return true;
+  }
+  console.log(`\n========== 硬闸对拍（本次 population 涉及 ${scope.length} 款：${scope.join('/')}；population 外的款不要求样本）==========`);
   let allPass = true;
-  for (const game of GAMES) {
+  for (const game of scope) {
     // 取该款【单行局】已结算行（一 round 一 player 一 bet），≥1 win 优先；带 result
     const rows = (await query(`
-      SELECT b.id, b.player_id, b.round_id, b.amount, b.outcome, b.selections, b.settle_detail, r.result
+      SELECT b.id, b.player_id, b.round_id, b.amount, b.outcome, b.selections, b.settle_detail,
+             b.idempotency_key, r.result
       FROM bets b JOIN rounds r ON r.id = b.round_id
       WHERE r.game = $1 AND r.status = 'settled' AND r.result IS NOT NULL AND b.outcome IN ('win','lose')
         AND b.selections IS NOT NULL   -- 只对排期器格式(selections {key:amt})对拍；排除排期器上线前的老式 per-player 局(selections NULL，另一套结算路径，非本补派 population)
@@ -53,8 +68,7 @@ async function calibrationGate() {
     for (const b of rows.slice(0, 2).concat(rows.filter(r => r.outcome === 'win').slice(0, 1))) {
       let recomputed, capped;
       try {
-        const draw = drawOf({ id: b.round_id, result: b.result });
-        recomputed = computeDetail(game, b.selections, draw);
+        recomputed = detailFor({ id: b.round_id, game, result: b.result }, b);
         capped = await capPayout(game, recomputed.rawTotalPayout);
       } catch (err) { console.log(`  ❌ ${game} bet#${b.id}: 复算异常 ${err.message}`); gamePass = false; allPass = false; continue; }
       const led = (await query(`SELECT COALESCE(SUM(amount),0) AS p FROM ledger WHERE player_id=$1 AND round_id=$2 AND type=$3`, [b.player_id, b.round_id, `${game}_payout`])).rows[0].p;
@@ -65,15 +79,15 @@ async function calibrationGate() {
     }
     if (gamePass) console.log(`  —— ${game} 对拍通过`);
   }
-  console.log(`\n硬闸结论：${allPass ? '✅ 9 款全等，放行' : '❌ 有款不等/样本不足，阻断 --execute'}`);
+  console.log(`\n硬闸结论：${allPass ? `✅ 本次涉及的 ${scope.length} 款全等，放行` : '❌ 有款不等/样本不足，阻断 --execute'}`);
   return allPass;
 }
 
-// ============ 卡单补派 ============
-async function repairStuck(gatePassed) {
-  console.log('\n========== 卡单清单（outcome=pending AND rounds.status=settled）==========');
+// ============ 卡单 population（先查，供硬闸按需收窄；裁定③）============
+async function fetchStuck() {
   const stuck = (await query(`
-    SELECT b.id, b.player_id, p.username, b.round_id, r.game, r.round_no, b.amount, b.selections, r.result, b.settle_detail
+    SELECT b.id, b.player_id, p.username, b.round_id, r.game, r.round_no, b.amount, b.selections,
+           b.idempotency_key, r.result, b.settle_detail
     FROM bets b JOIN rounds r ON r.id = b.round_id JOIN players p ON p.id = b.player_id
     WHERE b.outcome = 'pending' AND r.status = 'settled' AND r.game = ANY($1)
       AND b.selections IS NOT NULL   -- 防御护栏：只补排期器格式局；老式 per-player(selections NULL) 不在本 population，单列不动
@@ -81,16 +95,21 @@ async function repairStuck(gatePassed) {
   `, [GAMES])).rows;
   // 老式 NULL-selections 的卡单单独统计（本脚本不处理，避免误算成 0）
   const legacyNull = (await query(`SELECT count(*) AS n FROM bets b JOIN rounds r ON r.id=b.round_id WHERE b.outcome='pending' AND r.status='settled' AND r.game = ANY($1) AND b.selections IS NULL`, [GAMES])).rows[0].n;
-  if (Number(legacyNull) > 0) console.log(`  ⚠ 另有 ${legacyNull} 条老式(selections NULL) 卡单不在本补派范围（需人工核，非排期器格式）`);
+  return { stuck, legacyNull: Number(legacyNull) };
+}
+
+// ============ 卡单补派 ============
+async function repairStuck(gatePassed, stuck, legacyNull) {
+  console.log('\n========== 卡单清单（outcome=pending AND rounds.status=settled）==========');
+  if (legacyNull > 0) console.log(`  ⚠ 另有 ${legacyNull} 条老式(selections NULL) 卡单不在本补派范围（需人工核，非排期器格式）`);
   if (stuck.length === 0) { console.log('  （无卡单）'); return; }
 
   const loseRows = [];
   let totalCredit = 0, nWin = 0, nLose = 0, nErr = 0;
   for (const b of stuck) {
-    let draw, det, capped;
+    let det, capped;
     try {
-      draw = drawOf({ id: b.round_id, result: b.result });
-      det = computeDetail(b.game, b.selections, draw);
+      det = detailFor({ id: b.round_id, game: b.game, result: b.result }, b);
       capped = await capPayout(b.game, det.rawTotalPayout);
     } catch (err) { console.log(`  ❌ bet#${b.id} ${b.game} ${b.round_no}: ${err.message} —— 停手上报，跳过该行`); nErr++; continue; }
     const win = Number(capped) > 0;
@@ -126,7 +145,9 @@ async function repairStuck(gatePassed) {
 }
 
 console.log(`repair_stuck_bets —— 模式：${MODE}`);
-const gatePassed = await calibrationGate();
+// 裁定③：先查 population，硬闸只对 population 里出现的款要样本（population 外的款不连坐）。
+const { stuck, legacyNull } = await fetchStuck();
+const gatePassed = await calibrationGate(new Set(stuck.map((b) => b.game)));
 if (EXECUTE && !gatePassed) { console.log('\n⛔ 硬闸阻断，退出，未动钱。'); await pool.end(); process.exit(2); }
-await repairStuck(gatePassed);
+await repairStuck(gatePassed, stuck, legacyNull);
 await pool.end();
