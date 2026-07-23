@@ -26,7 +26,7 @@ import { deriveBombRows, TIERS } from '../../../server/src/game/goal.js';
 import { generateCrash } from '../../../server/src/game/aviator.js';
 import { walkPath } from '../../../server/src/game/momentum.js';
 import { drawBall, remainingPool } from '../../../server/src/game/rollingBall.js';
-import { makeSeededRng } from '../../../server/src/lib/seededRng.js';
+import { makeSeededRng, sha256Hex } from '../../../server/src/lib/seededRng.js';
 
 // backendId → { fields, needs, derive, manualOk? }
 // manualOk（默认 true）：能否走 SeedFairness 的【手填】路径（只给 seed/client/nonce + needs，无 result）。
@@ -145,3 +145,61 @@ INSTANT_VERIFY.rollingball = {
 
 /** 取某局要比对的字段名：fields 可为定值数组，也可为 (result)=>string[]（形状随终局而变的款，如 goal/momentum）。 */
 export const fieldsOf = (spec, result) => (typeof spec.fields === 'function' ? spec.fields(result) : spec.fields);
+
+// ============================================================================
+// #B2：按 roundId 就地重算验公平 —— 共用纯函数（BillDrawer 就地验 + 将来收编 SeedFairness）。
+//   ⚠ SeedFairness 本体【零碰】：它保留自己内联的 doVerifyWhole/deepEq；此处是【新 export】，
+//     供 BillDrawer 用。deepEq 短暂两份（SeedFairness 既有 + 此处），收编另开单（欠账池）。
+
+// 顺序无关规范化深比：keno drawn / plinko path 是数组需深比，对象键排序后 JSON 比。
+const canon = (v) => {
+  if (Array.isArray(v)) return v.map(canon);
+  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) o[k] = canon(v[k]); return o; }
+  return v;
+};
+export const deepEqVerify = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+
+const TERMINAL_VERIFY = new Set(['settled', 'cashed', 'bust']);
+
+// verifyRound(roundId, { token, serverSeed }) → Promise<结果对象>
+//   成功：{ ok, rows:[{f,want,got,ok}], allOk, game, status, nonce, serverSeed }
+//   失败：{ error, code }，code ∈:
+//     'in_progress'   本局未终局（活局未开区不下发，无从重算）
+//     'no_seed'       未提供 serverSeed 明文（面板揭晓区兜底）
+//     'seed_mismatch' 提供的 seed 与本局 result_hash 不符（更早揭晓的种子已不在本机）
+//     'unsupported'   该 game 无重算注册项
+//     'no_nonce'      老局缺 nonce
+//     'missing'       缺重算要素（needs 里的字段库里没有）
+//     'not_found'     /:id 404（他人局/不存在/无权）
+//     'network'       网络/其它异常
+export async function verifyRound(roundId, { token, serverSeed } = {}) {
+  const rid = String(roundId || '').trim();
+  if (!rid) return { error: '缺 roundId', code: 'not_found' };
+  const seed = String(serverSeed || '').trim();
+  if (!seed) return { error: '当前种子未揭晓', code: 'no_seed' };
+  let row;
+  try {
+    const resp = await fetch(`/round/${encodeURIComponent(rid)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (resp.status === 404) return { error: '记录不存在或无权查看', code: 'not_found' };
+    if (!resp.ok) { let d = null; try { d = await resp.json(); } catch { /* 无 body */ } return { error: d?.error || `请求失败（${resp.status}）`, code: 'network' }; }
+    row = await resp.json();
+  } catch {
+    return { error: '网络异常，请重试', code: 'network' };
+  }
+  const spec = INSTANT_VERIFY[row.game];
+  if (!spec) return { error: `${row.game} 暂不支持本地重算`, code: 'unsupported', game: row.game };
+  if (!TERMINAL_VERIFY.has(row.status)) return { error: `本局进行中（${row.status}）`, code: 'in_progress', game: row.game, status: row.status };
+  const R = row.result || {};
+  if (R.nonce == null) return { error: '本局缺 nonce（补落之前的老局）', code: 'no_nonce', game: row.game };
+  // 承诺校验：sha256(明文种子) 必须等于本局落库的 result_hash
+  if (row.result_hash && sha256Hex(seed) !== row.result_hash) {
+    return { error: '此局用的是更早揭晓的种子，已不在本机，无法就地重算', code: 'seed_mismatch', game: row.game };
+  }
+  const miss = spec.needs.filter((nd) => R[nd.key] == null);
+  if (miss.length) return { error: `缺重算要素（${miss.map((m) => m.key).join('/')}）`, code: 'missing', game: row.game };
+  const got = spec.derive(seed, row.client_seed ?? '', R.nonce, R);
+  const rows = fieldsOf(spec, R).map((f) => ({ f, want: R[f], got: got[f], ok: deepEqVerify(R[f], got[f]) }));
+  return { ok: true, rows, allOk: rows.length > 0 && rows.every((r) => r.ok), game: row.game, status: row.status, nonce: R.nonce, result: R, serverSeed: seed };
+}

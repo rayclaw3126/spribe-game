@@ -161,6 +161,132 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
     }
   }
 
+  // ── #B2 就地验：per-player 款每行「验」钮 → 展开重算面板 ──
+  // ⚠ code-split：verifyRound 在 instantVerify.js（含 9 款引擎），点「验」时才【动态 import】，
+  //   不拖进 BillDrawer 主 chunk（守住 localVerifyGames 那条零引擎约束）。
+  const [vOpen, setVOpen] = useState({})       // {roundId: true} 展开的行
+  const [vRes, setVRes] = useState({})         // {roundId: 结果对象 | {loading:true}}
+  const [serverSeed, setServerSeed] = useState('')   // 会话内揭晓的 serverSeed 明文（一把种子验多局）
+  const [revealing, setRevealing] = useState(false)
+  const [vSteps, setVSteps] = useState({})     // {roundId: true} 多步序列展开态
+
+  // 跑单行重算。seedArg 用于揭晓后立即用新 seed（state 异步未更新时）。
+  async function runVerify(roundId, seedArg) {
+    setVRes(m => ({ ...m, [roundId]: { loading: true } }))
+    try {
+      const mod = await import('./shell/instantVerify')
+      const res = await mod.verifyRound(roundId, { token: playerToken, serverSeed: seedArg ?? serverSeed })
+      setVRes(m => ({ ...m, [roundId]: res }))
+    } catch (e) {
+      setVRes(m => ({ ...m, [roundId]: { error: e?.message || '重算失败', code: 'network' } }))
+    }
+  }
+
+  function toggleVerify(roundId) {
+    const willOpen = !vOpen[roundId]
+    setVOpen(m => ({ ...m, [roundId]: willOpen }))
+    if (willOpen && !vRes[roundId]) runVerify(roundId)   // 首次展开才拉
+  }
+
+  // 揭晓：rotate 会【换新种子】—— 由玩家在 no_seed 提示区显式点，禁静默代点。
+  //   揭晓后拿到旧种子明文，回验所有已展开的行（一把种子只验 result_hash 匹配的局）。
+  async function doReveal() {
+    if (revealing) return
+    setRevealing(true)
+    try {
+      const d = await api.apiPost('/seed/rotate', {})
+      const seed = d?.revealed?.serverSeed || ''
+      setServerSeed(seed)
+      for (const rid of Object.keys(vOpen)) if (vOpen[rid]) runVerify(rid, seed)
+    } catch (e) {
+      // 揭晓失败：把错误落到当前展开的行上
+      for (const rid of Object.keys(vOpen)) if (vOpen[rid]) setVRes(m => ({ ...m, [rid]: { error: e?.message || '揭晓失败，请重试', code: 'network' } }))
+    } finally {
+      setRevealing(false)
+    }
+  }
+
+  // #B2 就地验面板：按 vRes[roundId] 的形态渲染（loading / 四态兜底 / 公平 / 不匹配）
+  const seedBrief = (s) => (s && s.length > 20 ? `${s.slice(0, 10)}…${s.slice(-10)}` : s)
+  const fmtVal = (v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))
+  function renderVerify(it) {
+    const rid = it.round_id
+    const r = vRes[rid]
+    const box = { marginTop: 8, padding: '9px 11px', borderRadius: RADIUS.md || 10, background: COLORS.surface, border: `1px solid ${COLORS.border}`, fontSize: 12 }
+    const line = { display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 4, fontFamily: MONO, fontSize: 11 }
+    if (!r || r.loading) return <div style={box}><span style={{ color: COLORS.textMuted }}>⏳ 重算中…</span></div>
+    // 四态兜底
+    if (r.error) {
+      if (r.code === 'no_seed') {
+        return (
+          <div style={box}>
+            <div style={{ color: COLORS.amber, fontWeight: 700 }}>当前种子未揭晓</div>
+            <div style={{ color: COLORS.textMuted, marginTop: 4, lineHeight: 1.5 }}>
+              揭晓后即可就地重算验证。<b style={{ color: COLORS.amber }}>揭晓会换一把新种子</b>（旧种子明文公开供你事后核对），确认后再点。
+            </div>
+            <button type="button" disabled={revealing} onClick={doReveal} style={{
+              marginTop: 8, padding: '6px 14px', borderRadius: RADIUS.pill, cursor: revealing ? 'not-allowed' : 'pointer',
+              opacity: revealing ? 0.6 : 1, fontSize: 12, fontWeight: 900,
+              color: '#06251a', background: COLORS.green, border: 'none',
+            }}>{revealing ? '揭晓中…' : '揭晓并验证'}</button>
+          </div>
+        )
+      }
+      const hint = r.code === 'seed_mismatch'
+        ? '此局用的是更早揭晓的种子，已不在本机，无法就地重算。'
+        : r.code === 'in_progress' ? '本局仍在进行中，终局后才可验。'
+          : r.code === 'not_found' ? '记录不存在或无权查看。'
+            : r.error
+      return (
+        <div style={box}>
+          <div style={{ color: r.code === 'seed_mismatch' ? COLORS.textMuted : COLORS.slate }}>{hint}</div>
+          {r.code === 'network' && <button type="button" onClick={() => runVerify(rid)} style={{ marginTop: 8, padding: '5px 12px', borderRadius: RADIUS.pill, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: COLORS.textMuted, background: 'transparent', border: `1px solid ${COLORS.border}` }}>重试</button>}
+        </div>
+      )
+    }
+    // 公平 / 不匹配
+    const multi = (r.game === 'hilo' || r.game === 'goal') && r.result
+    return (
+      <div style={box}>
+        {r.allOk ? (
+          <div style={{ color: COLORS.green, fontWeight: 900 }}>✓ 重算值 = 开奖值，本局公平</div>
+        ) : (
+          <div style={{ color: COLORS.red || '#e2564a', fontWeight: 900 }}>✗ 重算值与开奖值不符</div>
+        )}
+        <div style={{ ...line, color: COLORS.textFaint }}>
+          <span>serverSeed</span><span>{seedBrief(serverSeed)}</span>
+        </div>
+        <div style={{ ...line, color: COLORS.textFaint }}>
+          <span>hash 校验</span><span style={{ color: COLORS.green }}>✓ 与本局承诺一致</span>
+        </div>
+        {/* 逐字段比对（不匹配时最有用；匹配也列出供核）*/}
+        {r.rows.map((row, i) => (
+          <div key={i} style={{ ...line, color: row.ok ? COLORS.textMuted : (COLORS.red || '#e2564a') }}>
+            <span>{row.f}</span>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {row.ok ? '✓' : `开=${fmtVal(row.want)} 算=${fmtVal(row.got)}`}
+            </span>
+          </div>
+        ))}
+        {/* #B2 多步款(hilo/goal)：可展开逐步序列（只读，整局 derive 已覆盖，不再逐步重算）*/}
+        {multi && (
+          <>
+            <div onClick={() => setVSteps(m => ({ ...m, [rid]: !m[rid] }))} style={{ marginTop: 6, cursor: 'pointer', color: COLORS.textMuted, fontSize: 11, textDecoration: 'underline dotted' }}>
+              {vSteps[rid] ? '收起逐步' : '展开逐步序列'}
+            </div>
+            {vSteps[rid] && (
+              <div style={{ marginTop: 4, fontFamily: MONO, fontSize: 10.5, color: COLORS.textFaint, wordBreak: 'break-all', lineHeight: 1.5 }}>
+                {r.game === 'hilo'
+                  ? (Array.isArray(r.result.history) ? r.result.history.map((h, j) => `${j + 1}.${h.n}${h.dir ? h.dir[0] : ''}${h.correct === false ? '✗' : ''}`).join('  ') : '（无逐步记录）')
+                  : (Array.isArray(r.result.bombRows) ? r.result.bombRows.map((rows, col) => `列${col + 1}:[${rows.join(',')}]`).join('  ') + (r.result.bustCol != null ? `  ✗踩雷@列${r.result.bustCol + 1}` : '') : '（无逐列记录）')}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
   if (!open) return null
 
   const smallMuted = { fontSize: 11, color: COLORS.textFaint, marginTop: 3 }
@@ -315,6 +441,18 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
                             style={{ marginLeft: 6, fontFamily: MONO, cursor: 'pointer', textDecoration: 'underline dotted' }}
                           >#{it.round_id}</span>
                         )}
+                        {/* #B2 就地验小签：per-player 款 + 已结算(win/lose 粗判)才亮；进行中/退注不显 */}
+                        {PER_PLAYER_VERIFY_GAMES.has(it.game) && it.round_id != null && (it.outcome === 'win' || it.outcome === 'lose') && (
+                          <span
+                            onClick={() => toggleVerify(it.round_id)}
+                            style={{
+                              marginLeft: 8, padding: '1px 8px', borderRadius: RADIUS.pill, cursor: 'pointer',
+                              fontSize: 10, fontWeight: 900, letterSpacing: 0.5,
+                              color: COLORS.green, border: `1px solid ${COLORS.green}`,
+                              background: vOpen[it.round_id] ? COLORS.greenTint : 'transparent',
+                            }}
+                          >{vOpen[it.round_id] ? '收起' : '⚖ 验'}</span>
+                        )}
                       </div>
                     </div>
                     <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
@@ -335,6 +473,8 @@ export default function BillDrawer({ open, onClose, playerToken, onLogout }) {
                       ))}
                     </div>
                   )}
+                  {/* #B2 就地验展开面板 */}
+                  {vOpen[it.round_id] && renderVerify(it)}
                 </div>
               )
             })
