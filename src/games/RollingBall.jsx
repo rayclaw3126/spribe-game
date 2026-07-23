@@ -250,7 +250,10 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   // #47 三区放大门控：与另九款同档取 hasRail(≥1280)，【不】用 isDesk —— 1024–1279 无右栏窄桌面
   //   中栏实宽仅 664，此档放大必挤爆赔率（S9 当年正是治这档的截断）。手机 <768 永为 false。
   const hasRail = useMediaQuery('(min-width: 1280px)')
-  const [acc, setAcc] = useState({ comboRow: true, col: true, num: false })   // 手机手风琴折叠态（默认组合/列注展开、单号收起）；纯 UI，不动任何下注 state
+  const [acc, setAcc] = useState({ comboRow: true, rowBet: true, col: true, num: false })   // 手机手风琴折叠态（默认组合/行注/列注展开、单号收起）；纯 UI，不动任何下注 state
+  // #Ray 定案：桌面区块折叠。【独立于手机 acc】—— 手机单号盘默认收起是既有习惯，桌面按定案四区
+  //   全展开；共用一个 state 会互相带偏，故各持一份。折叠纯 UI，不动任何下注 state。
+  const [deskAcc, setDeskAcc] = useState({ comboRow: true, rowBet: true, col: true, num: true })
   const [freshCount, setFreshCount] = useState(0)   // #47 动效：本局新落珠数（本款无速度房，单值即可）
   const [roadView, setRoadView] = useState('bs')   // 珠盘路视角（手机 pill 选，默认 1球大小）；纯显示，零请求零 state 污染
   const [bet, setBet] = useState(10)
@@ -847,6 +850,49 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       : <div style={secHead}>{text}</div>
   )
 
+  // #Ray 微调：行注三档从组合区拆出独立成区 → 两区的已选计数各算各的（原先共用一个 KEYS 集合混算）
+  const COMBO_KEYS = new Set(COMBO_META.map(m => m.slot))
+  const ROW_KEYS = new Set(ROWS.map(m => m.slot))
+  const selCount = (section) => {
+    let n = 0
+    new Set([...picks, ...betsPlaced.keys()]).forEach(k => {
+      const belong = section === 'num' ? k.startsWith('num-')
+        : section === 'col' ? k.startsWith('col-')
+          : section === 'rowBet' ? ROW_KEYS.has(k)
+            : COMBO_KEYS.has(k)
+      if (belong) n++
+    })
+    return n
+  }
+
+  // 桌面区块折叠壳：外框/内边距沿用 secBox，标题行沿用 secHead 视觉（金色/字号/字距/下边距全不动），
+  //   只在右端补 ˄/˅ 箭头并让整行可点。已选计数复用手机同一份 selCount（禁二写）。
+  //   ⚠ 主盘不接本壳（与手机一致，主盘无折叠）。
+  const deskSection = (key, title, body, badge = null) => {
+    const open = deskAcc[key]
+    const cnt = selCount(key)
+    return (
+      <div style={secBox}>
+        <button type="button" onClick={() => setDeskAcc(a => ({ ...a, [key]: !a[key] }))}
+          style={{
+            ...secHead, width: '100%', boxSizing: 'border-box',
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left',
+          }}>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+          {cnt > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flex: '0 0 auto', color: DERBY.sel, fontSize: 10, fontWeight: 900 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: DERBY.sel, display: 'inline-block' }} />{cnt}
+            </span>
+          )}
+          {badge}
+          <span style={{ marginLeft: badge ? 8 : 'auto', color: COLORS.white, fontSize: 12, fontWeight: 900, flex: '0 0 auto' }}>{open ? '˄' : '˅'}</span>
+        </button>
+        <div style={{ maxHeight: open ? 1400 : 0, overflow: 'hidden', transition: 'max-height 0.2s ease' }}>{body}</div>
+      </div>
+    )
+  }
+
   const mainBoard = (
     <div style={secBox}>
       {headRow(<span>主盘 · 押第 {ballIdx + 1} 球</span>, poolBadge)}
@@ -863,9 +909,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   )
   // #47 刀1：原「组合 ｜ 行注三档」合卡（挤在主盘右侧半宽）拆成两张独立全宽卡。
   //   ⚠ 仅 gameCard 引用；手机走独立的 comboBody（手风琴内），故拆分对手机零影响。
-  const comboBoard = (
-    <div style={secBox}>
-      {headRow('组合 · 大小×单双')}
+  const comboBoard = deskSection('comboRow', '组合 · 大小×单双', (
       <div style={{
         display: isMobile ? 'grid' : 'grid',
         gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
@@ -874,35 +918,30 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
         {/* 大小×单双四键：手机横排；桌面全档(≥1024, 单S9) → 竖排（名/赔率两行），赔率永不被裁。 */}
         {COMBO_META.map(m => stackCell(m.slot, m.name, '', DERBY.grey, isDesk))}
       </div>
-    </div>
-  )
-  const rowBetBoard = (
-    <div style={secBox}>
-      {headRow('行注三档')}
+  ))
+  const rowBetBoard = deskSection('rowBet', '行注三档', (
+    <>
       {/* 行注三档：竖排堆叠（>N行 / 区间小字 / 赔率），满位赔率不挤。
           手机默认横排；桌面全档(≥1024, 单S9 扩档) 强制竖排，赔率独占一行永不被裁。 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: isMobile ? 5 : 8 }}>
         {ROWS.map(m => stackCell(m.slot, m.name, m.range, DERBY.grey, isDesk))}
       </div>
-    </div>
-  )
-  const colBoard = (
-    <div style={secBox}>
-      <div style={secHead}>列注 · 1-75 按 5 分列（各 15 号）</div>
+    </>
+  ))
+  const colBoard = deskSection('col', '列注 · 1-75 按 5 分列（各 15 号）', (
+    <>
       {/* 列注五键：grid 等宽竖排堆叠（列N / 赔率），照 Wu Xing 五行横排先例 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: isMobile ? 4 : 8 }}>
         {[1, 2, 3, 4, 5].map(c => stackCell(`col-${c}`, RL[`col-${c}`], ''))}
       </div>
-    </div>
-  )
+    </>
+  ))
   // #47 终批·刀1 裁定 (a) 收现状：顶区改纵排后，中栏定高滚动区把单号盘推出首屏，需下滚才见。
   // ⚠ 禁为「让它进首屏」而重排本盘（如改 25×3）—— 单号盘 15×5 的【行】与列注区【列1-5】
   //   是玩法语义映射（一行 = 一列的 15 个号），重排即切断语义，与骨牌 3×3 判例同理。
   //   代价明确接受：下半盘靠滚。滚动层只有中栏一个（已探针核过，无滚中滚）。
   const numCols = isDesk ? 15 : 5
-  const numBoard = (
-    <div style={secBox}>
-      <div style={secHead}>单号直选 · {numCols}×{75 / numCols}（<span key={oddsStr(`num-1`)} className="rbOdds">{oddsStr(`num-1`)}</span>）</div>
+  const numBoard = deskSection('num', <>单号直选 · {numCols}×{75 / numCols}（<span key={oddsStr(`num-1`)} className="rbOdds">{oddsStr(`num-1`)}</span>）</>, (
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numCols}, 1fr)`, gap: isMobile ? 3 : 4 }}>
         {Array.from({ length: 75 }, (_, i) => {
           const n = i + 1
@@ -917,8 +956,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
           )
         })}
       </div>
-    </div>
-  )
+  ))
 
   // ---- ③ 珠盘路（第1球大小单轨，抄 Line Up）----
   // #47 双端一致·A 案：手机路珠列数升到与桌面同标 30（本款 per-player 本地流，两端喂同一份 road ref → 天然一致）
@@ -1087,17 +1125,6 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
 
   // ============ 手机三段式 v2（<1024）：锁顶(顶栏+舞台+主盘) / 中间滚(三折叠盘区) / 锁底(珠盘路+注栏) ============
   // 折叠纯 UI（acc 状态），不动任何下注 state（picks/betsPlaced/bet 组件级持有，收起也保留）；钱路(confirmBets/结算/odds)一行未动。
-  const COMBO_ROW_KEYS = new Set([...COMBO_META.map(m => m.slot), ...ROWS.map(m => m.slot)])
-  const selCount = (section) => {
-    let n = 0
-    new Set([...picks, ...betsPlaced.keys()]).forEach(k => {
-      const belong = section === 'num' ? k.startsWith('num-')
-        : section === 'col' ? k.startsWith('col-')
-          : COMBO_ROW_KEYS.has(k)
-      if (belong) n++
-    })
-    return n
-  }
   const accSection = (key, title, body) => {
     const open = acc[key]
     const cnt = selCount(key)
@@ -1125,14 +1152,16 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
     )
   }
   const comboBody = (
-    <>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginBottom: 5 }}>
-        {COMBO_META.map(m => rowCell(m.slot, m.name, ''))}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
-        {ROWS.map(m => stackCell(m.slot, m.name, m.range))}
-      </div>
-    </>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+      {COMBO_META.map(m => rowCell(m.slot, m.name, ''))}
+    </div>
+  )
+  // #Ray 微调：行注三档独立成区（原挂在组合区底部）。三档按钮本体（stackCell 尺寸/赔率/点击）零改，
+  //   只是换了个容器；区块外框/间距/折叠行为走同一个 accSection，与组合区同款。
+  const rowBody = (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
+      {ROWS.map(m => stackCell(m.slot, m.name, m.range))}
+    </div>
   )
   const colBody = (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
@@ -1186,6 +1215,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '4px 12px', position: 'relative', zIndex: 1 }}>
         <WinToast toasts={toasts} />
         {accSection('comboRow', '组合·大小×单双', comboBody)}
+        {accSection('rowBet', '行注三档', rowBody)}
         {accSection('col', '列注·1-75', colBody)}
         {accSection('num', '单号直选·5×15', numBody)}
       </div>
