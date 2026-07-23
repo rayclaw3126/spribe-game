@@ -34,7 +34,7 @@ import { TEAMS, teamOf } from './markets-ui/speedgridTeams'    // #41 单15：4 
 
 // —— 引擎常量块已剪切到 ./markets/speedgrid（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { RED, MARKETS, hitsOf, round2, drawCar, ODDS } from './markets/speedgrid'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roadSeedTarget } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { RED, drawCar, ODDS, MARKETS, hitsOf }
 
 // 开奖动画总时长（收到 drawn → 冲线舞台演完 → 结算显示 + 回写余额）；须 < 服务器 idle(5s)
@@ -80,8 +80,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     ROOMS, selectedRoomKey, roomsByKey, room, roomA, roomB,
     betsRef, betsOf, betsPlaced, setBetsPlaced, hasLast, lastBetsRef,
     shownRoundRef, animatedRoundRef, settleInfoRef,
-    commitSettle, resetRoomView, renderRoomTabs,
-  } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
+    commitSettle, resetRoomView, renderRoomTabs } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
 
 
   const [bet, setBet] = useState(10)
@@ -265,7 +264,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
         .map((it) => (it?.drawResult?.n != null ? it.drawResult.n : null))
         .filter((n) => n != null)
       if (!champs.length) return
-      setRoadByRoom((m) => ({ ...m, [r.key]: roadWindowAt(champs, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setRoadByRoom((m) => ({ ...m, [r.key]: roadWindow(champs, DESK_ROAD) }))
       setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgRoadRoundRef.current[r.key] = acc[0]?.roundNo
@@ -354,8 +353,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
       background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
-    }}>{phaseChip.text}</span>
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{phaseChip.text}</span>
   )
   // #42 速度 tab 条（形态A，抽件渲染）：色值传本款 tokens，件内零硬编码主题色。
   const roomTabs = renderRoomTabs({ tokens: { sel: DERBY.sel, strip: DERBY.strip, dim: DERBY.dim, tabBorder: COLORS.borderLight, onSel: '#0d2016' }, isMobile })
@@ -371,23 +369,20 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }}>该房不存在，请切回其它房</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }}>该房不存在，请切回其它房</div>
       )}
       {/* 断线重连提示（hook 自动指数退避重连；恢复后 sync 补相位） */}
       {!room.connected && room.roundNo && room.roomError !== 'invalid_room' && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${DERBY.orange}`, borderRadius: 10,
-          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800,
-        }}>连接断开，正在重连…</div>
+          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800 }}>连接断开，正在重连…</div>
       )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }} onClick={() => setNetErr(null)}>{netErr}</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }} onClick={() => setNetErr(null)}>{netErr}</div>
       )}
     </>
   )
@@ -409,8 +404,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       boxSizing: 'border-box', overflow: 'hidden',
       // 手机三段锁死：两相位舞台同高常驻(锁顶不跳)；桌面原样
-      ...(isDesk ? {} : { height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center' }),
-    }}>
+      ...(isDesk ? {} : { height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center' }) }}>
       <SpeedGridStage key={selectedRoomKey} phase={uiPhase} roundNo={room.roundNo} drawResult={{ n: cur }} muted={muted} height={128} />
     </div>
   ) : (
@@ -423,8 +417,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       gap: isMobile ? 10 : 18, boxSizing: 'border-box', flexWrap: 'wrap',
-      ...(isDesk ? {} : { height: 150, overflow: 'hidden' }),
-    }}>
+      ...(isDesk ? {} : { height: 150, overflow: 'hidden' }) }}>
       {/* 冠军大牌 */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flex: '0 0 auto' }}>
         <span style={{ color: drawing ? DERBY.orange : DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>{zoneTitle}</span>
@@ -435,8 +428,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
           boxShadow: '0 0 14px rgba(255,213,79,0.45), inset 0 2px 3px rgba(255,255,255,0.25)',
           color: COLORS.white, fontSize: isMobile ? 26 : 32, fontWeight: 900,
           fontFamily: "'Space Grotesk', sans-serif",
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}>{drawing ? '?' : shownChamp}</span>
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{drawing ? '?' : shownChamp}</span>
         <span style={{ color: DERBY.gold, fontSize: 10, fontWeight: 900 }}>
           {drawing ? '— · —' : `${champTeam.name} · ${champTeam.range}`}
         </span>
@@ -457,8 +449,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
                   color: COLORS.white, fontSize: mini * 0.42, fontWeight: 900,
                   fontFamily: "'Space Grotesk', sans-serif",
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  boxSizing: 'border-box', opacity: lit ? 1 : 0.85,
-                }}>{n}</span>
+                  boxSizing: 'border-box', opacity: lit ? 1 : 0.85 }}>{n}</span>
               )
             })}
             <span style={{ color: DERBY.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, whiteSpace: 'nowrap', marginLeft: 2 }}>{t.name}</span>
@@ -493,8 +484,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
         display: 'flex', flexDirection: 'column',
         padding: isMobile ? '6px 12px' : hasRail ? '4px 0' : '4px 18px', boxSizing: 'border-box',
         gap: 4, overflowY: 'auto',
-        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
-      }}>
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处。hasRail 下发→车队四键竖排防裁 */}
         {/* #47 ⚠ 桌手共用 → big/stacked 只在 hasRail 档给 */}
@@ -524,16 +514,14 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
         padding: hasRail ? '6px 0' : '6px 12px',
         background: DERBY.band,
         borderTop: '1px solid rgba(0,0,0,0.25)',
-        position: 'relative', zIndex: 1,
-      }}>
+        position: 'relative', zIndex: 1 }}>
         <div style={{
           display: 'grid',
           /* #47 ⚠ 桌手共用 → 行高与钮列宽必须 hasRail 门控，手机保持 28px/92px */
           gridTemplateColumns: `minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) ${hasRail ? 110 : 92}px`,
           gridTemplateRows: `repeat(2, ${hasRail ? 34 : 28}px)`,
           gap: 6,
-          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
-        }}>
+          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto' }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
             { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -545,16 +533,14 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
               background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
               border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
               cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
-              boxSizing: 'border-box',
-            }}>{v}</button>
+              boxSizing: 'border-box' }}>{v}</button>
           ))}
           <div style={{
             gridColumn: 3, gridRow: 1,
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
             borderRadius: 8, padding: '0 6px',
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-          }}>
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input
               value={bet}
@@ -562,8 +548,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
               onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{
                 width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-                color: COLORS.white, fontSize: 14, fontWeight: 900,
-              }}
+                color: COLORS.white, fontSize: 14, fontWeight: 900 }}
             />
           </div>
           <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
@@ -574,8 +559,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
             background: 'rgba(0,0,0,0.35)',
             border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
             cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
@@ -602,8 +586,7 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       <div style={{
         display: 'flex', flexDirection: 'column',
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
-        background: COLORS.bg,
-      }}>
+        background: COLORS.bg }}>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />

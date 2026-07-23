@@ -15,7 +15,15 @@
 //   （因为 L ≡ N mod rows 被保持，L+1 与 N+1 同余）。故 WS 追珠与首灌走同一函数、无需特判。
 //
 // ⚠ 首灌不要先截到 usable 再进来：那样 N 恰等于 usable、算出 28 满列钉在角落。
-//   应把拉回的完整条数（应 > usable）直接喂进来，当前列才会天然半满。
+//   应把拉回的完整条数（应 > usable）直接喂进来。
+//
+// #B1 跨零点相位修复（退役 roadWindowAt）：相位【由珠数 list.length 自持】，不再依赖期号。
+//   旧法用 roadWindowAt(list, roundSeq(期号)) 拿【当日期号序号】当相位基准 N —— 期号跨零点归 1，
+//   N 从 ~1400 掉到个位数 → keep 骤裁到十几颗，全端路珠每天零点缩水、随当日局数慢慢回血。
+//   现首灌与 WS 追珠统一走本函数（N = list.length）：/round/history 不按日切（COALESCE room），
+//   跨日仍返回最近 ~174 局 → 裁到 168 满墙，零点不缩水；三场景（重启/切房/重灌）皆连续。
+//   代价：首灌初始相位从「当前列半满」变「可能满列」（174%6=0→168 满 28 列）——半列的活性
+//   已由弹入动效 + 呼吸游标接管，不为它养期号相位逻辑（Ray B1 定案）。
 export const ROAD_RESERVE_COLS = 2
 
 export function roadWindow(list, { cols = 30, rows = 6, reserve = ROAD_RESERVE_COLS } = {}) {
@@ -31,22 +39,7 @@ export function roadSeedTarget({ cols = 30, rows = 6, reserve = ROAD_RESERVE_COL
   return (cols - reserve) * rows + rows
 }
 
-// 按【指定的 N】开窗（首灌专用）：list 是拉回的素材，n 是真实序列基准。
-// ⚠ 首灌【不能】用 list.length 当 N —— 拉取条数是固定的（如恒 174），mod rows 恒为 0，
-//   会把当前列算成整列满、新珠钉在角落，正是定案禁止的。应传【最新一期的期号序号】：
-//   它每局 +1，与 WS 增量后 window(D+1) 的相位天然连续（因 L ≡ N mod rows 被保持）。
-export function roadWindowAt(list, n, { cols = 30, rows = 6, reserve = ROAD_RESERVE_COLS } = {}) {
-  const usable = (cols - reserve) * rows
-  if (!Array.isArray(list) || !Number.isFinite(n)) return roadWindow(list, { cols, rows, reserve })
-  const keep = n <= usable ? n : usable - ((rows - (n % rows)) % rows)
-  return list.slice(-Math.max(0, Math.min(keep, list.length)))
-}
 
-// 从期号取序号段：'WX-20260722-1347' → 1347（取末段数字；取不到返回 null）
-export function roundSeq(roundNo) {
-  const t = String(roundNo || '').split('-').pop()
-  return /^\d+$/.test(t) ? Number(t) : null
-}
 
 // ============================================================================
 // #47 追加·路珠活性动效（三款共用，禁三份拷贝）

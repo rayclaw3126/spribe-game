@@ -27,7 +27,7 @@ import { RULES } from './markets-ui/numberupRules'               // #41 单15：
 
 // —— 引擎常量块已剪切到 ./markets/numberup（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { pad2, drawNumber, deriveNum, ODDS, hitsOf, round2, MARKETS } from './markets/numberup'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roadSeedTarget, freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { drawNumber, deriveNum, ODDS, MARKETS, hitsOf }
 
 // ---------- 换人牌舞台时间轴（rAF 内使用，毫秒）：十位先定、个位后定 ----------
@@ -95,8 +95,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
     ROOMS, selectedRoomKey, roomsByKey, room, roomA, roomB,
     betsRef, betsOf, betsPlaced, setBetsPlaced, hasLast, lastBetsRef,
     shownRoundRef, animatedRoundRef, settleInfoRef,
-    commitSettle, resetRoomView, renderRoomTabs,
-  } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
+    commitSettle, resetRoomView, renderRoomTabs } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
 
 
   const [bet, setBet] = useState(10)
@@ -296,7 +295,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
         .map((it) => (it?.drawResult?.num != null ? deriveNum(it.drawResult.num).num : null))
         .filter((n) => n != null)
       if (!nums.length) return
-      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindowAt(nums, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindow(nums, DESK_ROAD) }))
       setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
@@ -379,8 +378,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
       transition: 'filter 0.12s, background 0.12s, border-color 0.12s, box-shadow 0.15s',
       boxSizing: 'border-box',
-      position: 'relative',
-    }
+      position: 'relative' }
   }
   const cellName = { color: NUMBERUP.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
   const cellRange = { color: NUMBERUP.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
@@ -391,8 +389,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       position: 'absolute', top: 2, right: 3,
       padding: '1px 5px', borderRadius: RADIUS.pill,
       background: NUMBERUP.sel, color: '#083a1b',
-      fontSize: 9, fontWeight: 900,
-    }}>${betsPlaced.get(key)}</span>
+      fontSize: 9, fontWeight: 900 }}>${betsPlaced.get(key)}</span>
   )
 
   // 10×10 网格格（选中亮金 / 已下注金框 / 命中亮绿）
@@ -413,8 +410,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
         fontFamily: "'Space Grotesk', sans-serif",
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         boxSizing: 'border-box',
-        transition: 'background 0.1s, box-shadow 0.1s',
-      }}>{pad2(n)}</button>
+        transition: 'background 0.1s, box-shadow 0.1s' }}>{pad2(n)}</button>
     )
   }
 
@@ -434,8 +430,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
       background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
-    }}>{phaseChip.text}</span>
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{phaseChip.text}</span>
   )
   const subRowNode = <NumberUpPodium last={lastNum.num} recent={recent} isMobile={isMobile} />   // 上局信息条（切件）
 
@@ -453,23 +448,20 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }}>该房不存在，请切回其它房</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }}>该房不存在，请切回其它房</div>
       )}
       {/* 断线重连提示（hook 自动指数退避重连；恢复后 sync 补相位） */}
       {!room.connected && room.roundNo && room.roomError !== 'invalid_room' && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${NUMBERUP.orange}`, borderRadius: 10,
-          padding: '8px 16px', color: NUMBERUP.orange, fontSize: 13, fontWeight: 800,
-        }}>连接断开，正在重连…</div>
+          padding: '8px 16px', color: NUMBERUP.orange, fontSize: 13, fontWeight: 800 }}>连接断开，正在重连…</div>
       )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }} onClick={() => setNetErr(null)}>{netErr}</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }} onClick={() => setNetErr(null)}>{netErr}</div>
       )}
     </>
   )
@@ -502,8 +494,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       // #47 二批：补 hasRail 档 —— 外层包裹层已是 800 宽，本卡侧边距必须归零才共用同一条宽度线
       margin: isMobile ? '8px 12px 0' : hasRail ? '10px 0 0' : '10px 18px 0',
       background: NUMBERUP.strip, border: '1px solid rgba(255,255,255,0.1)',
-      borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box', minHeight: stageH,
-    }}>
+      borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box', minHeight: stageH }}>
       {(drawing || settled) && pendingRef.current ? (
         <NumberUpStage key={selectedRoomKey} phase={settled ? 'settled' : 'drawn'} roundNo={room.roundNo} drawResult={{ num: pendingRef.current.num }}
           height={stageH} muted={muted}
@@ -511,14 +502,12 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       ) : (
         <div style={{
           height: stageH, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: 10, boxSizing: 'border-box',
-        }}>
+          alignItems: 'center', justifyContent: 'center', gap: 10, boxSizing: 'border-box' }}>
           <span style={{ color: NUMBERUP.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>上期开奖 · 待命中</span>
           <NumberCard num={lastNum.num} w={isMobile ? 44 : 52} />
           <span style={{
             padding: '2px 14px', borderRadius: RADIUS.pill,
-            background: NUMBERUP.gold, color: '#3a2c00', fontSize: 13, fontWeight: 900, whiteSpace: 'nowrap',
-          }}>号码 {pad2(lastNum.num)}</span>
+            background: NUMBERUP.gold, color: '#3a2c00', fontSize: 13, fontWeight: 900, whiteSpace: 'nowrap' }}>号码 {pad2(lastNum.num)}</span>
         </div>
       )}
     </div>
@@ -530,8 +519,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden',
       position: 'relative',
       display: 'flex', flexDirection: 'column',
-      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
-    }}>
+      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}) }}>
       <style>{`.nuCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
 
       {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
@@ -563,12 +551,10 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       {/* ---- ④ bottom bet band — pinned，grid 4列×2行（照 Line Up 定案）---- */}
       <div style={{
         flex: '0 0 auto', padding: hasRail ? '6px 0' : '6px 12px', background: NUMBERUP.band,
-        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
-      }}>
+        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47：92→110 */
-          gridTemplateRows: 'repeat(2, 34px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
-        }}>
+          gridTemplateRows: 'repeat(2, 34px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto' }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
             { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -578,14 +564,12 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
               fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
               background: bet === v ? NUMBERUP.selTint : 'rgba(0,0,0,0.35)',
               border: `1px solid ${bet === v ? NUMBERUP.sel : 'rgba(255,255,255,0.35)'}`,
-              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
-            }}>{v}</button>
+              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box' }}>{v}</button>
           ))}
           <div style={{
             gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
             borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-          }}>
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
@@ -596,8 +580,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
             color: repeatOk ? COLORS.white : NUMBERUP.dim, background: 'rgba(0,0,0,0.35)',
             border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
             cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
@@ -622,8 +605,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   const SEC_TEST = {
     pick: k => k.startsWith('n-'),
     digit: k => k.startsWith('fd-') || k.startsWith('ld-'),
-    side: k => k.startsWith('s-'),
-  }
+    side: k => k.startsWith('s-') }
   const selCount = (sec) => {
     let n = 0
     new Set([...picks, ...betsPlaced.keys()]).forEach(k => { if (SEC_TEST[sec](k)) n++ })
@@ -638,8 +620,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
         <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
           width: '100%', height: 36, boxSizing: 'border-box',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
-        }}>
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <span style={{ color: NUMBERUP.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
             {cnt > 0 && (
@@ -699,8 +680,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${NUMBERUP.bgCenter}, ${NUMBERUP.bgOuter})`,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
-      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
-    }}>
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
       <style>{`.nuCell:hover:not(:disabled) { filter: brightness(1.3); }`}</style>
 
       {/* ① 锁顶：GameTopBar + 单舞台（stageZone 恒常驻，canvas 相位内换，不折叠不卸载） */}
@@ -726,8 +706,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
                 flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: RADIUS.pill,
                 background: roadTab === t ? NUMBERUP.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : NUMBERUP.dim,
                 border: `1px solid ${roadTab === t ? NUMBERUP.sel : 'rgba(255,255,255,0.2)'}`,
-                fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
-              }}>{ROAD_TAB_LABELS[t]}</button>
+                fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer' }}>{ROAD_TAB_LABELS[t]}</button>
             ))}
           </div>
           {/* #47 A 案：30×6 珠18，598 > 390 → 横滑，右端锚定最新珠 */}
@@ -746,8 +725,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
                     background: b ? b.c : 'rgba(255,255,255,0.05)',
                     border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
                     color: COLORS.white, fontSize: b && b.t.length > 1 ? 7 : 9, fontWeight: 900,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
-                  }}>{b ? b.t : ''}</span>
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>{b ? b.t : ''}</span>
                 )
               })}
             </div>
@@ -756,8 +734,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
         <div style={{ padding: '6px 12px', background: NUMBERUP.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{
             display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
-          }}>
+            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto' }}>
             {[
               { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
               { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -767,14 +744,12 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
                 fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
                 background: bet === v ? NUMBERUP.selTint : 'rgba(0,0,0,0.35)',
                 border: `1px solid ${bet === v ? NUMBERUP.sel : 'rgba(255,255,255,0.35)'}`,
-                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
-              }}>{v}</button>
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box' }}>{v}</button>
             ))}
             <div style={{
               gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
               borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-            }}>
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
               <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
               <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
@@ -785,8 +760,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
               color: repeatOk ? COLORS.white : NUMBERUP.dim, background: 'rgba(0,0,0,0.35)',
               border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
               cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
             <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
               <BetButton
                 state="bet"
@@ -814,8 +788,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       <div style={{
         display: 'flex', flexDirection: 'column',
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
-        background: COLORS.bg,
-      }}>
+        background: COLORS.bg }}>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />

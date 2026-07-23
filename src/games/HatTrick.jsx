@@ -17,7 +17,7 @@ import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import HatTrickStage from './stages/HatTrickStage'
 import HatTrickMarkets, { DieFace } from './markets-ui/HatTrickMarkets'   // #41 单15：盘口区切件（DieFace 随件，舞台/mobile 回用）
 import HatTrickRoad from './markets-ui/HatTrickRoad'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）                       // #41 单15：珠盘路墙
+import { roadWindow, roadSeedTarget, freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）                       // #41 单15：珠盘路墙
 import HatTrickPodium from './markets-ui/HatTrickPodium'                   // #41 单15：上局信息条（subRow 槽）
 import { RULES } from './markets-ui/hattrickRules'                         // #41 单15：玩法说明内容（共享）
 import { SIDES, ROAD_TABS, ROAD_TAB_LABELS, beadFor } from './markets-ui/hattrickShared'   // #41 单15：SIDES/珠盘页签/beadFor（mobile 段回用）
@@ -104,8 +104,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     ROOMS, selectedRoomKey, roomsByKey, room, roomA, roomB,
     betsRef, betsOf, betsPlaced, setBetsPlaced, hasLast, lastBetsRef,
     shownRoundRef, animatedRoundRef, settleInfoRef,
-    commitSettle, resetRoomView, renderRoomTabs,
-  } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
+    commitSettle, resetRoomView, renderRoomTabs } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
 
 
   // ---- 本地「表演」状态机（仅动画层；相位真相在 room）----
@@ -340,7 +339,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       if (!dice.length) return
       // #47：首灌【不预截】—— 直接把拉回的完整条数过窗口，当前列才天然半满；
       //   且首灌不是「真新珠」，freshRoad 置空，避免一次灌 160+ 颗整屏爆闪。
-      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindowAt(dice, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindow(dice, DESK_ROAD) }))
       setFreshByRoom(f => ({ ...f, [r.key]: -1 }))
       const latest = acc[0]?.roundNo
       if (latest) {
@@ -469,8 +468,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       opacity: betting || hit || placed ? 1 : 0.75,
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
       transition: 'filter 0.12s, background 0.12s, border-color 0.12s, box-shadow 0.15s',
-      boxSizing: 'border-box', position: 'relative',
-    }
+      boxSizing: 'border-box', position: 'relative' }
   }
   const cellName = { color: HATTRICK.text, fontSize: isMobile ? 10 : 11.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
   const cellRange = { color: HATTRICK.dim, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
@@ -479,8 +477,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: 5,
     background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
-    boxSizing: 'border-box',
-  }
+    boxSizing: 'border-box' }
   // 押额胶囊：只显 $押额（未中结算时碎裂；就差1点的不碎，让位橙红惋惜）
   const stakeChip = key => {
     if (!betsPlaced.has(key)) return null
@@ -490,8 +487,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         position: 'absolute', top: 2, right: 3, zIndex: 2,
         padding: '1px 5px', borderRadius: RADIUS.pill,
         background: HATTRICK.sel, color: '#083a1b',
-        fontSize: 9, fontWeight: 900, pointerEvents: 'none',
-      }}>${betsPlaced.get(key)}</span>
+        fontSize: 9, fontWeight: 900, pointerEvents: 'none' }}>${betsPlaced.get(key)}</span>
     )
   }
   // 赔率位常显赢额（下注后替换赔率数字，不并列） + 结算演出 class
@@ -510,8 +506,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
       zIndex: 4, padding: '2px 6px', borderRadius: RADIUS.pill,
       background: 'rgba(4,10,7,0.78)', color: '#ff6a3d', border: '1px solid #ff6a3d',
-      fontSize: isMobile ? 8.5 : 9.5, fontWeight: 900, whiteSpace: 'nowrap', pointerEvents: 'none',
-    }}>就差1点！</span>
+      fontSize: isMobile ? 8.5 : 9.5, fontWeight: 900, whiteSpace: 'nowrap', pointerEvents: 'none' }}>就差1点！</span>
   )
 
   // TOTAL 4–17 小格（desk 14 连排 / mobile 7×2 折行不挤爆）
@@ -530,12 +525,10 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         opacity: betting || hit || placed ? 1 : 0.75,
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
         boxSizing: 'border-box', transition: 'background 0.1s, box-shadow 0.1s',
-        position: 'relative',
-      }}>
+        position: 'relative' }}>
         <span style={{
           color: hit ? '#083a1b' : HATTRICK.text, fontSize: isMobile ? 12 : 13, fontWeight: 900,
-          fontFamily: "'Space Grotesk', sans-serif",
-        }}>{s}</span>
+          fontFamily: "'Space Grotesk', sans-serif" }}>{s}</span>
         <span className={fxCls(key)} style={{ color: hit ? '#083a1b' : HATTRICK.gold, fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, whiteSpace: 'nowrap' }}>{placed ? winTxt(key, ODDS.total[s]) : ODDS.total[s]}</span>
         {stakeChip(key)}
         {nearBadge(key)}
@@ -559,8 +552,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
       background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
-    }}>{phaseChip.text}</span>
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{phaseChip.text}</span>
   )
   const subRowNode = <HatTrickPodium lastRoll={lastRoll} recent={recent} isMobile={isMobile} compact={hasRail} />   // 上局信息条（切件）；单S6：≥1280 右栏压窄启紧凑档防裁
   // #42 速度 tab 条（形态A，抽件渲染）：色值传本款 tokens，件内零硬编码主题色。
@@ -577,22 +569,19 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }}>该房不存在，请切回其它房</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }}>该房不存在，请切回其它房</div>
       )}
       {!room.connected && room.roundNo && room.roomError !== 'invalid_room' && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${HATTRICK.orange}`, borderRadius: 10,
-          padding: '8px 16px', color: HATTRICK.orange, fontSize: 13, fontWeight: 800,
-        }}>连接断开，正在重连…</div>
+          padding: '8px 16px', color: HATTRICK.orange, fontSize: 13, fontWeight: 800 }}>连接断开，正在重连…</div>
       )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }} onClick={() => setNetErr(null)}>{netErr}</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }} onClick={() => setNetErr(null)}>{netErr}</div>
       )}
     </>
   )
@@ -624,8 +613,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden',
       position: 'relative',
       display: 'flex', flexDirection: 'column',
-      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
-    }}>
+      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}) }}>
       <style>{`
         .htCell:hover:not(:disabled) { filter: brightness(1.3); }
         @keyframes htWinFly {
@@ -671,14 +659,12 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       {suspense && (
         <div style={{
           position: 'absolute', top: isMobile ? 116 : 92, left: 0, right: 0, zIndex: 7,
-          textAlign: 'center', pointerEvents: 'none',
-        }}>
+          textAlign: 'center', pointerEvents: 'none' }}>
           <span className="htSuspenseBanner" style={{
             display: 'inline-block', padding: '6px 14px', borderRadius: RADIUS.pill,
             background: 'rgba(8,18,12,0.92)', border: '2px solid #ffd54f', color: '#ffd54f',
             fontSize: isMobile ? 12 : 14, fontWeight: 900, whiteSpace: 'nowrap',
-            boxShadow: '0 0 18px rgba(255,213,79,0.7)',
-          }}>❤ {suspense.msg}</span>
+            boxShadow: '0 0 18px rgba(255,213,79,0.7)' }}>❤ {suspense.msg}</span>
         </div>
       )}
 
@@ -689,8 +675,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
           textAlign: 'center', pointerEvents: 'none',
           color: HATTRICK.gold, fontSize: isMobile ? 26 : 32, fontWeight: 900,
           fontFamily: "'Space Grotesk', sans-serif",
-          textShadow: '0 0 16px rgba(255,213,79,0.9)',
-        }}>+${result.winTotal.toFixed(2)}</div>
+          textShadow: '0 0 16px rgba(255,213,79,0.9)' }}>+${result.winTotal.toFixed(2)}</div>
       )}
 
       {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
@@ -705,8 +690,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         margin: isMobile ? '8px 12px 0' : hasRail ? '8px 0 0' : '8px 18px 0',
         ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
         background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box',
-      }}>
+        borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box' }}>
         {(drawing || settled) && pendingRef.current ? (
           <HatTrickStage key={selectedRoomKey} phase={settled ? 'settled' : 'drawn'} roundNo={room.roundNo} drawResult={{ dice: pendingRef.current.dice }}
             height="100%" muted={muted} shakeRef={cardShakeRef} onLastSuspense={onLastSuspense}
@@ -720,8 +704,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
             </span>
             <span style={{
               color: HATTRICK.gold, fontSize: isMobile ? 16 : 20, fontWeight: 900,
-              fontFamily: "'Space Grotesk', sans-serif",
-            }}>{lastRoll.isTriple ? `豹子 ${lastRoll.tripleFace}` : `和值 ${lastRoll.total}`}</span>
+              fontFamily: "'Space Grotesk', sans-serif" }}>{lastRoll.isTriple ? `豹子 ${lastRoll.tripleFace}` : `和值 ${lastRoll.total}`}</span>
           </div>
         )}
       </div>
@@ -732,8 +715,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         display: 'flex', flexDirection: 'column',
         padding: isMobile ? '6px 12px' : hasRail ? '6px 0' : '6px 18px', boxSizing: 'border-box',
         gap: 5, overflowY: 'auto',
-        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
-      }}>
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处。
             富演出层(结算飞金/碎裂·就差1点·悬念脉冲)经 settleHits/settleFx/nearMiss/suspense 传入，原页分毫不变；
@@ -757,15 +739,13 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         padding: hasRail ? '6px 0' : '6px 12px',
         background: HATTRICK.band,
         borderTop: '1px solid rgba(0,0,0,0.25)',
-        position: 'relative', zIndex: 1,
-      }}>
+        position: 'relative', zIndex: 1 }}>
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47 整改：92→110，下注钮字号 ×1.2 后在 92px 里折成三行 */
           gridTemplateRows: 'repeat(2, 34px)',   /* #47 首批：行高 28→34 */
           gap: 6,
-          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
-        }}>
+          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto' }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
             { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -777,16 +757,14 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
               background: bet === v ? HATTRICK.selTint : 'rgba(0,0,0,0.35)',
               border: `1px solid ${bet === v ? HATTRICK.sel : 'rgba(255,255,255,0.35)'}`,
               cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
-              boxSizing: 'border-box',
-            }}>{v}</button>
+              boxSizing: 'border-box' }}>{v}</button>
           ))}
           <div style={{
             gridColumn: 3, gridRow: 1,
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
             borderRadius: 8, padding: '0 6px',
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-          }}>
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input
               value={bet}
@@ -794,8 +772,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
               onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{
                 width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-                color: COLORS.white, fontSize: 14, fontWeight: 900,
-              }}
+                color: COLORS.white, fontSize: 14, fontWeight: 900 }}
             />
           </div>
           <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
@@ -806,8 +783,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
             background: 'rgba(0,0,0,0.35)',
             border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
             cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
@@ -833,8 +809,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   const SEC_TEST = {
     total: k => k.startsWith('t-') || k.startsWith('s-'),
     triple: k => k.startsWith('tr-'),
-    double: k => k.startsWith('d-'),
-  }
+    double: k => k.startsWith('d-') }
   const selCount = (sec) => {
     let n = 0
     new Set([...picks, ...betsPlaced.keys()]).forEach(k => { if (SEC_TEST[sec](k)) n++ })
@@ -849,8 +824,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
           width: '100%', height: 36, boxSizing: 'border-box',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
-        }}>
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <span style={{ color: HATTRICK.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
             {cnt > 0 && (
@@ -920,8 +894,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${HATTRICK.bgCenter}, ${HATTRICK.bgOuter})`,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
-      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
-    }}>
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
       <style>{`
         .htCell:hover:not(:disabled) { filter: brightness(1.3); }
         @keyframes htWinFly { 0% { transform: scale(1); opacity: 1; } 25% { transform: scale(1.65); opacity: 1; filter: drop-shadow(0 0 6px rgba(255,213,79,0.95)); } 100% { transform: translateY(-16px) scale(1.1); opacity: 0; } }
@@ -947,22 +920,19 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
             <span className="htSuspenseBanner" style={{
               display: 'inline-block', padding: '6px 14px', borderRadius: RADIUS.pill,
               background: 'rgba(8,18,12,0.92)', border: '2px solid #ffd54f', color: '#ffd54f',
-              fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', boxShadow: '0 0 18px rgba(255,213,79,0.7)',
-            }}>❤ {suspense.msg}</span>
+              fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', boxShadow: '0 0 18px rgba(255,213,79,0.7)' }}>❤ {suspense.msg}</span>
           </div>
         )}
         {settleFx && result?.winTotal > 0 && (
           <div className="htFlyGold" style={{
             position: 'absolute', top: '44%', left: 0, right: 0, zIndex: 6, textAlign: 'center', pointerEvents: 'none',
             color: HATTRICK.gold, fontSize: 26, fontWeight: 900, fontFamily: "'Space Grotesk', sans-serif",
-            textShadow: '0 0 16px rgba(255,213,79,0.9)',
-          }}>+${result.winTotal.toFixed(2)}</div>
+            textShadow: '0 0 16px rgba(255,213,79,0.9)' }}>+${result.winTotal.toFixed(2)}</div>
         )}
         <div style={{
           flex: '0 0 auto', height: 160, position: 'relative', zIndex: 1,
           margin: '8px 12px 0', background: HATTRICK.strip, border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box',
-        }}>
+          borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box' }}>
           {(drawing || settled) && pendingRef.current ? (
             <HatTrickStage key={selectedRoomKey} phase={settled ? 'settled' : 'drawn'} roundNo={room.roundNo} drawResult={{ dice: pendingRef.current.dice }}
               height="100%" muted={muted} shakeRef={cardShakeRef} onLastSuspense={onLastSuspense}
@@ -994,8 +964,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
                 flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: RADIUS.pill,
                 background: roadTab === t ? HATTRICK.sel : 'rgba(0,0,0,0.35)', color: roadTab === t ? '#083a1b' : HATTRICK.dim,
                 border: `1px solid ${roadTab === t ? HATTRICK.sel : 'rgba(255,255,255,0.2)'}`,
-                fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
-              }}>{ROAD_TAB_LABELS[t]}</button>
+                fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer' }}>{ROAD_TAB_LABELS[t]}</button>
             ))}
           </div>
           {/* #47 A 案：30×6 珠18，598 > 390 → 横滑，右端锚定最新珠 */}
@@ -1014,8 +983,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
                     background: b ? b.c : 'rgba(255,255,255,0.05)',
                     border: b ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
                     color: b?.dark ? '#3a2c00' : COLORS.white, fontSize: b && b.t.length > 1 ? 7 : 9, fontWeight: 900,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
-                  }}>{b ? b.t : ''}</span>
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>{b ? b.t : ''}</span>
                 )
               })}
             </div>
@@ -1024,8 +992,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
         <div style={{ padding: '6px 12px', background: HATTRICK.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{
             display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
-          }}>
+            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto' }}>
             {[
               { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
               { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -1035,14 +1002,12 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
                 fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
                 background: bet === v ? HATTRICK.selTint : 'rgba(0,0,0,0.35)',
                 border: `1px solid ${bet === v ? HATTRICK.sel : 'rgba(255,255,255,0.35)'}`,
-                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
-              }}>{v}</button>
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box' }}>{v}</button>
             ))}
             <div style={{
               gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
               borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-            }}>
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
               <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
               <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
@@ -1053,8 +1018,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
               color: repeatOk ? HATTRICK.text : HATTRICK.dim, background: 'rgba(0,0,0,0.35)',
               border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
               cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
             <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
               <BetButton
                 state="bet"
@@ -1082,8 +1046,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       <div style={{
         display: 'flex', flexDirection: 'column',
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
-        background: COLORS.bg,
-      }}>
+        background: COLORS.bg }}>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />

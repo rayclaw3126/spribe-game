@@ -29,7 +29,7 @@ import trafficLightImg from '../assets/goldenboot/traffic_light.png'
 
 // —— 引擎常量块已剪切到 ./markets/goldenboot（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { drawRace, deriveRace, ODDS, hitsOf, round2, MARKETS, SUM_N } from './markets/goldenboot'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roadSeedTarget } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { drawRace, deriveRace, ODDS, MARKETS, hitsOf }
 
 // ---------- 冲刺舞台时间轴（rAF 内使用，毫秒）：----------
@@ -79,8 +79,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
     ROOMS, selectedRoomKey, roomsByKey, room, roomA, roomB,
     betsRef, betsOf, betsPlaced, setBetsPlaced, hasLast, lastBetsRef,
     shownRoundRef, animatedRoundRef, settleInfoRef,
-    commitSettle, resetRoomView, renderRoomTabs,
-  } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
+    commitSettle, resetRoomView, renderRoomTabs } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
 
 
   const [bet, setBet] = useState(10)
@@ -268,7 +267,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
           ? (() => { const d = deriveRace(it.drawResult.ranking); return { winner: d.winner, sum: d.sprintSum } })() : null))
         .filter(Boolean)
       if (!rows.length) return
-      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindowAt(rows, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindow(rows, DESK_ROAD) }))
       setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
@@ -353,8 +352,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
       background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
-    }}>{phaseChip.text}</span>
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{phaseChip.text}</span>
   )
   const subRowNode = <GoldenBootPodium order={lastRace.order} isMobile={isMobile} />   // 上局前三名信息条（切件）
   // #42 速度 tab 条（形态A，抽件渲染）：色值传本款 tokens，件内零硬编码主题色。
@@ -371,22 +369,19 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }}>该房不存在，请切回其它房</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }}>该房不存在，请切回其它房</div>
       )}
       {!room.connected && room.roundNo && room.roomError !== 'invalid_room' && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${GOLDENBOOT.orange}`, borderRadius: 10,
-          padding: '8px 16px', color: GOLDENBOOT.orange, fontSize: 13, fontWeight: 800,
-        }}>连接断开，正在重连…</div>
+          padding: '8px 16px', color: GOLDENBOOT.orange, fontSize: 13, fontWeight: 800 }}>连接断开，正在重连…</div>
       )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }} onClick={() => setNetErr(null)}>{netErr}</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }} onClick={() => setNetErr(null)}>{netErr}</div>
       )}
     </>
   )
@@ -417,8 +412,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       margin: isMobile ? '8px 12px 0' : hasRail ? '6px 0 0' : '6px 18px 0',
       ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
       background: GOLDENBOOT.strip, border: '1px solid rgba(255,255,255,0.1)',
-      borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box', minHeight: stageH,
-    }}>
+      borderRadius: 10, overflow: 'hidden', boxSizing: 'border-box', minHeight: stageH }}>
       {(racing || settled) && pendingRef.current ? (
         <GoldenBootStage key={selectedRoomKey} phase={settled ? 'settled' : 'drawn'} roundNo={room.roundNo} drawResult={{ ranking: pendingRef.current.order }}
           height={stageH} muted={muted}
@@ -427,14 +421,12 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
         // BETTING 待命：赛车停起跑线（与冲刺舞台同套赛车视觉）+ 红绿灯红灯待发
         <div style={{
           height: stageH, position: 'relative', overflow: 'hidden', boxSizing: 'border-box',
-          background: 'linear-gradient(180deg, #252932, #15181f)',
-        }}>
+          background: 'linear-gradient(180deg, #252932, #15181f)' }}>
           {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
             <div key={n} style={{
               position: 'absolute', left: 0, right: 0, top: `${(n - 1) * 10}%`, height: '10%',
               borderBottom: n < 10 ? '1px dashed rgba(255,255,255,0.15)' : 'none',
-              display: 'flex', alignItems: 'center', gap: 5, paddingLeft: isMobile ? 8 : 14,
-            }}>
+              display: 'flex', alignItems: 'center', gap: 5, paddingLeft: isMobile ? 8 : 14 }}>
               <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 900, width: 9, textAlign: 'right' }}>{n}</span>
               <img src={CAR_SRC[n]} alt={`car ${n}`} style={{ height: `${stageH / 10 * 0.82}px`, width: 'auto', display: 'block' }} />
             </div>
@@ -444,12 +436,10 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
           {/* 红绿灯（红灯待发，居中）*/}
           <div style={{
             position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none',
-          }}>
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none' }}>
             <img src={trafficLightImg} alt="traffic light" style={{
               height: stageH * 0.58, width: 'auto', display: 'block',
-              filter: 'drop-shadow(0 0 10px rgba(255,60,40,0.75))',
-            }} />
+              filter: 'drop-shadow(0 0 10px rgba(255,60,40,0.75))' }} />
             <span style={{ color: GOLDENBOOT.dim, fontSize: 9, fontWeight: 900, letterSpacing: 1 }}>起跑线待命</span>
           </div>
         </div>
@@ -479,8 +469,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
         display: 'flex', flexDirection: 'column',
         padding: isMobile ? '8px 12px' : hasRail ? '8px 0' : '8px 18px', boxSizing: 'border-box',
         gap: isMobile ? 8 : 10, overflowY: 'auto',
-        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
-      }}>
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
         {/* #47 ⚠ 桌手共用 → big 只在 hasRail 档给，手机与窄桌面不传 */}
@@ -497,13 +486,11 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       {/* ---- ④ bottom bet band — pinned，grid 4列×2行（抄 LineUp/DominoDuel）---- */}
       <div style={{
         flex: '0 0 auto', padding: hasRail ? '6px 0' : '6px 12px', background: GOLDENBOOT.band,
-        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
-      }}>
+        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
         <div style={{
           /* #47 ⚠ 桌手共用 → 行高与钮列宽必须 hasRail 门控，手机保持 28px/92px 逐字节不变 */
           display: 'grid', gridTemplateColumns: `minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) ${hasRail ? 110 : 92}px`,
-          gridTemplateRows: `repeat(2, ${hasRail ? 34 : 28}px)`, gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
-        }}>
+          gridTemplateRows: `repeat(2, ${hasRail ? 34 : 28}px)`, gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto' }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
             { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -513,14 +500,12 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
               fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
               background: bet === v ? GOLDENBOOT.selTint : 'rgba(0,0,0,0.35)',
               border: `1px solid ${bet === v ? GOLDENBOOT.sel : 'rgba(255,255,255,0.35)'}`,
-              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
-            }}>{v}</button>
+              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box' }}>{v}</button>
           ))}
           <div style={{
             gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
             borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-          }}>
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
@@ -531,8 +516,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
             color: repeatOk ? COLORS.white : GOLDENBOOT.dim, background: 'rgba(0,0,0,0.35)',
             border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
             cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
@@ -559,8 +543,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       <div style={{
         display: 'flex', flexDirection: 'column',
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
-        background: COLORS.bg,
-      }}>
+        background: COLORS.bg }}>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />

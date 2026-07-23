@@ -16,7 +16,7 @@ import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import DominoDuelMarkets from './markets-ui/DominoDuelMarkets'   // #41 单16：盘口区切件（section= 逐段接入手风琴，视觉原样）
 import DominoDuelRoad from './markets-ui/DominoDuelRoad'   // #41 单16：珠盘路墙（页签/判定单一出处，走引擎）
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）
+import { roadWindow, roadSeedTarget, freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）
 import { RULES } from './markets-ui/dominoduelRules'            // #41 单16：玩法说明内容（共享）
 // #44 单S1：翻牌视觉原子（DominoTile/时间轴/keyframes）单一出处切至多桌舞台件，原页 import 回引（等价搬家）。
 import { DominoTile, FLIP_DELAY, FLIP_DUR, FLIP_END, DD_KEYFRAMES } from './stages/DominoDuelStage'
@@ -361,13 +361,11 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   // 已随盘口区切至 ./markets-ui/DominoDuelMarkets（键区单一出处）。secBox 留用于手机手风琴外壳(accSection)。
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 4 : 5,
-    background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', boxSizing: 'border-box',
-  }
+    background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)', boxSizing: 'border-box' }
   // 盘口区共享 props（桌面平铺 / 手机逐段 section= 同一出处，中奖高亮/退注态走件内建标准）
   const marketsProps = {
     onPick: toggleSel, stakes: betsPlaced, disabled: !betting,
-    selected: picks, hits: result?.hits, pushes: result?.pushes, isMobile,
-  }
+    selected: picks, hits: result?.hits, pushes: result?.pushes, isMobile }
 
   // ---- 顶栏 ----
   const connecting = !room.connected && !room.roundNo
@@ -385,8 +383,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
       background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseInfo.c}`,
-      color: phaseInfo.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
-    }}>{phaseInfo.text}{phaseInfo.cd && <span style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{secs}</span>}</span>
+      color: phaseInfo.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{phaseInfo.text}{phaseInfo.cd && <span style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{secs}</span>}</span>
   )
   const topBar = (
     <>
@@ -398,15 +395,13 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${DERBY.orange}`, borderRadius: 10,
-          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800,
-        }}>连接断开，正在重连…</div>
+          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800 }}>连接断开，正在重连…</div>
       )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }} onClick={() => setNetErr(null)}>{netErr}</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }} onClick={() => setNetErr(null)}>{netErr}</div>
       )}
     </>
   )
@@ -420,8 +415,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
       <span style={{
         padding: '2px 12px', borderRadius: RADIUS.pill, background: color,
-        color: COLORS.white, fontSize: isMobile ? 11 : 12, fontWeight: 900, letterSpacing: 0.5,
-      }}>{name}</span>
+        color: COLORS.white, fontSize: isMobile ? 11 : 12, fontWeight: 900, letterSpacing: 0.5 }}>{name}</span>
       <div style={{ display: 'flex', gap: 6 }}>
         {tiles.map((t, i) => {
           const slot = side === 'h' ? i * 2 : i * 2 + 1   // 全局翻序 主1→客1→主2→客2
@@ -486,7 +480,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       if (!pairs.length) return
       // #47：首灌【不预截】—— 直接把拉回的完整条数过窗口，当前列才天然半满；
       //   且首灌不是「真新珠」，freshIdx 置 -1，避免一次灌 160+ 颗整屏爆闪。
-      setRoad(roadWindowAt(pairs, roundSeq(acc[0]?.roundNo), DESK_ROAD))
+      setRoad(roadWindow(pairs, DESK_ROAD))
       setFreshIdx(-1)
       const latest = acc[0]?.roundNo
       if (latest) roadRecordedRef.current = latest
@@ -504,19 +498,16 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       borderRadius: 12, padding: isMobile ? '10px 8px' : '10px 18px',
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      gap: isMobile ? 14 : 30, boxSizing: 'border-box', flexWrap: 'wrap', overflow: 'hidden',
-    }}>
+      gap: isMobile ? 14 : 30, boxSizing: 'border-box', flexWrap: 'wrap', overflow: 'hidden' }}>
       {settled && !reduced && (
         <div style={{
           position: 'absolute', top: 0, bottom: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 3,
-          left: winSide === 'away' ? '50%' : 0, right: winSide === 'home' ? '50%' : 0,
-        }}>
+          left: winSide === 'away' ? '50%' : 0, right: winSide === 'home' ? '50%' : 0 }}>
           {confetti.map((p, i) => (
             <span key={i} style={{
               position: 'absolute', top: -12, left: `${p.left}%`, width: p.size, height: p.size * 0.55,
               background: p.color, borderRadius: 1, '--rot': `${p.rot}deg`,
-              animation: `ddConfFall ${p.dur}s linear ${p.delay}s both`,
-            }} />
+              animation: `ddConfFall ${p.dur}s linear ${p.delay}s both` }} />
           ))}
         </div>
       )}
@@ -526,8 +517,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         {outcomeTag && (
           <span style={{
             padding: '1px 8px', borderRadius: RADIUS.pill, background: 'rgba(0,0,0,0.4)',
-            border: `1px solid ${outcomeTag.c}`, color: outcomeTag.c, fontSize: 9, fontWeight: 900, whiteSpace: 'nowrap',
-          }}>{outcomeTag.t}</span>
+            border: `1px solid ${outcomeTag.c}`, color: outcomeTag.c, fontSize: 9, fontWeight: 900, whiteSpace: 'nowrap' }}>{outcomeTag.t}</span>
         )}
       </div>
       {teamBlock('客队', shown.awayTiles, shown.as, DERBY.away, 'a')}
@@ -555,8 +545,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       background: `radial-gradient(circle at 50% 28%, ${DERBY.bgCenter}, ${DERBY.bgOuter})`,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
       display: 'flex', flexDirection: 'column',
-      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
-    }}>
+      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}) }}>
       {/* .ddCell hover 样式已随盘口区切至 DominoDuelMarkets（组件内 <style> 挂）；对决区(舞台)动画 keyframes 单一出处 DD_KEYFRAMES */}
       <style>{DD_KEYFRAMES}</style>
       {topBar}
@@ -565,8 +554,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         flex: '0 1 auto', minHeight: 0, position: 'relative', zIndex: 1,
         display: 'flex', flexDirection: 'column',
         padding: isMobile ? '6px 12px' : hasRail ? '4px 0' : '4px 18px', boxSizing: 'border-box', gap: 5, overflowY: 'auto',
-        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
-      }}>
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
         <WinToast toasts={toasts} />
         <DominoDuelMarkets {...marketsProps} isDesk={isDesk} big />
       </div>
@@ -576,8 +564,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       {/* ---- 底部下注栏 grid 4×2 ---- */}
       <div style={{
         flex: '0 0 auto', padding: hasRail ? '6px 0' : '6px 12px', background: DERBY.band,
-        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
-      }}>
+        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47 整改：92→110，下注钮字号 ×1.2 后在 92px 里折成三行 */
           gridTemplateRows: 'repeat(2, 34px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',   /* #47 首批：行高 28→34 */
@@ -591,14 +578,12 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
               fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
               background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
               border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
-              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
-            }}>{v}</button>
+              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box' }}>{v}</button>
           ))}
           <div style={{
             gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
             borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-          }}>
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
@@ -609,8 +594,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
             color: repeatOk ? COLORS.white : DERBY.dim, background: 'rgba(0,0,0,0.35)',
             border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
             cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
@@ -655,8 +639,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
           width: '100%', height: 36, boxSizing: 'border-box',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
-        }}>
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <span style={{ color: DERBY.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
             {cnt > 0 && (
@@ -683,8 +666,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${DERBY.bgCenter}, ${DERBY.bgOuter})`,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
-      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
-    }}>
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
       {/* .ddCell hover 样式已随盘口区切至 DominoDuelMarkets（组件内 <style> 挂）；对决区(舞台)动画 keyframes 单一出处 DD_KEYFRAMES */}
       <style>{DD_KEYFRAMES}</style>
 
@@ -714,8 +696,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
         <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{
             display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
-          }}>
+            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto' }}>
             {[
               { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
               { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -725,14 +706,12 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
                 fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
                 background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
                 border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
-                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
-              }}>{v}</button>
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box' }}>{v}</button>
             ))}
             <div style={{
               gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
               borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-            }}>
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
               <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
               <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
@@ -743,8 +722,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
               color: repeatOk ? COLORS.white : DERBY.dim, background: 'rgba(0,0,0,0.35)',
               border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
               cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
             <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
               <BetButton state="bet"
                 label={betting ? `下注 ${picks.size} 格` : drawing ? '开牌中…' : '本局已结'}

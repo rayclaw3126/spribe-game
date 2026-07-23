@@ -18,7 +18,7 @@ import HalfTimeStage from './stages/HalfTimeStage'
 import HalfTimeMarkets from './markets-ui/HalfTimeMarkets'                  // #41 单15：盘口区切件
 import { SEC_KEYS } from './markets-ui/halftimeMarketsData'                // #41 单15：段位 key 集（手机手风琴 selCount 用，单一出处）
 import HalfTimeRoad from './markets-ui/HalfTimeRoad'                        // #41 单15：珠盘路墙
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roadSeedTarget, freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 import HalfTimePodium from './markets-ui/HalfTimePodium'                    // #41 单15：上局信息条（20 球+和值）
 import { RULES } from './markets-ui/halftimeRules'                          // #41 单15：玩法说明内容（共享）
 
@@ -83,8 +83,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
     ROOMS, selectedRoomKey, roomsByKey, room, roomA, roomB,
     betsRef, betsOf, betsPlaced, setBetsPlaced, hasLast, lastBetsRef,
     shownRoundRef, animatedRoundRef, settleInfoRef,
-    commitSettle, resetRoomView, renderRoomTabs,
-  } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
+    commitSettle, resetRoomView, renderRoomTabs } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
 
 
   const [bet, setBet] = useState(10)
@@ -280,7 +279,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         .map((it) => (Array.isArray(it?.drawResult?.balls) ? (() => { const d = deriveRound(it.drawResult.balls); return { sum: d.sum, half: halfOf(d) } })() : null))
         .filter(Boolean)
       if (!rows.length) return
-      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindowAt(rows, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindow(rows, DESK_ROAD) }))
       setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
@@ -367,8 +366,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
       background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
-    }}>{phaseChip.text}</span>
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{phaseChip.text}</span>
   )
   const subRowNode = <HalfTimePodium lastDraw={lastDraw} isMobile={isMobile} compact={hasRail} />   // 上局信息条（切件）；单S6：≥1280 右栏压窄启紧凑档防裁
   // #42 速度 tab 条（形态A，抽件渲染）：色值传本款 tokens，件内零硬编码主题色。
@@ -385,23 +383,20 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }}>该房不存在，请切回其它房</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }}>该房不存在，请切回其它房</div>
       )}
       {/* 断线重连提示（hook 自动指数退避重连；恢复后 sync 补相位） */}
       {!room.connected && room.roundNo && room.roomError !== 'invalid_room' && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${HALFTIME.gold}`, borderRadius: 10,
-          padding: '8px 16px', color: HALFTIME.gold, fontSize: 13, fontWeight: 800,
-        }}>连接断开，正在重连…</div>
+          padding: '8px 16px', color: HALFTIME.gold, fontSize: 13, fontWeight: 800 }}>连接断开，正在重连…</div>
       )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }} onClick={() => setNetErr(null)}>{netErr}</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }} onClick={() => setNetErr(null)}>{netErr}</div>
       )}
     </>
   )
@@ -421,8 +416,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden',
       position: 'relative',
       display: 'flex', flexDirection: 'column',
-      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
-    }}>
+      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}) }}>
       {/* .htCell hover / .htimeWin 脉冲样式已随盘口区切至 HalfTimeMarkets（组件内 <style> 挂） */}
 
       {/* ---- top bar（共享件：场馆行+特件 subRow 并入）---- */}
@@ -445,8 +439,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         display: 'flex', flexDirection: 'column', justifyContent: 'center',
         padding: isMobile ? '10px 12px' : hasRail ? '12px 0' : '12px 18px', boxSizing: 'border-box',
         gap: isMobile ? 8 : 10,
-        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
-      }}>
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（行①②③ 视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
         <HalfTimeMarkets {...marketsProps} big />
@@ -460,12 +453,10 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       {/* ---- bottom bet band — pinned，grid 4列×2行（照 Line Up 定案）---- */}
       <div style={{
         flex: '0 0 auto', padding: hasRail ? '6px 0' : '6px 12px', background: HALFTIME.band,
-        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1,
-      }}>
+        borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47：92→110，钮字号 ×1.2 后 92px 折三行 */
-          gridTemplateRows: 'repeat(2, 34px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
-        }}>
+          gridTemplateRows: 'repeat(2, 34px)', gap: 6, maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto' }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
             { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -475,14 +466,12 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
               fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
               background: bet === v ? HALFTIME.selTint : 'rgba(0,0,0,0.35)',
               border: `1px solid ${bet === v ? HALFTIME.sel : 'rgba(255,255,255,0.35)'}`,
-              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
-            }}>{v}</button>
+              cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box' }}>{v}</button>
           ))}
           <div style={{
             gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
             borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-          }}>
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
@@ -493,8 +482,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
             color: repeatOk ? COLORS.white : HALFTIME.dim, background: 'rgba(0,0,0,0.35)',
             border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
             cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
@@ -531,8 +519,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
           width: '100%', height: 36, boxSizing: 'border-box',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
-        }}>
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <span style={{ color: HALFTIME.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
             {cnt > 0 && (
@@ -557,8 +544,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${HALFTIME.bgCenter}, ${HALFTIME.bgOuter})`,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
-      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
-    }}>
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
       {/* .htCell hover / .htimeWin 脉冲样式随盘口区切件内建（各 section body 挂 <style>） */}
 
       {/* ① 锁顶：GameTopBar + 单舞台（drawing/settled 才出，canvas 常驻锁顶不折叠不卸载） */}
@@ -592,8 +578,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         <div style={{ padding: '6px 12px', background: HALFTIME.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{
             display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
-          }}>
+            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto' }}>
             {[
               { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
               { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -603,14 +588,12 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
                 fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
                 background: bet === v ? HALFTIME.selTint : 'rgba(0,0,0,0.35)',
                 border: `1px solid ${bet === v ? HALFTIME.sel : 'rgba(255,255,255,0.35)'}`,
-                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
-              }}>{v}</button>
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box' }}>{v}</button>
             ))}
             <div style={{
               gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
               borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-            }}>
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
               <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
               <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
@@ -621,8 +604,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
               color: repeatOk ? COLORS.white : HALFTIME.dim, background: 'rgba(0,0,0,0.35)',
               border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
               cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
             <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
               <BetButton
                 state="bet"
@@ -650,8 +632,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       <div style={{
         display: 'flex', flexDirection: 'column',
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
-        background: COLORS.bg,
-      }}>
+        background: COLORS.bg }}>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />

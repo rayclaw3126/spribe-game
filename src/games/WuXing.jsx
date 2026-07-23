@@ -17,7 +17,7 @@ import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import WuXingStage from './stages/WuXingStage'
 import WuXingMarkets from './markets-ui/WuXingMarkets'   // #41 单16：盘口区切件（视觉原样）
 import WuXingRoad from './markets-ui/WuXingRoad'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor, roadAnchorLeft, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）         // #41 单16：珠盘路墙（判定走引擎）
+import { roadWindow, roadSeedTarget, freshFor, roadAnchorLeft, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）         // #41 单16：珠盘路墙（判定走引擎）
 import { RULES } from './markets-ui/wuxingRules'         // #41 单16：玩法说明内容（共享）
 import { WUXING, ROAD_VIEWS } from './markets-ui/wuxingShared'   // #41 单16：五行五段/珠盘视角（原页 mobile 段 + 切件同源）
 
@@ -104,8 +104,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     ROOMS, selectedRoomKey, roomsByKey, room, roomA, roomB,
     betsRef, betsOf, betsPlaced, setBetsPlaced, hasLast, lastBetsRef,
     shownRoundRef, animatedRoundRef, settleInfoRef,
-    commitSettle, resetRoomView, renderRoomTabs,
-  } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
+    commitSettle, resetRoomView, renderRoomTabs } = useSpeedRooms({ G, playerToken, setServerBalance, pushToast })
 
   const [bet, setBet] = useState(10)
   const [netErr, setNetErr] = useState(null)   // 网络/后端错误提示（不白屏）
@@ -308,7 +307,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       if (!sums.length) return
       // #47：首灌【不预截】到 usable —— 直接把拉回的完整条数过窗口，当前列才天然半满；
       //   且首灌不是「真新珠」，freshRoad 置空，避免一次灌 160+ 颗整屏爆闪。
-      setRoadByRoom((m) => ({ ...m, [r.key]: roadWindowAt(sums, roundSeq(acc[0]?.roundNo), DESK_ROAD) }))
+      setRoadByRoom((m) => ({ ...m, [r.key]: roadWindow(sums, DESK_ROAD) }))
       setFreshByRoom(f => ({ ...f, [r.key]: -1 }))
       const latest = acc[0]?.roundNo
       if (latest) {
@@ -396,16 +395,14 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       opacity: betting || hit || staked ? 1 : 0.75,
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
       transition: 'filter 0.12s, border-color 0.12s, box-shadow 0.15s',
-      boxSizing: 'border-box', position: 'relative',
-    }
+      boxSizing: 'border-box', position: 'relative' }
   }
   const stakeChip = key => betsPlaced.has(key) && (
     <span style={{
       position: 'absolute', top: 2, right: 3,
       padding: '1px 5px', borderRadius: RADIUS.pill,
       background: DERBY.sel, color: '#083a1b',
-      fontSize: 9, fontWeight: 900,
-    }}>${betsPlaced.get(key)}</span>
+      fontSize: 9, fontWeight: 900 }}>${betsPlaced.get(key)}</span>
   )
   const cellName = { color: COLORS.white, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap' }
   const cellRange = { color: 'rgba(255,255,255,0.7)', fontSize: isMobile ? 8.5 : 9.5, fontWeight: 700, whiteSpace: 'nowrap' }
@@ -414,16 +411,14 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
-    boxSizing: 'border-box',
-  }
+    boxSizing: 'border-box' }
   // 单行键（名称左/区间中/赔率右，照 Line Up 定案行式）
   const rowCell = (key, name, range, odds, bg = DERBY.grey) => (
     <button key={key} type="button" className="wxCell" data-key={key} disabled={!betting} onClick={() => toggleSel(key)}
       style={{
         ...cellBase(key, bg),
         flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-        padding: isMobile ? '6px 8px' : '5px 12px', gap: 6,
-      }}>
+        padding: isMobile ? '6px 8px' : '5px 12px', gap: 6 }}>
       <span style={cellName}>{name}</span>
       {range ? <span style={{ ...cellRange, flex: 1, textAlign: 'center' }}>{range}</span> : <span style={{ flex: 1 }} />}
       <span style={cellOdds}>{odds}</span>
@@ -447,8 +442,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
       background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
-    }}>{phaseChip.text}</span>
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{phaseChip.text}</span>
   )
   // #42 速度 tab 条（形态A，抽件渲染）：色值传本款 tokens（两款共用 DERBY，同 SpeedGrid）。
   const roomTabs = renderRoomTabs({ tokens: { sel: DERBY.sel, strip: DERBY.strip, dim: DERBY.dim, tabBorder: COLORS.borderLight, onSel: '#0d2016' }, isMobile })
@@ -464,22 +458,19 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }}>该房不存在，请切回其它房</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }}>该房不存在，请切回其它房</div>
       )}
       {!room.connected && room.roundNo && room.roomError !== 'invalid_room' && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${DERBY.orange}`, borderRadius: 10,
-          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800,
-        }}>连接断开，正在重连…</div>
+          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800 }}>连接断开，正在重连…</div>
       )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }} onClick={() => setNetErr(null)}>{netErr}</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }} onClick={() => setNetErr(null)}>{netErr}</div>
       )}
     </>
   )
@@ -520,8 +511,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       borderColor: COLORS.border, padding: 0, overflow: 'hidden',
       position: 'relative',
       display: 'flex', flexDirection: 'column',
-      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
-    }}>
+      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}) }}>
       <style>{`.wxCell:hover { filter: brightness(1.2); }`}</style>
 
       {/* ---- top bar（共享件）---- */}
@@ -536,8 +526,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         display: 'flex', flexDirection: 'column',
         padding: isMobile ? '6px 12px' : hasRail ? '4px 0' : '4px 18px', boxSizing: 'border-box',
         gap: 4, overflowY: 'auto',
-        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
-      }}>
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
         {/* #46 单12 追加 中度放大档：big 只在桌面 gameCard 传；手机段与多桌不传，逐字节零感 */}
@@ -566,16 +555,14 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         padding: hasRail ? '6px 0' : '6px 12px',
         background: DERBY.band,
         borderTop: '1px solid rgba(0,0,0,0.25)',
-        position: 'relative', zIndex: 1,
-      }}>
+        position: 'relative', zIndex: 1 }}>
         <div style={{
           display: 'grid',
           /* #46 单12 追加 中度放大档：行高 28→34、下注钮列 92→110（本条是五行私有内联，直改） */
           gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',
           gridTemplateRows: 'repeat(2, 34px)',
           gap: 6,
-          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
-        }}>
+          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto' }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
             { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -587,16 +574,14 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
               background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
               border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
               cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
-              boxSizing: 'border-box',
-            }}>{v}</button>
+              boxSizing: 'border-box' }}>{v}</button>
           ))}
           <div style={{
             gridColumn: 3, gridRow: 1,
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
             borderRadius: 8, padding: '0 6px',
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-            boxSizing: 'border-box', minWidth: 0,
-          }}>
+            boxSizing: 'border-box', minWidth: 0 }}>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input
               value={bet}
@@ -604,8 +589,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
               onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{
                 width: 48, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-                color: COLORS.white, fontSize: 17, fontWeight: 900,
-              }}
+                color: COLORS.white, fontSize: 17, fontWeight: 900 }}
             />
           </div>
           <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
@@ -616,8 +600,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
             background: 'rgba(0,0,0,0.35)',
             border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
             cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
@@ -644,8 +627,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     main: new Set(['big', 'small', 'odd', 'even']),
     dtud: new Set(['dragon', 'dt-tie', 'tiger', 'up', 'ud-tie', 'down']),
     parlay: new Set(['big-odd', 'small-odd', 'big-even', 'small-even']),
-    wuxing: new Set(WUXING.map(w => w.key)),
-  }
+    wuxing: new Set(WUXING.map(w => w.key)) }
   const selCount = (sec) => {
     let n = 0
     new Set([...picks, ...betsPlaced.keys()]).forEach(k => { if (SEC_KEYS[sec].has(k)) n++ })
@@ -660,8 +642,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
           width: '100%', height: 36, boxSizing: 'border-box',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
-        }}>
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <span style={{ color: DERBY.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
             {cnt > 0 && (
@@ -712,8 +693,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${DERBY.bgCenter}, ${DERBY.bgOuter})`,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
-      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
-    }}>
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
       <style>{`.wxCell:hover { filter: brightness(1.2); }`}</style>
 
       {/* ① 锁顶：GameTopBar + 舞台 drawZone（非弹性自成块，canvas 常驻不折叠不卸载） */}
@@ -742,8 +722,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
                   flex: '0 0 auto', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: RADIUS.pill,
                   background: on ? DERBY.sel : 'rgba(0,0,0,0.35)', color: on ? '#083a1b' : DERBY.dim,
                   border: `1px solid ${on ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
-                  fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer',
-                }}>{v.label}</button>
+                  fontSize: 10, fontWeight: 900, letterSpacing: 0.3, cursor: 'pointer' }}>{v.label}</button>
               )
             })}
           </div>
@@ -764,8 +743,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
                     background: d ? d.c : 'rgba(255,255,255,0.05)',
                     border: d ? '1px solid rgba(0,0,0,0.35)' : '1px solid rgba(255,255,255,0.06)',
                     color: COLORS.white, fontSize: 9, fontWeight: 900,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
-                  }}>{d ? d.t : ''}</span>
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>{d ? d.t : ''}</span>
                 )
               })}
             </div>
@@ -774,8 +752,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
         <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>
           <div style={{
             display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
-            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto',
-          }}>
+            gridTemplateRows: 'repeat(2, 28px)', gap: 6, maxWidth: 480, margin: '0 auto' }}>
             {[
               { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
               { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -785,14 +762,12 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
                 fontSize: 11, fontWeight: 900, lineHeight: 1, color: COLORS.white,
                 background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
                 border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
-                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box',
-              }}>{v}</button>
+                cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6, boxSizing: 'border-box' }}>{v}</button>
             ))}
             <div style={{
               gridColumn: 3, gridRow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
               borderRadius: 8, padding: '0 6px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-              boxSizing: 'border-box', minWidth: 0,
-            }}>
+              boxSizing: 'border-box', minWidth: 0 }}>
               <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
               <input value={bet} disabled={!betting} onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 style={{ width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', color: COLORS.white, fontSize: 14, fontWeight: 900 }} />
@@ -803,8 +778,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
               color: repeatOk ? DERBY.text : DERBY.dim, background: 'rgba(0,0,0,0.35)',
               border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
               cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
             <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
               <BetButton
                 state="bet"
@@ -832,8 +806,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       <div style={{
         display: 'flex', flexDirection: 'column',
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
-        background: COLORS.bg,
-      }}>
+        background: COLORS.bg }}>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />

@@ -31,7 +31,7 @@ import trophyImg from '../assets/shared/trophy.png'
 
 // —— 引擎常量块已剪切到 ./markets/derbyday（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { deriveMatch, ODDS, MARKETS, hitsOf, pushesOf, round2, drawMatch } from './markets/derbyday'
-import { roadWindow, roadWindowAt, roadSeedTarget, roundSeq , freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roadSeedTarget, freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { drawMatch, deriveMatch, ODDS, MARKETS, hitsOf, pushesOf }
 
 // ---------- 开奖动画分段时长（#43单3：服务器排期器驱动，本地不再有相位 setInterval）----------
@@ -55,8 +55,7 @@ const DESK_ROAD = { cols: 30, rows: 6 }
 // 种子上局（确定性脚本预生成后硬编码；真开奖逐期顶掉）
 const SEED_LAST = deriveMatch({
   home20: [22, 13, 2, 57, 44, 64, 49, 70, 54, 62, 46, 65, 78, 27, 75, 11, 51, 14, 39, 5],
-  away20: [8, 24, 25, 71, 66, 7, 44, 60, 52, 62, 40, 3, 17, 58, 23, 73, 64, 12, 53, 33],
-})   // htHome 437 / htAway 419 / ftHome 848 / ftAway 795 / ftTotal 1643
+  away20: [8, 24, 25, 71, 66, 7, 44, 60, 52, 62, 40, 3, 17, 58, 23, 73, 64, 12, 53, 33] })   // htHome 437 / htAway 419 / ftHome 848 / ftAway 795 / ftTotal 1643
 
 // 30 期假历史 [htHome, htAway, ftHome, ftAway]（旧→新；真开奖逐期顶掉）
 const SEED_ROUNDS = [
@@ -80,8 +79,7 @@ function NumBead({ n, color, size = 24, blank = false }) {
       color: COLORS.white, fontSize: size * 0.42, fontWeight: 900,
       fontFamily: "'Space Grotesk', sans-serif",
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      boxSizing: 'border-box', flex: '0 0 auto',
-    }}>{blank ? '' : n}</span>
+      boxSizing: 'border-box', flex: '0 0 auto' }}>{blank ? '' : n}</span>
   )
 }
 
@@ -333,7 +331,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
           return dr && dr.htHome != null ? [dr.htHome, dr.htAway, dr.ftHome, dr.ftAway] : null })
         .filter(Boolean)
       if (!rows.length) return
-      setHistory(roadWindowAt(rows, roundSeq(acc[0]?.roundNo), DESK_ROAD))
+      setHistory(roadWindow(rows, DESK_ROAD))
       setFreshIdx(-1)
       roadRecordedRef.current = acc[0]?.roundNo
     })().catch(() => { /* 静默：保留种子珠 */ }).then(() => { if (!cancelled) setRoadSeeded(true) })
@@ -410,21 +408,18 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         ...(cur.htHome !== cur.htAway
           ? { 'ht-home': cur.htHome > cur.htAway, 'ht-away': cur.htAway > cur.htHome }
           : {}),
-        'ft-home': ftWinner === 'home', 'ft-away': ftWinner === 'away',
-      }
+        'ft-home': ftWinner === 'home', 'ft-away': ftWinner === 'away' }
     : null
   const secBox = {
     flex: '0 0 auto', borderRadius: 12, padding: isDesk ? 3 : 4,
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
-    boxSizing: 'border-box',
-  }
+    boxSizing: 'border-box' }
   // 盘口区切件（视觉原样）props：点击/态由本页 state 传入，键区单一出处。
   //   desktop 一整块（无 section），mobile 手风琴逐段（section='ht'|'ft'|'htft'）。
   const marketsProps = {
     onPick: toggleSel, stakes: betsPlaced, disabled: !betting,
     selected: picks, hits: result?.hits ?? preHits, pushes: result?.pushes,
-    sideWins, isMobile,
-  }
+    sideWins, isMobile }
 
   // ---- 场馆头行（desk 走骨架 34px 历史行位）----
   const connecting = !room.connected && !room.roundNo
@@ -446,8 +441,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
     <span style={{
       padding: '2px 10px', borderRadius: RADIUS.pill,
       background: 'rgba(0,0,0,0.35)', border: `1px solid ${phaseChip.c}`,
-      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto',
-    }}>{phaseChip.text}</span>
+      color: phaseChip.c, fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{phaseChip.text}</span>
   )
   const topBar = (
     <>
@@ -463,15 +457,13 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,16,10,0.95)', border: `1px solid ${DERBY.orange}`, borderRadius: 10,
-          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800,
-        }}>连接断开，正在重连…</div>
+          padding: '8px 16px', color: DERBY.orange, fontSize: 13, fontWeight: 800 }}>连接断开，正在重连…</div>
       )}
       {netErr && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 210,
           background: 'rgba(20,10,14,0.95)', border: '1px solid rgba(196,24,54,0.5)', borderRadius: 10,
-          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800,
-        }} onClick={() => setNetErr(null)}>{netErr}</div>
+          padding: '8px 16px', color: '#ff8a9a', fontSize: 13, fontWeight: 800 }} onClick={() => setNetErr(null)}>{netErr}</div>
       )}
     </>
   )
@@ -483,8 +475,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   const ballGrid = (balls, color, lit) => (
     <div style={{
       display: 'grid', gridTemplateColumns: `repeat(5, ${beadSize}px)`,
-      gridTemplateRows: `repeat(2, ${beadSize}px)`, gap: isMobile ? 3 : 4,
-    }}>
+      gridTemplateRows: `repeat(2, ${beadSize}px)`, gap: isMobile ? 3 : 4 }}>
       {Array.from({ length: 10 }, (_, i) => (
         <NumBead key={i} n={lit ? balls[i] : 0} color={color} size={beadSize} blank={!lit} />
       ))}
@@ -497,12 +488,10 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
       opacity: lit ? 1 : dimmed ? 0.85 : 1,
       display: 'flex', flexDirection: 'column', gap: 4,
-      boxSizing: 'border-box',
-    }}>
+      boxSizing: 'border-box' }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: isMobile ? 8 : 14, flexWrap: 'nowrap',
-      }}>
+        gap: isMobile ? 8 : 14, flexWrap: 'nowrap' }}>
         {ballGrid(homeBalls, DERBY.home, lit)}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flex: '0 0 auto' }}>
           <span style={{ color: DERBY.dim, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, whiteSpace: 'nowrap' }}>{title}</span>
@@ -510,16 +499,14 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
             padding: '2px 12px', borderRadius: RADIUS.pill,
             background: lit ? DERBY.gold : 'rgba(255,255,255,0.14)',
             color: lit ? '#3a2c00' : DERBY.dim,
-            fontSize: isMobile ? 11 : 12.5, fontWeight: 900, whiteSpace: 'nowrap',
-          }}>合计 {lit ? total : '—'}</span>
+            fontSize: isMobile ? 11 : 12.5, fontWeight: 900, whiteSpace: 'nowrap' }}>合计 {lit ? total : '—'}</span>
         </div>
         {ballGrid(awayBalls, DERBY.away, lit)}
       </div>
       {/* 下缘比分行：主/客和值 + 胜方 trophy（平局双方都不亮） */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 2px',
-      }}>
+        padding: '0 2px' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: DERBY.text, fontSize: isMobile ? 11 : 12, fontWeight: 900 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: DERBY.home, display: 'inline-block' }} />
           主队：{lit ? homeSum : '—'}
@@ -542,8 +529,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
     <div style={{
       borderRadius: 12, padding: isMobile ? '8px 8px 6px' : '8px 12px 6px',
       background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
-      boxSizing: 'border-box',
-    }}>{children}</div>
+      boxSizing: 'border-box' }}>{children}</div>
   )
   // 半场块：HT_DRAW 原位舞台 → 本期 HT 先亮定格；全场块：FT_DRAW 原位舞台 → FT 后亮；
   // BETTING 期全场块回显上局
@@ -573,8 +559,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       flex: '0 0 auto', position: 'relative', zIndex: 1,
       // #47 二批：补 hasRail 档 —— 外层包裹层已是 800 宽，本卡侧边距必须归零才共用同一条宽度线
       margin: isMobile ? '8px 12px 0' : hasRail ? '6px 0 0' : '6px 18px 0',
-      display: 'flex', flexDirection: 'column', gap: 6,
-    }}>
+      display: 'flex', flexDirection: 'column', gap: 6 }}>
       {fullBlock}
       {halfBlock}
     </div>
@@ -597,8 +582,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden',
       position: 'relative',
       display: 'flex', flexDirection: 'column',
-      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}),
-    }}>
+      ...(isDesk ? { height: '100%', boxSizing: 'border-box' } : {}) }}>
       {/* .ddCell hover / ddWinBreath 呼吸 / .ddayWin 脉冲样式已随盘口区切至 DerbyDayMarkets（组件内 <style> 挂） */}
 
       {/* ---- top bar（共享件：名 pill 下拉 + 场馆/期号/相位 + ?/音频钮）---- */}
@@ -613,8 +597,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         display: 'flex', flexDirection: 'column',
         padding: isMobile ? '6px 12px' : hasRail ? '4px 0' : '4px 18px', boxSizing: 'border-box',
         gap: 4, overflowY: 'auto',
-        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}),
-      }}>
+        ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }}>
         <WinToast toasts={toasts} />
         {/* 盘口区切件（两组并排 + 半全场组，视觉原样）：点击/态由本页 state 传入，键区单一出处 */}
         <DerbyDayMarkets {...marketsProps} isDesk={isDesk} big />
@@ -633,15 +616,13 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         padding: hasRail ? '6px 0' : '6px 12px',
         background: DERBY.band,
         borderTop: '1px solid rgba(0,0,0,0.25)',
-        position: 'relative', zIndex: 1,
-      }}>
+        position: 'relative', zIndex: 1 }}>
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 110px',   /* #47：92→110，钮字号 ×1.2 后 92px 折三行 */
           gridTemplateRows: 'repeat(2, 34px)',
           gap: 6,
-          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto',
-        }}>
+          maxWidth: hasRail ? RAIL_MAXW : 480, margin: '0 auto' }}>
           {[
             { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
             { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -653,16 +634,14 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
               background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
               border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
               cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
-              boxSizing: 'border-box',
-            }}>{v}</button>
+              boxSizing: 'border-box' }}>{v}</button>
           ))}
           <div style={{
             gridColumn: 3, gridRow: 1,
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
             borderRadius: 8, padding: '0 6px',
             background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-          }}>
+            opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
             <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
             <input
               value={bet}
@@ -670,8 +649,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
               onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
               style={{
                 width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-                color: COLORS.white, fontSize: 14, fontWeight: 900,
-              }}
+                color: COLORS.white, fontSize: 14, fontWeight: 900 }}
             />
           </div>
           <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
@@ -682,8 +660,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
             background: 'rgba(0,0,0,0.35)',
             border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
             cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+            boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
           <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
             <BetButton
               state="bet"
@@ -725,8 +702,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         <button type="button" onClick={() => setUserAcc(a => ({ ...a, [key]: !a[key] }))} style={{
           width: '100%', height: 36, boxSizing: 'border-box',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer',
-        }}>
+          padding: '0 10px', background: 'transparent', border: 'none', cursor: 'pointer' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <span style={{ color: DERBY.gold, fontSize: 11, fontWeight: 900, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
             {cnt > 0 && (
@@ -748,8 +724,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
     <Panel style={{
       background: `radial-gradient(circle at 50% 28%, ${DERBY.bgCenter}, ${DERBY.bgOuter})`,
       borderColor: COLORS.border, padding: 0, overflow: 'hidden', position: 'relative',
-      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box',
-    }}>
+      display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
       {/* .ddCell hover / ddWinBreath 呼吸 / .ddayWin 脉冲样式随盘口区切件内建（各 section body 挂 <style>） */}
 
       {/* ① 锁顶：GameTopBar + 双舞台 drawZone（canvas 常驻挂载，禁折叠禁卸载） */}
@@ -780,8 +755,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
             gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 92px',
             gridTemplateRows: 'repeat(2, 28px)',
             gap: 6,
-            maxWidth: 480, margin: '0 auto',
-          }}>
+            maxWidth: 480, margin: '0 auto' }}>
             {[
               { v: 10, col: 1, row: 1 }, { v: 100, col: 2, row: 1 },
               { v: 50, col: 1, row: 2 }, { v: 500, col: 2, row: 2 },
@@ -793,16 +767,14 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
                 background: bet === v ? DERBY.selTint : 'rgba(0,0,0,0.35)',
                 border: `1px solid ${bet === v ? DERBY.sel : 'rgba(255,255,255,0.35)'}`,
                 cursor: betting ? 'pointer' : 'not-allowed', opacity: betting ? 1 : 0.6,
-                boxSizing: 'border-box',
-              }}>{v}</button>
+                boxSizing: 'border-box' }}>{v}</button>
             ))}
             <div style={{
               gridColumn: 3, gridRow: 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
               borderRadius: 8, padding: '0 6px',
               background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.3)',
-              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0,
-            }}>
+              opacity: betting ? 1 : 0.6, boxSizing: 'border-box', minWidth: 0 }}>
               <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>投注额</span>
               <input
                 value={bet}
@@ -810,8 +782,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
                 onChange={e => setBet(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 style={{
                   width: 40, minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none',
-                  color: COLORS.white, fontSize: 14, fontWeight: 900,
-                }}
+                  color: COLORS.white, fontSize: 14, fontWeight: 900 }}
               />
             </div>
             <button type="button" disabled={!repeatOk} onClick={repeatBets} style={{
@@ -822,8 +793,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
               background: 'rgba(0,0,0,0.35)',
               border: `1px solid rgba(255,255,255,${repeatOk ? 0.35 : 0.15})`,
               cursor: repeatOk ? 'pointer' : 'not-allowed', opacity: repeatOk ? 1 : 0.5,
-              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
+              boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}>↻ 重复{hasLast ? ` $${lastTotal.toFixed(0)}` : ''}</button>
             <div style={{ gridColumn: 4, gridRow: '1 / 3' }}>
               <BetButton
                 state="bet"
@@ -851,8 +821,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       <div style={{
         display: 'flex', flexDirection: 'column',
         height: `calc(100vh - ${LAYOUT.siteHeaderH}px)`, minHeight: 640,
-        background: COLORS.bg,
-      }}>
+        background: COLORS.bg }}>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: LAYOUT.feedW, flex: '0 0 auto', minHeight: 0, borderRight: `1px solid ${COLORS.border}` }}>
             <BetFeed bets={feedBets} myBets={[]} online={914} fill />
