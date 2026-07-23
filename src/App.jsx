@@ -10,7 +10,8 @@ import { useMediaQuery } from './hooks/useMediaQuery'
 // 单S4：桌面单游戏页右栏（今日大奖/近期开奖/换个游戏）。App 层一处挂载包全款，游戏内部文件零改。
 import GameSideRail from './components/shell/GameSideRail'
 // #44 我的最爱：前端 id ↔ backendId 反查单一数据源（禁手抄第二份映射）。
-import { GAME_BY_ID, GAME_BY_BACKEND_ID } from './gameRegistry'
+import { GAME_BY_ID, GAME_BY_BACKEND_ID, GAME_REGISTRY } from './gameRegistry'
+import { LOADING_HOOKS, LOADING_SELL, LOADING_EVENTS } from './lib/loadingHooks'   // #22 加载页文案(单一出处)
 // 单2改：前台反馈钮暂隐藏（挪去代理后台）。组件文件保留，需要时取消注释即可恢复。
 // import FeedbackWidget from './components/feedback/FeedbackWidget'
 // 每款游戏按需加载（lazy）：进哪款才拉该款 chunk，大厅首屏不含任何游戏 JS/资产。
@@ -42,19 +43,62 @@ const MultiTablePage = lazy(() => import('./components/MultiTable/MultiTablePage
 // src/gameRegistry.js —— 此处的键须与 GAME_REGISTRY 的 id 一一对应。
 const GAMES = { Aviator, Dice, Plinko, Goal, HiLo, Mines, Keno, Limbo, StreakRoll, MiniRoulette, Momentum, HalfTime, GoldenBoot, NumberUp, HatTrick, DerbyDay, LineUp, SpeedGrid, WuXing, RollingBall, DominoDuel }
 
-// 游戏 chunk 加载中的过渡态（一般一闪而过）：深色 chrome 底 + 绿点 + 加载中，色值走 tokens。
-function GameLoading() {
+// #22 加载页广告位（双场景）：懒加载 chunk 期的过渡态从裸 spinner 升级为广告页。
+//   场景判定：该款进场次数(spribe_playCount_<id>) ≤3 → 场景2（新客固期待，本款封面+卖点）；
+//             ≥4 → 场景1（熟客推新，推进场最少的另一款）。封面走 registry g.cover 同源不重复打包。
+const PLAY_KEY = (id) => `spribe_playCount_${id}`
+const readCount = (id) => { try { return Number(localStorage.getItem(PLAY_KEY(id))) || 0 } catch { return 0 } }
+
+// 场景2卖点：LOADING_SELL 有硬数字用之；否则有 15s 速度房显「15 秒一局」；再无回落 desc。
+function sellPointOf(g) {
+  if (!g) return ''
+  if (LOADING_SELL[g.backendId]) return LOADING_SELL[g.backendId]
+  if (Array.isArray(g.rooms) && g.rooms.some((r) => r.key === '15s')) return '15 秒一局'
+  return g.desc || ''
+}
+
+function LoadingAd({ gameId }) {
+  const cur = GAME_BY_ID[gameId]
+  const count = readCount(gameId)
+  const scene1 = count >= 4   // 熟客推新
+  // 场景1：推「进场次数最少（含 0）且非当前款」的一款
+  let promo = cur
+  if (scene1) {
+    promo = GAME_REGISTRY
+      .filter((g) => g.id !== gameId)
+      .reduce((best, g) => (readCount(g.id) < readCount(best.id) ? g : best), GAME_REGISTRY.find((g) => g.id !== gameId) || cur)
+  }
+  const show = scene1 ? promo : cur
+  const sell = scene1 ? (LOADING_HOOKS[show?.backendId] || show?.desc || '') : sellPointOf(cur)
+  const eventText = LOADING_EVENTS[(count) % LOADING_EVENTS.length]   // 无 Date.now：按进场次数轮播
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      gap: 10, background: COLORS.bg, color: COLORS.textMuted,
-      fontSize: 15, fontWeight: 700, letterSpacing: 1,
+      minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 0,
+      background: COLORS.bg, position: 'relative', overflow: 'hidden',
     }}>
-      <span style={{
-        width: 10, height: 10, borderRadius: '50%', background: COLORS.green,
-        boxShadow: `0 0 12px ${COLORS.green}`, animation: 'fadeIn 0.8s ease-in-out infinite alternate',
-      }} />
-      加载中…
+      <style>{'@keyframes ldPulse{0%,100%{opacity:.5}50%{opacity:1}}@keyframes ldFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}'}</style>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, animation: 'ldFade 0.4s ease-out', maxWidth: 340, padding: '0 24px', textAlign: 'center' }}>
+        {scene1 && <div style={{ fontSize: 12, color: COLORS.textFaint, letterSpacing: 2, fontWeight: 700 }}>换个玩法试试</div>}
+        {show?.cover && (
+          <img src={show.cover} alt={show.displayName || ''} style={{
+            width: 200, height: 125, objectFit: 'cover', borderRadius: 14,
+            border: `1px solid ${COLORS.border}`, boxShadow: '0 8px 28px rgba(0,0,0,0.45)',
+          }} />
+        )}
+        <div style={{ fontSize: 20, fontWeight: 900, color: COLORS.text, letterSpacing: 1 }}>{show?.displayName || '加载中'}</div>
+        {sell && <div style={{ fontSize: 14, fontWeight: 800, color: scene1 ? COLORS.textMuted : COLORS.gold, letterSpacing: 0.5 }}>{sell}</div>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, color: COLORS.textFaint, fontSize: 12, fontWeight: 700 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.green, boxShadow: `0 0 10px ${COLORS.green}`, animation: 'ldPulse 0.9s ease-in-out infinite' }} />
+          加载中…
+        </div>
+      </div>
+      {/* 底部平台事件细条（两场景共用，静态真事实轮播）*/}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, padding: '10px 0',
+        textAlign: 'center', fontSize: 11.5, color: COLORS.textFaint, fontWeight: 600,
+        letterSpacing: 0.5, borderTop: `1px solid ${COLORS.border}`, background: 'rgba(0,0,0,0.25)',
+      }}>{eventText}</div>
     </div>
   )
 }
@@ -75,6 +119,11 @@ export default function App() {
   // #44 我的最爱：收藏集，存前端 id（Set）。登录/刷新拉真源，点☆乐观翻转+回写。
   const [favIds, setFavIds] = useState(() => new Set())
 
+  // #22 进场计数：包一层 openGame —— spribe_playCount_<id> +1 再切款（三入口统一走它，游戏文件零改）。
+  function openGame(id) {
+    try { const k = PLAY_KEY(id); localStorage.setItem(k, String((Number(localStorage.getItem(k)) || 0) + 1)) } catch { /* localStorage 不可用则跳过计数，不挡进场 */ }
+    setActiveGame(id)
+  }
   const GameComponent = activeGame ? GAMES[activeGame] : null
   // 单S4：右栏仅桌面宽（≥1280）+ 处于单游戏视图时渲染；1024-1279 及以下现状零变。
   const showSideRail = useMediaQuery('(min-width: 1280px)')
@@ -173,7 +222,7 @@ export default function App() {
   if (activeView === 'multi') {
     // 多桌专区：全屏渲染，页面自绘暗黑底，onBack 清回大厅。
     body = (
-      <Suspense fallback={<GameLoading />}>
+      <Suspense fallback={<LoadingAd gameId={null} />}>
         <MultiTablePage
           serverBalance={serverBalance}
           setServerBalance={setServerBalance}
@@ -181,7 +230,7 @@ export default function App() {
           playerToken={playerToken}
           onLogout={handlePlayerLogout}
           onBack={() => setActiveView(null)}
-          onOpenGame={(id) => { setGameFrom('multi'); setActiveView(null); setActiveGame(id) }}
+          onOpenGame={(id) => { setGameFrom('multi'); setActiveView(null); openGame(id) }}
           onOpenBill={openBill}
           favIds={favIds}
         />
@@ -191,8 +240,8 @@ export default function App() {
     // 选了游戏：全屏铺满，不挂 Header。Context 下发 setActiveGame（切款不过大厅，游戏文件零改）。
     const gameView = (
       <div style={{ minHeight: '100vh', background: '#0e1520' }}>
-        <GameNavContext.Provider value={setActiveGame}>
-          <Suspense fallback={<GameLoading />}>
+        <GameNavContext.Provider value={openGame}>
+          <Suspense fallback={<LoadingAd gameId={activeGame} />}>
             <GameComponent
               serverBalance={serverBalance}
               setServerBalance={setServerBalance}
@@ -235,7 +284,7 @@ export default function App() {
           onOpenBill={openBill}
         />
         <main style={{ paddingTop: '52px' }}>
-          <Lobby onSelect={setActiveGame} balance={serverBalance ?? 0} onOpenMulti={() => setActiveView('multi')} favIds={favIds} onToggleFav={toggleFav} />
+          <Lobby onSelect={openGame} balance={serverBalance ?? 0} onOpenMulti={() => setActiveView('multi')} favIds={favIds} onToggleFav={toggleFav} />
         </main>
         {/* {feedback} */}
       </div>
