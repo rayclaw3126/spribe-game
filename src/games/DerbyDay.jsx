@@ -31,7 +31,7 @@ import trophyImg from '../assets/shared/trophy.png'
 
 // —— 引擎常量块已剪切到 ./markets/derbyday（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { deriveMatch, ODDS, MARKETS, hitsOf, pushesOf, round2, drawMatch } from './markets/derbyday'
-import { roadWindow, roadSeedTarget, freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roundSeqNo, roadSeedTarget, freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { drawMatch, deriveMatch, ODDS, MARKETS, hitsOf, pushesOf }
 
 // ---------- 开奖动画分段时长（#43单3：服务器排期器驱动，本地不再有相位 setInterval）----------
@@ -133,6 +133,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
   // #47 二批 新增：珠盘路整局记账去重（按期号）。本款原先无此 ref；接了历史播种后必须显式去重
   //   （玩家正好在开奖动画中进页时，history 已含该期，动画结束会再追一次 = 重复上珠）。
   const roadRecordedRef = useRef(null)
+  const roadPhaseRef = useRef({})   // #Ray 手机路珠相位·按房自持（首灌锚真实序号，live +1，跨零点连续）
   const pendingRef = useRef(null)          // 只读表演：当前动画派生赛果
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -250,6 +251,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
     // #47：按期号去重（防与历史播种重复上珠）+ 列对齐窗口 + 新珠弹入
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
+      roadPhaseRef.current._ = (roadPhaseRef.current._ ?? ((roundSeqNo(rnd) ?? 1) - 1)) + 1   // #Ray 相位自持 +1
       setHistory(h => {
         const next = roadWindow([...h, [r.htHome, r.htAway, r.ftHome, r.ftAway]], DESK_ROAD)
         setFreshIdx(next.length - 1)   // WS 真新珠 → 弹入
@@ -334,6 +336,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
       setHistory(roadWindow(rows, DESK_ROAD))
       setFreshIdx(-1)
       roadRecordedRef.current = acc[0]?.roundNo
+      roadPhaseRef.current._ = roundSeqNo(acc[0]?.roundNo)   // #Ray 相位锚：首灌对齐真实当日序号
     })().catch(() => { /* 静默：保留种子珠 */ }).then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
   }, [hasRail])
@@ -746,7 +749,7 @@ export default function DerbyDay({ serverBalance, setServerBalance, playerToken,
         {/* 珠盘路切件（紧凑变体：页签横滚 + 细占比条 + 2 行 15px 珠矩阵，视觉原样） */}
         {/* #47 专单：动效手机也上（fresh 索引按手机面 20×2 窗口长度换算） */}
         {/* #47 手机高墙档：compact 默认 2 行 15px → 显式传 20×6 珠18，可用 108 */}
-        <DerbyDayRoad history={roadSeeded ? history : EMPTY_ROAD} slide tab={roadTab} onTab={setRoadTab} compact cols={30} rows={6} bead={18}
+        <DerbyDayRoad history={roadSeeded ? history : EMPTY_ROAD} slide fitWidth phaseN={roadPhaseRef.current._} tab={roadTab} onTab={setRoadTab} compact cols={30} rows={6} bead={18}
           freshIndex={freshFor(freshIdx, history.length, roadWindow(history, { cols: 20, rows: 6 }).length)}
           style={{ padding: '4px 12px 0' }} />
         <div style={{ padding: '6px 12px', background: DERBY.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>

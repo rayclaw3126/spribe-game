@@ -27,7 +27,8 @@ import { RULES } from './markets-ui/numberupRules'               // #41 单15：
 
 // —— 引擎常量块已剪切到 ./markets/numberup（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { pad2, drawNumber, deriveNum, ODDS, hitsOf, round2, MARKETS } from './markets/numberup'
-import { roadWindow, roadSeedTarget, freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roadWindowN, roundSeqNo, roadSeedTarget, freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { useRoadFitCols } from './markets-ui/useRoadFit'   // #Ray 手机路珠·列数按屏宽现算
 export { drawNumber, deriveNum, ODDS, MARKETS, hitsOf }
 
 // ---------- 换人牌舞台时间轴（rAF 内使用，毫秒）：十位先定、个位后定 ----------
@@ -49,7 +50,6 @@ const DESK_ROAD = { cols: 30, rows: 6 }
 //   故两者都必须解耦、钉回原值。
 const MOBILE_ROAD_CAP = 120
 // #47 双端一致·A 案：手机路珠列数升到与桌面同标 30（6 行已同）
-const MOBILE_ROAD_COLS = 30
 
 // 种子上期 + 种子历史（值域 0–49，真开奖逐期顶掉）
 const SEED_LAST = deriveNum(38)
@@ -137,6 +137,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   // #47 二批 新增：珠盘路整局记账去重（按期号）。接了历史播种后必须显式去重
   //   （玩家正好在开奖动画中进页时 history 已含该期，动画结束会再追一次 = 重复上珠）。
   const roadRecordedRef = useRef(null)
+  const roadPhaseRef = useRef({})   // #Ray 手机路珠相位·按房自持（首灌锚真实序号，live +1，跨零点连续）
   const pendingRef = useRef(null)          // 只读表演：当前动画开出号码的派生对象（.num 等）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -179,6 +180,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
     // #47：按期号去重（防与历史播种重复上珠）+ 列对齐窗口 + 新珠弹入
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
+      roadPhaseRef.current[selectedRoomKey] = (roadPhaseRef.current[selectedRoomKey] ?? ((roundSeqNo(rnd) ?? 1) - 1)) + 1   // #Ray 相位自持 +1
       setHistoryByRoom(m => {
         const next = roadWindow([...(m[selectedRoomKey] || SEED_HISTORY), r.num], DESK_ROAD)
         setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))
@@ -297,6 +299,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
       if (!nums.length) return
       setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindow(nums, DESK_ROAD) }))
       setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
+      roadPhaseRef.current[r.key] = roundSeqNo(acc[0]?.roundNo)   // #Ray 相位锚：首灌对齐真实当日序号
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
     }
@@ -468,10 +471,9 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
 
   // ---- 珠盘路（真历史滚动，容量 6×20）----
   // #47：桌面走 DESK_ROAD；本常量降级为【手机专用】别名，解耦双端（见模块级注释）
-  const ROAD_COLS = MOBILE_ROAD_COLS
-  // #47 专单：手机内联珠格改吃列滑窗口（本款手机实为 20×2，非 10×5 —— 见 ROAD_COLS/:722）。
-  const roadItems = roadWindow(history, { cols: ROAD_COLS, rows: 6 })
   const roadScrollRef = useRef(null)
+  const ROAD_COLS = useRoadFitCols(roadScrollRef, 18, 2, 18, true)   // #Ray 手机路珠·列数按屏宽现算（数据窗=cols−2，右恒留2空列 → roadWindow 默认 reserve=2）
+  const roadItems = roadWindowN(history, roadPhaseRef.current[selectedRoomKey], { cols: ROAD_COLS, rows: 6 })   // #Ray 进场相位真实化：按真实珠序开窗
   useEffect(() => { roadAnchorLeft(roadScrollRef.current, roadItems.length, 18 + 2) }, [roadItems.length])
   // #47 专单：动效手机也上（fresh 索引按各面窗口长度换算）
   const mobFresh = freshFor(freshByRoom[selectedRoomKey] ?? -1, history.length, roadItems.length)
@@ -479,7 +481,7 @@ export default function NumberUp({ serverBalance, setServerBalance, playerToken,
   // ---- 珠盘路（切件；桌面 6×20；手机三段版另有 2 行内联）----
   const beadRoad = (
     <NumberUpRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab}
-      cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
+      cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={isMobile ? 18 : 24} isMobile={isMobile}
       freshIndex={freshByRoom[selectedRoomKey] ?? -1}
       style={{ margin: isMobile ? '0 12px 10px' : hasRail ? '0 auto 10px' : '0 18px 10px' }} />   /* #47：hasRail 档归零侧边距 */
   )

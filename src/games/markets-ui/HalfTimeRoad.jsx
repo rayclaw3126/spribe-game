@@ -6,7 +6,8 @@ import { useRef, useEffect } from 'react'   // #47 A 案：右端锚定
 //   compact = 卡内紧凑变体（手机锁底 2 行 15px + 页签横滚），非 compact = 桌面 6 行 18px + 页签换行。
 //   style 覆外框（桌面 margin / 手机 padding）。
 import { COLORS, RADIUS, HALFTIME } from '../../components/shell/tokens'
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindowN, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'   // #47：路珠动效（共用）
+import { useRoadFitCols } from './useRoadFit'   // #Ray 手机路珠·列数按屏宽现算
 
 const ROAD_TABS = ['O/U', 'ODD/EVEN', 'PARLAY', 'ZONE', 'HALF']
 // 珠盘页签内部 key（beadFor 判定用，不动）+ 中文显示映射（照 Derby 先例分离）
@@ -23,7 +24,7 @@ function beadFor(tab, sum, half) {
   return { t: half, c: half === 'F' ? HALFTIME.over : half === 'S' ? HALFTIME.under : HALFTIME.draw }
 }
 
-export default function HalfTimeRoad({ history = [], tab, onTab, isMobile = false, compact = false, cols = 20, rows, bead, freshIndex = -1, slide = false, style }) {
+export default function HalfTimeRoad({ history = [], tab, onTab, isMobile = false, compact = false, cols = 20, rows, bead, freshIndex = -1, slide = false, style, fitWidth = false, phaseN }) {
   // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
   //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   // 紧凑变体 = 显式 compact 或手机（多桌/锁底），驱动页签横滚 + 2 行 15px 珠矩阵
@@ -32,9 +33,10 @@ export default function HalfTimeRoad({ history = [], tab, onTab, isMobile = fals
   const nRows = rows ?? (cmp ? 2 : 6)
   // 原页口径：history 已由调用方截到容量窗口(ROAD_CAP)，本件从窗口头部起填格(beads[i])——
   // 桌面渲首 6×cols、紧凑渲首 2×cols（与原 beadRoad / 锁底 road 逐格同源，分毫不变）。
-  const beads = (slide ? roadWindow(history, { cols, rows: nRows }) : history).map(h => beadFor(tab, h.sum, h.half))
-  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
   const roadScrollRef = useRef(null)
+  const rCols = useRoadFitCols(roadScrollRef, cell, 2, cols, fitWidth)   // #Ray 手机列数按屏宽现算（数据窗=cols−2，右恒留2空列 → roadWindow 默认 reserve=2）
+  const beads = (slide ? roadWindowN(history, phaseN, { cols: rCols, rows: nRows }) : history).map(h => beadFor(tab, h.sum, h.half))
+  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
   useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, (bead ?? 18) + 2) }, [beads.length, bead])
 
   return (
@@ -60,10 +62,10 @@ export default function HalfTimeRoad({ history = [], tab, onTab, isMobile = fals
       }}>
         <div style={{
           display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: `repeat(${nRows}, ${cell}px)`, gridTemplateColumns: `repeat(${cols}, ${cell}px)`,
+          gridTemplateRows: `repeat(${nRows}, ${cell}px)`, gridTemplateColumns: `repeat(${rCols}, ${cell}px)`,
           gap: 2, width: 'max-content',
         }}>
-          {Array.from({ length: cols * nRows }).map((_, i) => {
+          {Array.from({ length: rCols * nRows }).map((_, i) => {
             const b = beads[i]
             return (
               <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && beads.length > 0 && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{

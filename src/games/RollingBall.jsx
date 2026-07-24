@@ -17,7 +17,8 @@ import { useRoundRoom } from '../hooks/useRoundRoom'
 import RollingBallPhaseBar, { PoolBadge } from './markets-ui/RollingBallPhaseBar'
 import { ballWindowOf, ballKeyOf, isBetsLocked } from './markets-ui/rollingBallPhase'
 import { ROLLINGBALL_LABEL as RL } from '../lib/betKeyLabels'   // #S3 档位中文名单一出处（搬家回引，视觉零变）
-import { roadWindow, roadSeedTarget, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口 + 动效（共用）
+import { roadWindow, roadWindowN, roundSeqNo, roadSeedTarget, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口 + 动效（共用）
+import { useRoadFitCols } from './markets-ui/useRoadFit'   // #Ray 手机路珠·列数按屏宽现算
 
 // Rolling Ball — NUMBER GAME 连开 3 球足球滚球皮（每球 1-75，同局 3 球不重复），第 20 卡。
 // X2：连开 3 球引擎 + 剩余池动态赔率 + 六段公期相位（前 19 卡无此结构）。
@@ -304,6 +305,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
   const roadRecordedRef = useRef(null)                    // 珠盘路整局记账去重：存已记的 roundNo，防 StrictMode 双调用重复入
+  const roadPhaseRef = useRef({})                         // #Ray 手机路珠相位·自持（首灌锚 序×3，live 每局 +3；滚球 3 珠/局，跨零点连续）
   const settledRoundRef = useRef(null)                    // settle 结算展示去重
   const clearedRoundRef = useRef(null)                    // 新一局清盘去重
 
@@ -480,6 +482,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
     sfxFinal()   // 三球齐 → 终场哨
     if (roadRecordedRef.current !== roundNo) {
       roadRecordedRef.current = roundNo
+      roadPhaseRef.current._ = (roadPhaseRef.current._ ?? (((roundSeqNo(roundNo) ?? 1) - 1) * BEADS_PER_ROUND)) + BEADS_PER_ROUND   // #Ray 相位自持：本局 +3 珠
       // #47 收官：storage 只截局数；列滑窗口在渲染期按【珠】开（见 deskBeads）
       setRoad(r => [...r, balls].slice(-ROUND_CAP))
       setFreshCount(BEADS_PER_ROUND)   // 本局 3 颗一起弹入
@@ -543,6 +546,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
       setRoad(rounds.slice(-ROUND_CAP))
       setFreshCount(0)                       // 首灌非真新珠 → 不弹入
       roadRecordedRef.current = acc[0]?.roundNo ?? null   // seed↔live 分界：最新一局已入账
+      roadPhaseRef.current._ = roundSeqNo(acc[0]?.roundNo) != null ? roundSeqNo(acc[0]?.roundNo) * BEADS_PER_ROUND : null   // #Ray 相位锚：首灌对齐真实序×3
     })().catch(() => { /* 静默：保留种子珠 */ }).then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
   }, [])
@@ -960,7 +964,8 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
 
   // ---- ③ 珠盘路（第1球大小单轨，抄 Line Up）----
   // #47 双端一致·A 案：手机路珠列数升到与桌面同标 30（本款 per-player 本地流，两端喂同一份 road ref → 天然一致）
-  const ROAD_COLS = 30
+  const roadScrollRef = useRef(null)
+  const ROAD_COLS = useRoadFitCols(roadScrollRef, 18, 2, 18, true)   // #Ray 手机路珠·列数按屏宽现算（数据窗=cols−2，右恒留2空列 → roadWindow 默认 reserve=2）；桌面走 deskBeads/DESK_ROAD.cols=30 独立不碰
   // #47 刀2：原 roadBead(桌面 14) 已被 deskBead 取代；手机竖版珠格自带写死 14px，不引用本变量，故删。
   const deskBead = 24                        // 桌面统一珠径：30×24 + 29×2 = 778 ≤ 786 可用宽
   const curView = ROAD_VIEWS.find(v => v.key === roadView) || ROAD_VIEWS[0]   // 当前视角（桌手同一份 ROAD_VIEWS）
@@ -971,8 +976,7 @@ export default function RollingBall({ serverBalance, setServerBalance, playerTok
   const viewBeads = roadSeeded ? roadBeadsOf(curView, road) : EMPTY_BALLS
   // #47 专单：手机竖版同吃列滑窗口（20×2 → 可用 36 珠）。本款 3 颗/局，N 每局 +3、mod 2 交替，
   //   故 35/36 会逐局翻转 —— 全场最快的滑动节奏，相位错在此最先暴露（轨迹见交活）。
-  const beads = roadWindow(viewBeads, { cols: ROAD_COLS, rows: 6 })
-  const roadScrollRef = useRef(null)
+  const beads = roadWindowN(viewBeads, roadPhaseRef.current._, { cols: ROAD_COLS, rows: 6 })   // #Ray 进场相位真实化：按真实珠序开窗（滚球 序×3）
   useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, 18 + 2) }, [beads.length])
   const mobFreshFrom = freshCount > 0 ? beads.length - freshCount : -1   // #47 专单：手机面自己的新珠区间
   const deskBeads = roadWindow(viewBeads, DESK_ROAD)   // 桌面：列对齐滑动窗口（163–168 浮动，右恒空 2 列）

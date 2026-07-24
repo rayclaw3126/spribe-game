@@ -16,7 +16,7 @@ import { usePlayerApi } from '../lib/playerApi'
 import { useRoundRoom } from '../hooks/useRoundRoom'
 import DominoDuelMarkets from './markets-ui/DominoDuelMarkets'   // #41 单16：盘口区切件（section= 逐段接入手风琴，视觉原样）
 import DominoDuelRoad from './markets-ui/DominoDuelRoad'   // #41 单16：珠盘路墙（页签/判定单一出处，走引擎）
-import { roadWindow, roadSeedTarget, freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）
+import { roadWindow, roundSeqNo, roadSeedTarget, freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）
 import { RULES } from './markets-ui/dominoduelRules'            // #41 单16：玩法说明内容（共享）
 // #44 单S1：翻牌视觉原子（DominoTile/时间轴/keyframes）单一出处切至多桌舞台件，原页 import 回引（等价搬家）。
 import { DominoTile, FLIP_DELAY, FLIP_DUR, FLIP_END, DD_KEYFRAMES } from './stages/DominoDuelStage'
@@ -117,6 +117,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
   //   每期跑一次隐式保证。接了历史播种后必须显式去重：若玩家【正好在开奖动画中进页】，
   //   服务端已结算该期→history 已含它→播种灌入，随后动画结束 finishRound 会再追一次 = 重复上珠。
   const roadRecordedRef = useRef(null)
+  const roadPhaseRef = useRef({})   // #Ray 手机路珠相位·按房自持（首灌锚真实序号，live +1，跨零点连续）
 
   const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const [muted] = useSfxMuted()   // 全局 SFX 静音（顶栏钮在 GameTopBar，跨游戏同步）
@@ -251,6 +252,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
     // #47 首批：按期号去重（防与历史播种重复上珠，见 roadRecordedRef 注释）
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
+      roadPhaseRef.current._ = (roadPhaseRef.current._ ?? ((roundSeqNo(rnd) ?? 1) - 1)) + 1   // #Ray 相位自持 +1
       setRoad(rd => {
         const next = roadWindow([...rd, [r.hs, r.as]], DESK_ROAD)   // 存整局 → 多视角派生（判定走引擎）
         setFreshIdx(next.length - 1)   // WS 真新珠 → 弹入
@@ -484,6 +486,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       setFreshIdx(-1)
       const latest = acc[0]?.roundNo
       if (latest) roadRecordedRef.current = latest
+      roadPhaseRef.current._ = roundSeqNo(latest)   // #Ray 相位锚：首灌对齐真实当日序号
     })().catch(() => { /* 静默：保留种子珠 */ }).then(() => { if (!cancelled) setRoadSeeded(true) })
     return () => { cancelled = true }
   }, [hasRail])
@@ -688,7 +691,7 @@ export default function DominoDuel({ serverBalance, setServerBalance, playerToke
       {/* ③ 锁底：珠盘路多视角 pill + 注栏（原样搬） */}
       <div style={{ flex: '0 0 auto' }}>
         {/* #47 专单：动效手机也上 —— fresh 索引按手机面窗口长度换算（桌 30×6 与手机 20×2 长度不同） */}
-        <DominoDuelRoad history={roadSeeded ? road : EMPTY_ROAD} slide tab={roadTab} onTab={setRoadTab}
+        <DominoDuelRoad history={roadSeeded ? road : EMPTY_ROAD} slide fitWidth phaseN={roadPhaseRef.current._} tab={roadTab} onTab={setRoadTab}
           freshIndex={freshFor(freshIdx, road.length, roadWindow(road, { cols: 20, rows: 6 }).length)}
           /* #47 手机高墙档：2 行 15px 小条 → 20×6 珠18，可用 (20−2)×6 = 108 */
           cols={30} rows={6} bead={18} tabFs={9.5} ratioFs={8.5} pad={3} radius={8}

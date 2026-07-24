@@ -17,7 +17,8 @@ import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import HatTrickStage from './stages/HatTrickStage'
 import HatTrickMarkets, { DieFace } from './markets-ui/HatTrickMarkets'   // #41 单15：盘口区切件（DieFace 随件，舞台/mobile 回用）
 import HatTrickRoad from './markets-ui/HatTrickRoad'
-import { roadWindow, roadSeedTarget, freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）                       // #41 单15：珠盘路墙
+import { roadWindow, roadWindowN, roundSeqNo, roadSeedTarget, freshFor, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT, roadAnchorLeft} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）                       // #41 单15：珠盘路墙
+import { useRoadFitCols } from './markets-ui/useRoadFit'   // #Ray 手机路珠·列数按屏宽现算
 import HatTrickPodium from './markets-ui/HatTrickPodium'                   // #41 单15：上局信息条（subRow 槽）
 import { RULES } from './markets-ui/hattrickRules'                         // #41 单15：玩法说明内容（共享）
 import { SIDES, ROAD_TABS, ROAD_TAB_LABELS, beadFor } from './markets-ui/hattrickShared'   // #41 单15：SIDES/珠盘页签/beadFor（mobile 段回用）
@@ -132,6 +133,8 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
   //   接了历史播种后必须显式去重：若玩家【正好在开奖动画中进页】，服务端已结算该期→
   //   history 已含它→播种灌入，随后动画结束 finishRound 会再追一次 = 重复上珠。
   const roadRecordedRef = useRef(null)
+  // #Ray 进场相位真实化：手机路珠相位计数【按房自持】——首灌锚真实 roundNo，live 每珠 +1（不重读钟，跨零点连续）。
+  const roadPhaseRef = useRef({})
   const pendingRef = useRef(null)         // 只读表演：当前动画骰面派生（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -203,6 +206,8 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
     // #47 首批：按期号去重（防与历史播种重复上珠，见 roadRecordedRef 注释）
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
+      // #Ray 相位自持：真新珠 → 计数 +1（跨零点不重读 roundNo）；未播种兜底锚 rnd
+      roadPhaseRef.current[selectedRoomKey] = (roadPhaseRef.current[selectedRoomKey] ?? ((roundSeqNo(rnd) ?? 1) - 1)) + 1
       setHistoryByRoom(m => {
         const next = roadWindow([...(m[selectedRoomKey] || SEED_HISTORY), r.dice], DESK_ROAD)
         setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))   // WS 真新珠 → 弹入
@@ -343,6 +348,7 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
       setFreshByRoom(f => ({ ...f, [r.key]: -1 }))
       const latest = acc[0]?.roundNo
       if (latest) {
+        roadPhaseRef.current[r.key] = roundSeqNo(latest)   // #Ray 相位锚：首灌对齐真实当日序号（N → keep≡N mod6，最新珠落真实行位）
         if (r.key === selectedRoomKey) roadRecordedRef.current = latest
         else bgDrawRoundRef.current[r.key] = latest
       }
@@ -588,18 +594,17 @@ export default function HatTrick({ serverBalance, setServerBalance, playerToken,
 
   // ---- 珠盘路（真历史滚动，容量 6×20）——桌面切件；mobile 段 2 行走自身内联（beads 复用）----
   // #47 双端一致·A 案：手机路珠列数升到与桌面同标 30（6 行已同）→ 与桌面吃同一段窗口，逐颗对得上
-  const ROAD_COLS = 30
-  // #47 专单：手机内联珠格改吃列滑窗口（20×2 → 可用 36 珠）。
-  const mobWin = roadWindow(history, { cols: ROAD_COLS, rows: 6 })
-  const beads = mobWin.map(d => beadFor(roadTab, d))
   const roadScrollRef = useRef(null)
+  const ROAD_COLS = useRoadFitCols(roadScrollRef, 18, 2, 18, true)   // #Ray 手机路珠·列数按屏宽现算（数据窗=cols−2，右恒留2空列 → roadWindow 默认 reserve=2）
+  const mobWin = roadWindowN(history, roadPhaseRef.current[selectedRoomKey], { cols: ROAD_COLS, rows: 6 })   // #Ray 进场相位真实化：按真实珠序开窗（非数组长度）
+  const beads = mobWin.map(d => beadFor(roadTab, d))
   useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, 18 + 2) }, [beads.length])
   // #47 专单：动效手机也上（fresh 索引按各面窗口长度换算）
   const mobFresh = freshFor(freshByRoom[selectedRoomKey] ?? -1, history.length, mobWin.length)
   const beadRoad = (
     /* #47 首批：30 列 × 6 行 × 珠径 24 → 30×24+29×2=778 ≤ 内容可用宽 786，吃满 800 线。
        本 beadRoad 变量【仅桌面 gameCard:640 使用】，手机在 889 行另有内联网格，故可直写不门控。 */
-    <HatTrickRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab} isMobile={isMobile} cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
+    <HatTrickRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab} isMobile={isMobile} cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={isMobile ? 18 : 24}
       freshIndex={freshByRoom[selectedRoomKey] ?? -1}
       /* #47 首批 整改：件内默认 margin 是 '0 18px 8px'，有右栏时外层包裹层已是 800 宽，
          不覆盖就会让路珠卡两侧各内缩 18px（实测 L383/R1147/W764，比开奖/盘口窄 36px）。

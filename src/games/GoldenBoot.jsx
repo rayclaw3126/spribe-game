@@ -29,7 +29,7 @@ import trafficLightImg from '../assets/goldenboot/traffic_light.png'
 
 // —— 引擎常量块已剪切到 ./markets/goldenboot（赔率单一数据源）。原名 import 回用 + re-export 保外部引用。——
 import { drawRace, deriveRace, ODDS, hitsOf, round2, MARKETS, SUM_N } from './markets/goldenboot'
-import { roadWindow, roadSeedTarget } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roundSeqNo, roadSeedTarget } from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 export { drawRace, deriveRace, ODDS, MARKETS, hitsOf }
 
 // ---------- 冲刺舞台时间轴（rAF 内使用，毫秒）：----------
@@ -121,6 +121,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
   // #47 新增：珠盘路整局记账去重（按期号）。接了历史播种后必须显式去重
   //   （玩家正好在开奖动画中进页时 history 已含该期，动画结束会再追一次 = 重复上珠）。
   const roadRecordedRef = useRef(null)
+  const roadPhaseRef = useRef({})   // #Ray 手机路珠相位·按房自持（首灌锚真实序号，live +1，跨零点连续）
   const pendingRef = useRef(null)          // 只读表演：当前动画名次（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -160,6 +161,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
     // #47：按期号去重（防与历史播种重复上珠）+ 列对齐窗口 + 新珠弹入
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
+      roadPhaseRef.current[selectedRoomKey] = (roadPhaseRef.current[selectedRoomKey] ?? ((roundSeqNo(rnd) ?? 1) - 1)) + 1   // #Ray 相位自持 +1
       setHistoryByRoom(m => {
         const next = roadWindow([...(m[selectedRoomKey] || SEED_HISTORY), { winner: r.winner, sum: r.sprintSum }], DESK_ROAD)
         setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))
@@ -274,6 +276,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
       if (!rows.length) return
       setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindow(rows, DESK_ROAD) }))
       setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
+      roadPhaseRef.current[r.key] = roundSeqNo(acc[0]?.roundNo)   // #Ray 相位锚：首灌对齐真实当日序号
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
     }
@@ -393,7 +396,7 @@ export default function GoldenBoot({ serverBalance, setServerBalance, playerToke
 
   // ---- 珠盘路（切件；真历史滚动，容量 6×20）----
   const beadRoad = (
-    <GoldenBootRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab} isMobile={isMobile}
+    <GoldenBootRoad history={roadSeeded ? history : EMPTY_ROAD} tab={roadTab} onTab={setRoadTab} isMobile={isMobile} fitWidth={isMobile} phaseN={isMobile ? roadPhaseRef.current[selectedRoomKey] : undefined}
       /* #47 ⚠ 本款 gameCard 桌手共用 → 路珠三个尺寸参数必须 hasRail 门控；
          手机不传（undefined）走件内默认 20×6/珠18，与基线逐字节相同。 */
       /* #47 A 案：手机也吃 30×6（与桌面同标），仅珠径按档 24/18 */

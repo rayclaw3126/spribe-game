@@ -5,7 +5,8 @@ import { useRef, useEffect } from 'react'   // #47 A 案：右端锚定
 // style 覆外框边距（原页 isMobile ? '0 12px 8px' : '0 18px 8px'）。
 import { COLORS, RADIUS, DERBY, ROULETTE } from '../../components/shell/tokens'
 import { MARKETS } from '../markets/speedgrid'
-import { roadWindow, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'   // #47：路珠动效（共用）
+import { roadWindowN, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT , roadAnchorLeft} from './roadWindow'   // #47：路珠动效（共用）
+import { useRoadFitCols } from './useRoadFit'   // #Ray 手机路珠·列数按屏宽现算
 
 // 珠盘路多视角（B 型：存整值 champ，判定一律走引擎 MARKETS/RED 常量，禁手写第二份表）
 const SG_ROAD_TABS = ['BS', 'OE', 'RB']
@@ -16,13 +17,14 @@ function sgBeadFor(tab, n) {
   return MARKETS.big.hit(n) ? { t: '大', c: DERBY.away } : { t: '小', c: DERBY.home }   // BS 大小
 }
 
-export default function SpeedGridRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, slide = false, style }) {
+export default function SpeedGridRoad({ history = [], tab, onTab, isMobile = false, cols = 20, rows = 6, bead, freshIndex = -1, slide = false, style, fitWidth = false, phaseN }) {
   // #47 专单：slide = 列对齐滑动窗口（整列丢最旧 + 右端恒留 2 空列），默认 false = 原逐颗裁法，
   //   桌面调用点一字不动。手机/多桌调用点传 slide，按本件【自己的 cols/rows】开窗（同一函数，各面参数）。
   const roadBead = bead ?? (isMobile ? 18 : 14)   // #47：可选 bead，默认原值
-  const beads = (slide ? roadWindow(history, { cols, rows }) : history.slice(-(cols * rows))).map(n => sgBeadFor(tab, n))
-  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
   const roadScrollRef = useRef(null)
+  const rCols = useRoadFitCols(roadScrollRef, roadBead, 2, cols, fitWidth)   // #Ray 手机列数按屏宽现算（数据窗=cols−2，右恒留2空列 → roadWindow 默认 reserve=2）
+  const beads = (slide ? roadWindowN(history, phaseN, { cols: rCols, rows }) : history.slice(-(rCols * rows))).map(n => sgBeadFor(tab, n))
+  // #47 A 案：右端锚定最新珠（未满窗时自然停在 0 —— 珠从左往右填，锚 scrollWidth 会滚到空白区）
   useEffect(() => { roadAnchorLeft(roadScrollRef.current, beads.length, (bead ?? 18) + 2) }, [beads.length, bead])
 
   return (
@@ -46,10 +48,10 @@ export default function SpeedGridRoad({ history = [], tab, onTab, isMobile = fal
       }}>
         <div style={{
           display: 'grid', gridAutoFlow: 'column',
-          gridTemplateRows: `repeat(${rows}, ${roadBead}px)`, gridTemplateColumns: `repeat(${cols}, ${roadBead}px)`,
+          gridTemplateRows: `repeat(${rows}, ${roadBead}px)`, gridTemplateColumns: `repeat(${rCols}, ${roadBead}px)`,
           gap: 2, width: 'max-content',
         }}>
-          {Array.from({ length: cols * rows }).map((_, i) => {
+          {Array.from({ length: rCols * rows }).map((_, i) => {
             const b = beads[i]
             return (
               <span key={i} className={i === freshIndex ? ROAD_FX_FRESH : (!b && beads.length > 0 && i === beads.length ? ROAD_FX_NEXT : undefined)} style={{

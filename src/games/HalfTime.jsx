@@ -18,7 +18,7 @@ import HalfTimeStage from './stages/HalfTimeStage'
 import HalfTimeMarkets from './markets-ui/HalfTimeMarkets'                  // #41 单15：盘口区切件
 import { SEC_KEYS } from './markets-ui/halftimeMarketsData'                // #41 单15：段位 key 集（手机手风琴 selCount 用，单一出处）
 import HalfTimeRoad from './markets-ui/HalfTimeRoad'                        // #41 单15：珠盘路墙
-import { roadWindow, roadSeedTarget, freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
+import { roadWindow, roundSeqNo, roadSeedTarget, freshFor} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（共用）
 import HalfTimePodium from './markets-ui/HalfTimePodium'                    // #41 单15：上局信息条（20 球+和值）
 import { RULES } from './markets-ui/halftimeRules'                          // #41 单15：玩法说明内容（共享）
 
@@ -123,6 +123,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
   //   每期跑一次隐式保证。接了历史播种后必须显式去重：若玩家【正好在开奖动画中进页】，
   //   服务端已结算该期→history 已含它→播种灌入，随后动画结束 finishRound 会再追一次 = 重复上珠。
   const roadRecordedRef = useRef(null)
+  const roadPhaseRef = useRef({})   // #Ray 手机路珠相位·按房自持（首灌锚真实序号，live +1，跨零点连续）
   const pendingRef = useRef(null)          // 只读表演：当前动画派生结果（铁律不变）
   const toastIdRef = useRef(0)
   const timersRef = useRef([])
@@ -162,6 +163,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
     // #47：按期号去重（防与历史播种重复上珠，见 roadRecordedRef 注释）
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
+      roadPhaseRef.current[selectedRoomKey] = (roadPhaseRef.current[selectedRoomKey] ?? ((roundSeqNo(rnd) ?? 1) - 1)) + 1   // #Ray 相位自持 +1
       setHistoryByRoom(m => {
         const next = roadWindow([...(m[selectedRoomKey] || SEED_HISTORY), { sum: r.sum, half: halfOf(r) }], DESK_ROAD)
         setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))   // WS 真新珠 → 弹入
@@ -281,6 +283,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
       if (!rows.length) return
       setHistoryByRoom((m) => ({ ...m, [r.key]: roadWindow(rows, DESK_ROAD) }))
       setFreshByRoom((f) => ({ ...f, [r.key]: -1 }))
+      roadPhaseRef.current[r.key] = roundSeqNo(acc[0]?.roundNo)   // #Ray 相位锚：首灌对齐真实当日序号
       if (r.key === selectedRoomKey) roadRecordedRef.current = acc[0]?.roundNo
       else bgDrawRoundRef.current[r.key] = acc[0]?.roundNo
     }
@@ -572,7 +575,7 @@ export default function HalfTime({ serverBalance, setServerBalance, playerToken,
         {/* #47 专单：不再预截固定 CAP —— 预截会让 N 恒定、mod rows 相位钉死成满列。传全量 + slide，由件内按 20×2 开窗 */}
         {/* #47 专单：动效手机也上（fresh 索引按手机面 20×2 窗口长度换算） */}
         {/* #47 手机高墙档：compact 默认 2 行 15px → 显式传 20×6 珠18，可用 108 */}
-        <HalfTimeRoad history={roadSeeded ? history : EMPTY_ROAD} slide tab={roadTab} onTab={setRoadTab} compact cols={30} rows={6} bead={18}
+        <HalfTimeRoad history={roadSeeded ? history : EMPTY_ROAD} slide fitWidth phaseN={roadPhaseRef.current[selectedRoomKey]} tab={roadTab} onTab={setRoadTab} compact cols={30} rows={6} bead={18}
           freshIndex={freshFor(freshByRoom[selectedRoomKey] ?? -1, history.length, roadWindow(history, { cols: 20, rows: 6 }).length)}
           style={{ padding: '4px 12px 0' }} />
         <div style={{ padding: '6px 12px', background: HALFTIME.band, borderTop: '1px solid rgba(0,0,0,0.25)', position: 'relative', zIndex: 1 }}>

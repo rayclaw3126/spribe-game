@@ -39,6 +39,29 @@ export function roadSeedTarget({ cols = 30, rows = 6, reserve = ROAD_RESERVE_COL
   return (cols - reserve) * rows + rows
 }
 
+// #Ray 进场相位真实化：按【绝对珠序 N】开窗，而非数组长度。
+//   相位锚定真实序号（单珠款 N = 最新珠 roundNo；滚球 N = roundNo*3）：keep ≡ N (mod rows) 且 ≤ usable，
+//   取 list 最后 keep 颗 → 最新珠落真实行位 (N−1)%rows，当前列走到第几颗显第几颗（非恒满列底部）。
+//   仅手机档用：桌面 history 的 length 相位被首灌 SEED_TARGET(174, 6 的倍数) 整块尾切锁死为 0，
+//   桌面按 B1 定案维持满墙零碰；手机改喂真实 N 还原半列相位。跨零点 N 由调用方计数自持（不看钟）。
+//   N 缺省(null)时兜底走 roadWindow(按长度)，保证未接相位的调用零行为改变。
+// #Ray 期号 → 当日序号（roundNo 形如 "SG-YYYYMMDD-NNN"，取末段数字）。跨零点归 001 —— 故仅
+//   用作【首灌相位锚】，live 之后由调用方计数自持（+1），不再重解析，跨零点连续（照 B1 珠数自持判例）。
+export function roundSeqNo(roundNo) {
+  if (roundNo == null) return null
+  const n = parseInt(String(roundNo).split('-').pop(), 10)
+  return Number.isFinite(n) ? n : null
+}
+
+export function roadWindowN(list, N, { cols = 30, rows = 6, reserve = ROAD_RESERVE_COLS } = {}) {
+  const listLen = Array.isArray(list) ? list.length : 0
+  if (N == null || listLen === 0) return roadWindow(list, { cols, rows, reserve })
+  const usable = (cols - reserve) * rows
+  const keepPhase = usable - ((rows - (N % rows)) % rows)   // ≡ N mod rows，≤ usable
+  const keep = Math.min(keepPhase, listLen)                 // list 不足时给几颗渲几颗（新库真相位）
+  return keep >= listLen ? list : list.slice(-keep)
+}
+
 
 
 // ============================================================================

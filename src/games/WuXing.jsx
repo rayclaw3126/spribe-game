@@ -17,7 +17,8 @@ import { useSpeedRooms } from '../hooks/useSpeedRooms'
 import WuXingStage from './stages/WuXingStage'
 import WuXingMarkets from './markets-ui/WuXingMarkets'   // #41 单16：盘口区切件（视觉原样）
 import WuXingRoad from './markets-ui/WuXingRoad'
-import { roadWindow, roadSeedTarget, freshFor, roadAnchorLeft, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）         // #41 单16：珠盘路墙（判定走引擎）
+import { roadWindow, roadWindowN, roundSeqNo, roadSeedTarget, freshFor, roadAnchorLeft, ROAD_FX_CSS, ROAD_FX_FRESH, ROAD_FX_NEXT} from './markets-ui/roadWindow'   // #47：列对齐滑动窗口（三款共用）         // #41 单16：珠盘路墙（判定走引擎）
+import { useRoadFitCols } from './markets-ui/useRoadFit'   // #Ray 手机路珠·列数按屏宽现算
 import { RULES } from './markets-ui/wuxingRules'         // #41 单16：玩法说明内容（共享）
 import { WUXING, ROAD_VIEWS } from './markets-ui/wuxingShared'   // #41 单16：五行五段/珠盘视角（原页 mobile 段 + 切件同源）
 
@@ -132,7 +133,8 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   const [freshByRoom, setFreshByRoom] = useState({})
   const [roadView, setRoadView] = useState('bs')   // 手机路珠视角（默认大小）；纯显示
   const [userAcc, setUserAcc] = useState({ main: true, dtud: true, parlay: true, wuxing: true })   // 4 盘区手风琴（默认全展开）；纯 UI
-  const roadRecordedRef = useRef(null)   // 珠盘路整局记账去重（按 rnd，防 StrictMode 双调用重复入）
+  const roadRecordedRef = useRef(null)
+  const roadPhaseRef = useRef({})   // #Ray 手机路珠相位·按房自持（首灌锚真实序号，live +1，跨零点连续）   // 珠盘路整局记账去重（按 rnd，防 StrictMode 双调用重复入）
   const [result, setResult] = useState(null)             // { hits:Set, winTotal }
   const [preHits, setPreHits] = useState(null)           // 舞台尾五行段预亮
   const [toasts, setToasts] = useState([])
@@ -177,6 +179,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     // 珠盘路改存整局 sum（3 视角从 sum 派生）；按 rnd 去重，一局恰记一次（StrictMode 防重）
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
+      roadPhaseRef.current[selectedRoomKey] = (roadPhaseRef.current[selectedRoomKey] ?? ((roundSeqNo(rnd) ?? 1) - 1)) + 1   // #Ray 相位自持 +1
       setRoadByRoom(m => {
         const next = roadWindow([...(m[selectedRoomKey] || EMPTY_ROAD), { sum: r.sum, up: r.up }], DESK_ROAD)   // #Ray 6 路：存 {sum,up}
         setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))   // WS 真新珠 → 弹入
@@ -308,7 +311,8 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       setFreshByRoom(f => ({ ...f, [r.key]: -1 }))
       const latest = acc[0]?.roundNo
       if (latest) {
-        if (r.key === selectedRoomKey) roadRecordedRef.current = latest
+        roadPhaseRef.current[r.key] = roundSeqNo(latest)   // #Ray 相位锚：首灌对齐真实当日序号
+      if (r.key === selectedRoomKey) roadRecordedRef.current = latest
         else bgDrawRoundRef.current[r.key] = latest
       }
     }
@@ -491,12 +495,9 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   // ---- ② 盘区（主盘/龙虎上下/过关/五行）：已切至 ./markets-ui/WuXingMarkets（键区单一出处），下方 JSX 直接组装。----
   // ---- ③ 珠盘路：桌面切件 ./markets-ui/WuXingRoad（页签/判定单一出处，history=road 整值派生）；mobile 段 2 行走自身内联（ROAD_VIEWS 复用）。----
   // #47 双端一致：手机路珠列数升到与桌面同标 30（6 行已同）→ 与桌面吃同一段窗口，逐颗对得上
-  const ROAD_COLS = 30
-  // #47 专单：手机内联珠格改吃列滑窗口（按手机自己的 20×2 开窗 → 可用 (20−2)×2 = 36 珠）。
-  //   ⚠ 几何零碰：珠径 15 / 格数 40 / 盒尺寸一字未动，只改「填几颗」。
-  const mobileBeads = roadWindow(road, { cols: ROAD_COLS, rows: 6 })
-  // A 案锚定右端：新珠落格后把横滚条推到最右，保证「最新珠 + 右侧两空列」恒在视口
   const roadScrollRef = useRef(null)
+  const ROAD_COLS = useRoadFitCols(roadScrollRef, 18, 2, 18, true)   // #Ray 手机路珠·列数按屏宽现算（数据窗=cols−2，右恒留2空列 → roadWindow 默认 reserve=2）
+  const mobileBeads = roadWindowN(road, roadPhaseRef.current[selectedRoomKey], { cols: ROAD_COLS, rows: 6 })   // #Ray 进场相位真实化：按真实珠序开窗
   useEffect(() => { roadAnchorLeft(roadScrollRef.current, mobileBeads.length, 18 + 2) }, [mobileBeads.length])
   // #47 专单：动效手机也上 —— 桌面 fresh 索引按各自窗口长度换算到手机面（禁直接复用，长度不同会落错格）
   const mobFresh = freshFor(freshByRoom[selectedRoomKey] ?? -1, road.length, mobileBeads.length)
@@ -541,7 +542,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       <div style={{ flex: '1 0 auto' }} />
 
       <WuXingRoad history={roadSeeded ? road : EMPTY_ROAD} tab={roadView} onTab={setRoadView} isMobile={isMobile}
-        cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={24}
+        cols={DESK_ROAD.cols} rows={DESK_ROAD.rows} bead={isMobile ? 18 : 24}
       freshIndex={freshByRoom[selectedRoomKey] ?? -1}
         style={{ margin: isMobile ? '0 12px 8px' : hasRail ? '0 auto 8px' : '0 18px 8px',
           ...(hasRail ? { alignSelf: 'center', width: '100%', maxWidth: RAIL_MAXW } : {}) }} />
