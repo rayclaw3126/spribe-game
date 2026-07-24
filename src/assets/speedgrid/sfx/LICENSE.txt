@@ -1,0 +1,5 @@
+极速方格赛车音效（3 条）—— 来源 mixkit.co · Mixkit License（免署名商用，逐条备审）
+  engine.mp3 = Mixkit sfx #2685（引擎轰鸣 3.79s，冲刺感）  https://assets.mixkit.co/active_storage/sfx/2685/2685-preview.mp3
+  finish.mp3 = Mixkit sfx #1616（冲线撞击 3.31s，短促有力）  https://assets.mixkit.co/active_storage/sfx/1616/1616-preview.mp3
+  win.mp3    = Mixkit sfx #1938（胜利提示 2.09s）           https://assets.mixkit.co/active_storage/sfx/1938/1938-preview.mp3
+loudnorm I=-14:TP=-1.5 响度粗对齐。Ray 选定 eng-2/crash-3/win-2（试听池法二）。

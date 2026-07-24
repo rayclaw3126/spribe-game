@@ -3,6 +3,10 @@
 // 加 height 参）。props {phase,roundNo,drawResult,width,height,muted}；key=期号重挂载惯例在内层 RaceCanvas 保持。
 // SpeedGrid 原页 = 只在 drawing/settled 挂本件(=原 RaceStage)，体验分毫不变；多桌 betting 走待命态。
 import { useRef, useEffect } from 'react'
+// #Ray 真音效（Mixkit License 免署名商用，见 assets/speedgrid/sfx/LICENSE.txt）——WebAudio 合成器退役。
+import engineUrl from '../../assets/speedgrid/sfx/engine.mp3'
+import finishUrl from '../../assets/speedgrid/sfx/finish.mp3'
+import winUrl from '../../assets/speedgrid/sfx/win.mp3'
 import { COLORS, DERBY, ROULETTE } from '../../components/shell/tokens'
 import carSpritesImg from '../../assets/speedgrid/car_sprites.png'
 
@@ -73,7 +77,7 @@ function RaceCanvas({ champ, sfx, height = 128 }) {
       else lanes.push({ ...pacers[pi++], isChamp: false })
     }
 
-    let whistled = false, cheered = false, horned = false, marked = false
+    let whistled = false, cheered = false, marked = false   // #Ray：horned 退役（车队号角合成器已删）
     let raf = 0
     if (import.meta.env.DEV) window.__SG_CONF = null   // 彩带几何记录重置
 
@@ -222,22 +226,15 @@ function RaceCanvas({ champ, sfx, height = 128 }) {
         if (import.meta.env.DEV) console.debug('[SG-SFX] trigger engine t=', Math.round(t))
         cbRef.current.engine?.()
       }
+      // #Ray：冲线撞击（原 whistle 位，RACE_T 冲线帧）——engine 冲线即止在 finish 回调内
       if (t >= RACE_T && !whistled) {
         whistled = true
-        if (import.meta.env.DEV) console.debug('[SG-SFX] trigger whistle t=', Math.round(t))
-        cbRef.current.whistle?.()
+        if (import.meta.env.DEV) console.debug('[SG-SFX] trigger finish t=', Math.round(t))
+        cbRef.current.finish?.()
       }
-      // 庆祝套（定格后）：欢呼先起，车队号角压轴叠加
-      if (t >= FREEZE_T && !cheered) {
-        cheered = true
-        if (import.meta.env.DEV) console.debug('[SG-SFX] trigger cheer t=', Math.round(t))
-        cbRef.current.cheer?.()
-      }
-      if (t >= FREEZE_T + 500 && !horned) {
-        horned = true
-        if (import.meta.env.DEV) console.debug('[SG-SFX] trigger horn t=', Math.round(t))
-        cbRef.current.horn?.(Math.ceil(champ / 6) - 1)
-      }
+      if (t >= FREEZE_T && !cheered) { cheered = true }   // #Ray：win 改由 SpeedGridStage 的 playerWon effect 触发（见下）——
+      //   rAF 时间轴在 FREEZE_T(3400) 时 result 尚未 set（finishRound 在 DRAW_ANIM_MS=4600 才置 winTotal），
+      //   放这里 playerWon 恒 false 永不响；改成监听 playerWon 翻真，天然排在 finish(3300) 之后。
       if (t >= FREEZE_T && !marked) {
         marked = true
         if (import.meta.env.DEV) window.__SG_ANIM_LAST = String(champ)
@@ -287,100 +284,60 @@ function StandbyTrack({ height = 128 }) {
   return <canvas ref={canvasRef} style={{ width: '100%', height, display: 'block', opacity: 0.55 }} aria-hidden />
 }
 
-export default function SpeedGridStage({ phase, roundNo, drawResult, width = '100%', height = 128, muted }) {
-  const audioRef = useRef({ ctx: null, muted: false })
-  useEffect(() => { audioRef.current.muted = muted }, [muted])
-  // 卸载关闭 AudioContext（多桌/多期不泄漏；SpeedGrid 原页单期一个、SFX 每期照响）
-  useEffect(() => () => { try { audioRef.current.ctx?.close?.() } catch { /* ignore */ } }, [])
-
-    // ---------- SFX（WebAudio 合成器，muted 门控；全部在结果已锁后触发）----------
-    function ensureAudio() {
-      if (audioRef.current.ctx) return audioRef.current.ctx
-      const AC = window.AudioContext || window.webkitAudioContext
-      if (!AC) return null
-      const ctx = new AC(); if (ctx.state === 'suspended') ctx.resume()
-      if (import.meta.env.DEV) console.debug('[SG-SFX] ctx-created state=', ctx.state)
-      audioRef.current.ctx = ctx; return ctx
-    }
-    // DEV 探针：三音触发实录（触发了没响 vs 根本没触发，修法不同）
-    const probe = (name, extra = '') => {
-      if (import.meta.env.DEV) console.debug(`[SG-SFX] ${name} fired ctx=${audioRef.current.ctx?.state ?? 'null'} muted=${audioRef.current.muted} ${extra}`)
-    }
-    function sfxEngine() {   // 引擎轰鸣：满程底噪（快攻 0.25s → 渐强 → 平台撑到冲线 → 收尾接哨）
-      const ctx = ensureAudio(); probe('engine'); if (!ctx || audioRef.current.muted) return
-      const t = ctx.currentTime
-      // 包络时刻对齐舞台时间轴：0.25s 攻至可闻 0.07 → 2.9s 渐强至 0.14 →
-      // 平台撑到 3.3s（= RACE_T 冲线哨响起）→ 3.4s 硬切（100ms；给 3400ms 起的
-      // 欢呼让出频谱——掩蔽终查根因，Derby 欢呼起时无持续底噪）
-      const len = 3.5
-      const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * len), ctx.sampleRate)
-      const d = buf.getChannelData(0)
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
-      const src = ctx.createBufferSource(); src.buffer = buf
-      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(260, t)
-      f.frequency.linearRampToValueAtTime(520, t + 3.3)   // 提频到冲线
-      const env = (g, atk, peak) => {
-        g.gain.setValueAtTime(0.0001, t)
-        g.gain.exponentialRampToValueAtTime(atk, t + 0.25)
-        g.gain.exponentialRampToValueAtTime(peak, t + 2.9)
-        g.gain.setValueAtTime(peak, t + 3.3)
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 3.4)   // 冲线即刻硬切
-      }
-      const g = ctx.createGain(); env(g, 0.07, 0.14)
-      src.connect(f); f.connect(g); g.connect(ctx.destination); src.start(t); src.stop(t + len)
-      audioRef.current.engineGains = [g]   // 欢呼探针实测轰鸣残余增益用
-      // 马达基音：低频锯齿随赛程升调（60→110Hz），同包络
-      const o = ctx.createOscillator(); o.type = 'sawtooth'
-      o.frequency.setValueAtTime(60, t); o.frequency.linearRampToValueAtTime(110, t + 3.3)
-      const g2 = ctx.createGain(); env(g2, 0.035, 0.06)
-      o.connect(g2); g2.connect(ctx.destination); o.start(t); o.stop(t + len)
-      audioRef.current.engineGains.push(g2)
-      if (import.meta.env.DEV) console.debug('[SG-SFX] engine env start=0 attack@250ms=0.07 peak@2900ms=0.14 hold→3300ms hardcut→3400ms stop=3500ms')
-    }
-    function sfxWhistle() {   // 冲线哨（短哨两响）
-      const ctx = ensureAudio(); probe('whistle'); if (!ctx || audioRef.current.muted) return
-      const t = ctx.currentTime
-      ;[0, 0.16].forEach(off => {
-        const o = ctx.createOscillator(); o.type = 'square'
-        o.frequency.setValueAtTime(2100, t + off); o.frequency.linearRampToValueAtTime(2350, t + off + 0.1)
-        const g = ctx.createGain()
-        g.gain.setValueAtTime(0.0001, t + off); g.gain.exponentialRampToValueAtTime(0.035, t + off + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + off + 0.12)
-        o.connect(g); g.connect(ctx.destination); o.start(t + off); o.stop(t + off + 0.13)
-      })
-    }
-    function sfxHorn(teamIdx) {   // 胜出车队短号角：锯齿双音，音高随队别
-      const ctx = ensureAudio(); probe('horn', `team=${teamIdx}`); if (!ctx || audioRef.current.muted) return
-      const t = ctx.currentTime
-      const f0 = 240 + teamIdx * 50
-      ;[f0, f0 * 1.25].forEach((f, i) => {
-        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f
-        const g = ctx.createGain()
-        const s = t + i * 0.18
-        g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.08, s + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.24)
-        o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.26)
-      })
-    }
-    function sfxCheer() {   // 观众欢呼声浪（照 Derby sfxCheer 已验配方：带通白噪 swell ~1.6s）
-      const ctx = ensureAudio(); probe('cheer'); if (!ctx || audioRef.current.muted) return
-      const t = ctx.currentTime
-      const len = 1.6
-      const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * len), ctx.sampleRate)
-      const d = buf.getChannelData(0)
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
-      const src = ctx.createBufferSource(); src.buffer = buf
-      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.8
-      const g = ctx.createGain()
-      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.35); g.gain.exponentialRampToValueAtTime(0.0001, t + len)
-      src.connect(f); f.connect(g); g.connect(ctx.destination); src.start(t); src.stop(t + len)
-      if (import.meta.env.DEV) {
-        const eg = (audioRef.current.engineGains || []).map(x => +x.gain.value.toFixed(4))
-        console.debug('[SG-SFX] cheer env swell@350ms=0.12 release→1600ms engineGainAtCheer=', JSON.stringify(eg))
-      }
-    }
-    const stageSfx = { engine: sfxEngine, whistle: sfxWhistle, horn: sfxHorn, cheer: sfxCheer }
+export default function SpeedGridStage({ phase, roundNo, drawResult, width = '100%', height = 128, muted, playerWon = false }) {
+  // #Ray 真音频（替代 WebAudio 合成器）：三条 HTMLAudio 惰性建，muted 门控 + 卸载释放。
+  //   铁律不破：muted 原样（含多桌 activeCard 单声道，muted prop 由 TableCard 传入）；
+  //   触发时机原样（RaceCanvas rAF「结果已锁后」时间轴）；卸载 pause+断源，多桌/多期不泄漏。
+  const audioRef = useRef({ muted: false, els: null, engineOn: false })
+  useEffect(() => {
+    audioRef.current.muted = muted
+    if (muted && audioRef.current.engineOn) { try { audioRef.current.els.engine.pause() } catch { /* */ } audioRef.current.engineOn = false }
+  }, [muted])
+  useEffect(() => () => {
+    const els = audioRef.current.els
+    if (els) for (const el of Object.values(els)) { try { el.pause(); el.src = '' } catch { /* */ } }
+    audioRef.current.els = null; audioRef.current.engineOn = false
+    if (import.meta.env.DEV && els) window.__SG_AUDIO = (window.__SG_AUDIO || 0) - 3   // 泄漏探针：释放对冲建时 +3
+  }, [])
+  const ensureEls = () => {
+    if (audioRef.current.els) return audioRef.current.els
+    const engine = new Audio(engineUrl); engine.loop = true; engine.preload = 'auto'   // 铺满整段，无缝循环
+    const finish = new Audio(finishUrl); finish.preload = 'auto'
+    const win = new Audio(winUrl); win.preload = 'auto'
+    audioRef.current.els = { engine, finish, win }
+    if (import.meta.env.DEV) window.__SG_AUDIO = (window.__SG_AUDIO || 0) + 3
+    return audioRef.current.els
+  }
+  const playOnce = (name) => {
+    if (audioRef.current.muted) return
+    const el = ensureEls()[name]; try { el.currentTime = 0; el.play().catch(() => {}) } catch { /* */ }
+  }
+  const startEngine = () => {
+    if (audioRef.current.muted) return
+    const el = ensureEls().engine; audioRef.current.engineOn = true
+    try { el.currentTime = 0; el.play().catch(() => {}) } catch { /* */ }
+  }
+  const stopEngine = () => {
+    if (!audioRef.current.engineOn) return
+    audioRef.current.engineOn = false
+    try { audioRef.current.els.engine.pause() } catch { /* */ }
+  }
+  const stageSfx = {
+    engine: startEngine,
+    finish: () => { stopEngine(); playOnce('finish') },   // 冲线：先停引擎再撞击
+  }
+  // #Ray：win 仅玩家中奖时响，【排在 finish 之后】——finish 在 rAF 3300ms 触发，playerWon 由页面
+  //   winTotal>0 驱动、在 DRAW_ANIM_MS(4600) 才翻真，故此 effect 必晚于 finish。同 roundNo 只响一次。
+  const winRndRef = useRef(null)
+  useEffect(() => {
+    if (!playerWon || winRndRef.current === roundNo) return
+    winRndRef.current = roundNo
+    playOnce('win')
+    // playOnce 走 refs，仅随 playerWon/roundNo 变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerWon, roundNo])
 
   const champ = drawResult?.n ?? null
-  // 有开奖号且非投注/封盘相位 → 跑冲线动画；否则待命态。SpeedGrid 原页仅在 drawing/settled 挂载，恒为动画态。
   const racing = champ != null && phase !== 'betting' && phase !== 'locked' && phase !== 'connecting'
   return (
     <div style={{ position: 'relative', width, height }}>

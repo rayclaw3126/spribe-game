@@ -442,7 +442,8 @@ export default function SpeedGrid({ serverBalance, setServerBalance, playerToken
       boxSizing: 'border-box', overflow: 'hidden',
       // 手机三段锁死：两相位舞台同高常驻(锁顶不跳)；桌面原样
       ...(isDesk ? {} : { height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center' }) }}>
-      <SpeedGridStage key={selectedRoomKey} phase={uiPhase} roundNo={room.roundNo} drawResult={{ n: cur }} muted={muted} height={128} />
+      <SpeedGridStage key={selectedRoomKey} phase={uiPhase} roundNo={room.roundNo} drawResult={{ n: cur }} muted={muted} height={128}
+        playerWon={Number(result?.winTotal || 0) > 0} />   {/* #Ray 裁C：玩家中奖信号（winTotal>0），stage 内 win.mp3 仅此时响 */}
     </div>
   ) : (
     <div style={{
