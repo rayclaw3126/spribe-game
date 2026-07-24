@@ -125,7 +125,7 @@ export const MARKETS_UI = {
     roadCols: 12,
     // drawResult.balls = 上局 20 球；命中键 = hitsOf(deriveRound(balls))；珠盘存整值总和 sum
     hitsOf: (dr) => (Array.isArray(dr?.balls) ? hitsOfWuXing(deriveRoundWuXing(dr.balls)) : undefined),
-    roadItem: (dr) => (Array.isArray(dr?.balls) ? deriveRoundWuXing(dr.balls).sum : null),
+    roadItem: (dr) => { if (!Array.isArray(dr?.balls)) return null; const d = deriveRoundWuXing(dr.balls); return { sum: d.sum, up: d.up } },   // #Ray 6 路：{sum,up}（上下路 sum 推不出）
   },
   LineUp: {
     Markets: LineUpMarkets,     // 无折叠组（内建 A/B 视图 + dim）；openMode/isDesk 传了被忽略

@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react'   // #47 A 案：右端锚定
 // #41 单16：WuXing 珠盘路墙（大小 / 单双 / 五行段 页签 + 6×N 珠矩阵）——从 WuXing beadRoad 机械切片。
 // 判定走引擎口径（wuxingShared ROAD_VIEWS：大小 n≥811 / 单双 n%2 / 五行段 WX_BOUNDS，禁二份表）。
-// props {history,tab,onTab,isMobile,cols,rows,bead,style}：history = 整局总和 sum 数组 [n,...]
+// props {history,tab,onTab,isMobile,cols,rows,bead,style}：history = 整局 road 项数组 [{sum,up},...]
 // #46 单12：新增可选 bead（珠径 px），照 HalfTimeRoad 的 compact 先例——【带默认值、不传即原行为】。
 //   仅五行原页桌面传 24（配合 cols 30 吃满 800 中栏）；多桌 TableCard 与手机段均不传，
 //   走默认 isMobile ? 18 : 14，逐字节零感。引用方仅两处（WuXing.jsx / marketsUiRegistry→TableCard）。
@@ -27,7 +27,7 @@ export default function WuXingRoad({ history = [], tab, onTab, isMobile = false,
           const on = tab === v.key
           return (
             <button key={v.key} type="button" onClick={() => onTab(v.key)} style={{
-              padding: '3px 12px', borderRadius: RADIUS.pill,
+              padding: '3px 8px', borderRadius: RADIUS.pill,   // #Ray 6 路：12→8（6 pill 一行放得下）
               background: on ? DERBY.sel : 'rgba(0,0,0,0.35)', color: on ? '#083a1b' : DERBY.dim,
               border: `1px solid ${on ? DERBY.sel : 'rgba(255,255,255,0.2)'}`,
               fontSize: 10, fontWeight: 900, letterSpacing: 0.5, cursor: 'pointer', whiteSpace: 'nowrap',

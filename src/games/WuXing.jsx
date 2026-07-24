@@ -75,11 +75,8 @@ const SEED_LAST = deriveRound([1, 4, 5, 10, 11, 13, 20, 27, 30, 32, 33, 36, 40, 
 
 // 40 期假珠盘（大小单轨，旧→新；引擎单换真历史滚动）
 // 珠盘路种子：整局总和 sum 形态（210-1410，跨五行五段/大小/单双分布，首屏各视角有料）。
-const SEED_ROAD = [
-  693, 812, 905, 740, 1050, 660, 858, 799, 924, 705,
-  833, 617, 951, 786, 690, 877, 810, 763, 1120, 845,
-  702, 889, 811, 758,
-]
+// #Ray 6 路：SEED_ROAD 假种子退役 —— road 项升级为 {sum,up} 后，假种子的 up 只能编，
+//   而编出来的「上下」路是假数据。改为首屏渲骨架（EMPTY_ROAD + roadSeeded 门闩），等真播种到货。
 
 // ---------- 开奖舞台（drawing 相位；结果进相前已锁定，动画只读）----------
 // 亮球乱序 + 慢放编排全部由已锁结果播种/推导（mulberry32，零额外随机数）：
@@ -122,9 +119,9 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   //   · lastRound 上局派生局 → 喂舞台的 lastRound prop（betting 期待命展示）
   //   · road      珠盘路 → 喂路珠墙
   const [lastRoundByRoom, setLastRoundByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_LAST])))
-  const [roadByRoom, setRoadByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, SEED_ROAD])))
+  const [roadByRoom, setRoadByRoom] = useState(() => Object.fromEntries(ROOMS.map((r) => [r.key, EMPTY_ROAD])))   // #Ray 6 路：假种子退役，首屏骨架等真播种
   const lastRound = lastRoundByRoom[selectedRoomKey] ?? SEED_LAST
-  const road = roadByRoom[selectedRoomKey] ?? SEED_ROAD
+  const road = roadByRoom[selectedRoomKey] ?? EMPTY_ROAD
   // #47 动效：仅 WS 真新珠时记新珠索引。⚠ 必须【按房存】—— 单值会被后台快房追珠覆盖，
   //   导致选中房刚亮起的高亮被瞬间清掉（实测 2.2s 内即消失）。首灌/切房一律清该房 → 不弹入。
   // #47 首帧闪变治理：播种未到货前不渲染珠墙（骨架占位，几何不变），到货后一次成型。
@@ -181,7 +178,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
     if (rnd != null && roadRecordedRef.current !== rnd) {
       roadRecordedRef.current = rnd
       setRoadByRoom(m => {
-        const next = roadWindow([...(m[selectedRoomKey] || SEED_ROAD), r.sum], DESK_ROAD)
+        const next = roadWindow([...(m[selectedRoomKey] || EMPTY_ROAD), { sum: r.sum, up: r.up }], DESK_ROAD)   // #Ray 6 路：存 {sum,up}
         setFreshByRoom(f => ({ ...f, [selectedRoomKey]: next.length - 1 }))   // WS 真新珠 → 弹入
         return { ...m, [selectedRoomKey]: next }
       })
@@ -258,7 +255,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       const d = deriveRound(rm.drawResult.balls)
       setLastRoundByRoom(m => ({ ...m, [r.key]: d }))
       setRoadByRoom(m => {
-        const next = roadWindow([...(m[r.key] || SEED_ROAD), d.sum], DESK_ROAD)
+        const next = roadWindow([...(m[r.key] || EMPTY_ROAD), { sum: d.sum, up: d.up }], DESK_ROAD)
         setFreshByRoom(f => ({ ...f, [r.key]: next.length - 1 }))   // WS 真新珠 → 弹入（切回该房时可见）
         return { ...m, [r.key]: next }
       })
@@ -273,7 +270,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
   //   · 与 WS 增量珠去重：灌完把该房【最新期号】写进已有的两个去重 ref（选中房 roadRecordedRef、
   //     未选中房 bgDrawRoundRef[key]），后续 WS 追同一期自然跳过 —— WS 那侧一行不改。
   //     之所以走 ref 而非按期号比对：road 只存裸 sum、不带期号，按期号去重要改存储形状并在传参处 map。
-  //   · 失败静默保留 SEED_ROAD：路珠是装饰，拉不到不该打断游戏，也不弹错误条。
+  //   · 失败静默保留骨架：路珠是装饰，拉不到不该打断游戏，也不弹错误条。
   //   · 只读，钱层零碰（apiGet 不经手 setServerBalance）。
   const apiRef = useRef(api)
   useEffect(() => { apiRef.current = api })
@@ -302,7 +299,7 @@ export default function WuXing({ serverBalance, setServerBalance, playerToken, o
       }
       if (cancelled || !acc.length) return
       const sums = acc.slice(0, SEED_TARGET).reverse()   // 素材（新→旧转旧→新）   // 接口新→旧，road 存旧→新
-        .map((it) => (Array.isArray(it?.drawResult?.balls) ? deriveRound(it.drawResult.balls).sum : null))
+        .map((it) => { if (!Array.isArray(it?.drawResult?.balls)) return null; const d = deriveRound(it.drawResult.balls); return { sum: d.sum, up: d.up } })
         .filter((n) => n != null)
       if (!sums.length) return
       // #47：首灌【不预截】到 usable —— 直接把拉回的完整条数过窗口，当前列才天然半满；

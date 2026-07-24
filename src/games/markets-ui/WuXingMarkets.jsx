@@ -13,6 +13,13 @@ import { WUXING } from './wuxingShared'
 
 const EMPTY = new Set()
 // 四玩法组名（单16）：原页 secHead 四条真实中文标题，逐字节沿用（禁硬造英文）。
+// 各组盘口键（用于组头已选计数；与下方各组 rowCell/stackCell 的 key 一一对应，改一处必须改两处）
+const GROUP_KEYS = [
+  ['big', 'small', 'odd', 'even'],
+  ['dragon', 'dt-tie', 'tiger', 'up', 'ud-tie', 'down'],
+  ['big-odd', 'big-even', 'small-odd', 'small-even'],
+  ['wx-gold', 'wx-wood', 'wx-water', 'wx-fire', 'wx-earth'],
+]
 const GROUP_TITLES = ['主盘 · 总和', '龙虎（和值十位/末位）｜ 上下（1-40/41-80 计数）', '过关四组合', '五行 · 总和五段']
 
 // #46 单12 追加：可选 big（桌面中度放大档 ×1.2）—— 默认 false 即原行为。仅五行原页桌面传 true；
@@ -79,16 +86,36 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
     background: DERBY.strip, border: '1px solid rgba(255,255,255,0.1)',
     boxSizing: 'border-box',
   }
-  // 组头 ▾/▸ 折叠钮（单16）：原 secHead(gold 标题) → 可开合钮，视觉沿用（gold 标题 + 前置 chevron）。
-  const groupHead = (i) => (
-    <button type="button" onClick={() => toggleGroup(i)} aria-expanded={open[i]} style={{
-      display: 'flex', alignItems: 'center', gap: 5, width: '100%',
-      background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
-      marginBottom: open[i] ? 4 : 0, textAlign: 'left',
-    }}>
-      <span style={{ color: DERBY.dim, fontSize: 9, width: 8, fontWeight: 900 }}>{open[i] ? '▾' : '▸'}</span>
-      <span style={{ color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>{GROUP_TITLES[i]}</span>
-    </button>
+  // 组头折叠钮 —— #Ray 定案：对齐滚球 deskSection 成例（原为左侧 ▾/▸）：
+  //   ① 箭头移到标题行【右端】并换 ˄/˅  ② 已选计数点（金绿圆点+数字）复用同一份 stakes/selected，禁二写
+  //   ③ 收起【不卸载 DOM】——改 maxHeight 折叠（原 `open[i] && (…)` 是条件渲染，收起即卸载）
+  const groupCount = (i) => {
+    const keys = GROUP_KEYS[i] || []
+    let n = 0
+    for (const k of keys) { if (selected.includes?.(k) || (stakes && stakes[k] != null)) n++ }
+    return n
+  }
+  const groupHead = (i) => {
+    const cnt = groupCount(i)
+    return (
+      <button type="button" onClick={() => toggleGroup(i)} aria-expanded={open[i]} style={{
+        display: 'flex', alignItems: 'center', gap: 5, width: '100%',
+        background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+        marginBottom: open[i] ? 4 : 0, textAlign: 'left',
+      }}>
+        <span style={{ color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>{GROUP_TITLES[i]}</span>
+        {cnt > 0 && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flex: '0 0 auto', color: DERBY.sel, fontSize: 10, fontWeight: 900 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: DERBY.sel, display: 'inline-block' }} />{cnt}
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 12, fontWeight: 900, flex: '0 0 auto' }}>{open[i] ? '˄' : '˅'}</span>
+      </button>
+    )
+  }
+  // 组折叠壳：maxHeight 过渡，收起后子树仍在 DOM（不卸载）
+  const groupBody = (i, body) => (
+    <div style={{ maxHeight: open[i] ? 1400 : 0, overflow: 'hidden', transition: 'max-height 0.2s ease' }}>{body}</div>
   )
   // 单行键（名称左/区间中/赔率右，照 Line Up 定案行式）
   const rowCell = (key, name, range, odds, bg = DERBY.grey) => (
@@ -109,7 +136,7 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
   const mainBoard = (
     <div style={secBox}>
       {groupHead(0)}
-      {open[0] && (
+      {groupBody(0, (
       <>
       <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
         {rowCell('big', '大', '811-1410', '1.95')}
@@ -120,13 +147,13 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
         {rowCell('even', '双', '总和双', '1.95')}
       </div>
       </>
-      )}
+      ))}
     </div>
   )
   const dtudBoard = (
     <div style={secBox}>
       {groupHead(1)}
-      {open[1] && (
+      {groupBody(1, (
       <>
       <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
         {rowCell('dragon', '龙', '十位', '2.13')}
@@ -139,13 +166,13 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
         {rowCell('down', '下', '≥11 个', '2.40')}
       </div>
       </>
-      )}
+      ))}
     </div>
   )
   const parlayBoard = (
     <div style={secBox}>
       {groupHead(2)}
-      {open[2] && (
+      {groupBody(2, (
       <div style={{
         display: parlayGrid ? 'grid' : 'flex',
         gridTemplateColumns: parlayGrid ? '1fr 1fr' : undefined,
@@ -156,7 +183,7 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
         {rowCell('big-even', '大双', '', '3.82')}
         {rowCell('small-even', '小双', '', '3.82')}
       </div>
-      )}
+      ))}
     </div>
   )
   // 五行五段：双端横排 5 列 grid（金→土），格内竖排 字大/区间小/赔率；
@@ -164,7 +191,7 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
   const wuxingBoard = (
     <div style={secBox}>
       {groupHead(3)}
-      {open[3] && (
+      {groupBody(3, (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: isMobile ? 4 : 8 }}>
         {WUXING.map(w => (
           <button key={w.key} type="button" className={`wxCell${wonCls(w.key)}`} data-key={w.key} disabled={!betting} onClick={() => onPick(w.key)}
@@ -176,7 +203,7 @@ export default function WuXingMarkets({ onPick, stakes, disabled = false, flying
           </button>
         ))}
       </div>
-      )}
+      ))}
     </div>
   )
 
