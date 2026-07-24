@@ -14,6 +14,12 @@ import { TEAMS, teamOf } from './speedgridTeams'
 const EMPTY = new Set()
 // 三组组名（单15 item5）：原页 secHead 三条真实中文标题，逐字节沿用（禁硬造英文）。
 const GROUP_TITLES = ['主盘 · 冠军车号', '发车三段 · 第1/2/3个8 ｜ 车队涂装', '车号直选 · 4×6']
+// 各组盘口键（组头已选计数用；与各组 rowCell/carCell 的 key 一一对应，改一处必须改两处）
+const GROUP_KEYS = [
+  ['big', 'small', 'odd', 'even', 'red', 'black'],
+  ['grid-front', 'grid-mid', 'grid-rear', 'team-1', 'team-2', 'team-3', 'team-4'],
+  Array.from({ length: 24 }, (_, i) => `car-${i + 1}`),
+]
 
 export default function SpeedGridMarkets({ onPick, stakes, disabled = false, flying, selected = EMPTY, hits = EMPTY, isMobile = false, isDesk: isDeskProp, chipMode = false, openMode = 'all', hasRail = false, big = false, stacked = false }) {
   const isDeskMedia = useMediaQuery(`(min-width: ${LAYOUT.breakpoint}px)`)
@@ -74,16 +80,33 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
   const flyDot = key => (flying?.[key] ? <span style={{ position: 'absolute', top: 2, left: 2, width: 5, height: 5, borderRadius: '50%', background: DERBY.gold, pointerEvents: 'none' }} /> : null)
   // 中奖高亮标准（hits 必接）：命中键走原版高亮(cellBase 内)；押中(有码)+命中 = 你中了 → 外加金边脉冲(WinFx 样式语言)。
   const wonCls = key => (hitSet.has(key) && stakeOf(key) > 0 ? ' sgWin' : '')
-  // 组头 ▾/▸ 折叠钮（单15 item5）：原 secHead(gold 标题) → 可开合钮，视觉沿用（gold 标题 + 前置 chevron）。
-  const groupHead = (i) => (
-    <button type="button" onClick={() => toggleGroup(i)} aria-expanded={open[i]} style={{
-      display: 'flex', alignItems: 'center', gap: 5, width: '100%',
-      background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
-      marginBottom: open[i] ? 4 : 0, textAlign: 'left',
-    }}>
-      <span style={{ color: DERBY.dim, fontSize: 9, width: 8, fontWeight: 900 }}>{open[i] ? '▾' : '▸'}</span>
-      <span style={{ color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>{GROUP_TITLES[i]}</span>
-    </button>
+  // 组头折叠钮 —— #Ray 对齐滚球/五行成例：箭头移标题行【右端】换 ˄/˅、整行可点、已选计数点
+  //   复用 selSet/stakeOf（禁二写）、收起改 maxHeight 不卸载 DOM（见 groupBody）。
+  const groupCount = (i) => {
+    let n = 0
+    for (const k of GROUP_KEYS[i]) { if ((selSet.has ? selSet.has(k) : selSet.includes?.(k)) || stakeOf(k) > 0) n++ }
+    return n
+  }
+  const groupHead = (i) => {
+    const cnt = groupCount(i)
+    return (
+      <button type="button" onClick={() => toggleGroup(i)} aria-expanded={open[i]} style={{
+        display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+        background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+        marginBottom: open[i] ? 4 : 0, textAlign: 'left',
+      }}>
+        <span style={{ color: DERBY.gold, fontSize: 10, fontWeight: 900, letterSpacing: 1.5 }}>{GROUP_TITLES[i]}</span>
+        {cnt > 0 && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flex: '0 0 auto', color: DERBY.sel, fontSize: 10, fontWeight: 900 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: DERBY.sel, display: 'inline-block' }} />{cnt}
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto', color: COLORS.white, fontSize: 12, fontWeight: 900, flex: '0 0 auto' }}>{open[i] ? '˄' : '˅'}</span>
+      </button>
+    )
+  }
+  const groupBody = (i, body) => (
+    <div style={{ maxHeight: open[i] ? 1400 : 0, overflow: 'hidden', transition: 'max-height 0.2s ease' }}>{body}</div>
   )
   // 单行键（名称左/区间中/赔率右，照 Line Up 定案行式）
   const rowCell = (key, name, range, odds, bg = DERBY.grey) => (
@@ -115,7 +138,7 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
   const mainBoard = (
     <div style={secBox}>
       {groupHead(0)}
-      {open[0] && (
+      {groupBody(0, (
       <>
       <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
         {rowCell('big', '大', '13-24', MARKETS.big.odds.toFixed(2))}
@@ -130,13 +153,13 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
         {rowCell('black', '黑', '12 黑号', MARKETS.black.odds.toFixed(2), ROULETTE.black)}
       </div>
       </>
-      )}
+      ))}
     </div>
   )
   const rowBoard = (
     <div style={secBox}>
       {groupHead(1)}
-      {open[1] && (
+      {groupBody(1, (
       <>
       <div style={{ display: 'flex', gap: isMobile ? 5 : 8, marginBottom: isMobile ? 5 : 4 }}>
         {/* 三段同处半幅子盘：≥1280 右栏挤压时改竖排，赔率独占一行永不裁（单S5 ①）。 */}
@@ -154,13 +177,13 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
         {TEAMS.map((t, i) => (hasRail ? stackCell : rowCell)(`team-${i + 1}`, t.name, t.range, MARKETS[`team-${i + 1}`].odds.toFixed(2), t.c))}
       </div>
       </>
-      )}
+      ))}
     </div>
   )
   const pickBoard = (
     <div style={secBox}>
       {groupHead(2)}
-      {open[2] && (
+      {groupBody(2, (
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)',
         gap: isMobile ? 4 : 6,
@@ -178,7 +201,7 @@ export default function SpeedGridMarkets({ onPick, stakes, disabled = false, fly
           )
         })}
       </div>
-      )}
+      ))}
     </div>
   )
 
